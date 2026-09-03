@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "volhelix-ai"
+version = "0.1.0"
+description = "Autonomous Multi-Agent Options & Risk Orchestrator"
+authors = [
+    { name = "Divyo", email = "author@example.com" }
+]
+readme = "README.md"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+addopts = "-v --tb=short"
+testpaths = [
+    "tests"
+]
+pythonpath = [
+    "..",
+    "."
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:websockets.*",
+]
+
+
