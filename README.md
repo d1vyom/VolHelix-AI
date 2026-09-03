@@ -14,7 +14,7 @@
 
 ## 📸 Executive Terminal Dashboard
 
-![VolHelix AI Autonomous Trading Terminal](docs/assets/dashboard.png)
+![VolHelix AI Autonomous Trading Terminal](docs/assets/terminal_dashboard.png)
 
 ---
 
