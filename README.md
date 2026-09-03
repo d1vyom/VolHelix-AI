@@ -8,8 +8,7 @@
 [![Tests](https://img.shields.io/badge/Tests-47%2F47_Passed-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-> **Autonomous Institutional Options Trading Swarm with Deterministic Zero-Hallucination Risk Gate & 24/7 Position Guardian**  
-> *Options Alpha Agents Hackathon Submission*
+> **Autonomous Institutional Options Trading Swarm with Deterministic Zero-Hallucination Risk Gate & 24/7 Position Guardian** 
 
 ---
 
