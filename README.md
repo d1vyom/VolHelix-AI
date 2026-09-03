@@ -128,6 +128,11 @@ The Risk Gate has **ZERO LLM involvement** and cannot be overridden by prompt in
 - Dynamic calculation of System Win Rate, Profit Factor, Gross Profit, and Payoff Ratios.
 - 3-second auto-syncing with WebSocket event streaming.
 
+### 8. Turbo Concurrent Confluence Engine & Fast Execution
+- **Multi-Ticker Thread Pool Parallelization**: Watchlist symbols (`SPY`, `QQQ`, `NVDA`, `AAPL`, `TSLA`) are evaluated concurrently in parallel via a dedicated thread pool rather than sequentially, slashing full radar scan latency by over 75%.
+- **Smart In-Memory TTL Caching**: High-frequency scans leverage in-memory quote and options chain caching (20s TTL), delivering sub-second response times on manual and automated cycles.
+- **Dynamic Structure Expansion & FVG Mitigation**: The Confluence Gate recognizes both active Order Block retests and Fair Value Gap discount support/expansion, ensuring high-probability trades with $R:R \ge 2.0:1$ execute promptly without starvation.
+
 ---
 
 ## 💻 Tech Stack

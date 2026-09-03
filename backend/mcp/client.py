@@ -1,7 +1,8 @@
 import os
 import re
+import time
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
 from alpaca.trading.client import TradingClient
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.historical.option import OptionHistoricalDataClient
@@ -28,6 +29,20 @@ from backend.utils.logger import get_logger
 from backend.models.trade import MCPCallLog
 
 logger = get_logger("mcp_client")
+
+# In-memory TTL cache to prevent redundant API latency during high-frequency scans
+_CLIENT_CACHE: Dict[str, Tuple[any, float]] = {}
+
+def _get_client_cache(key: str, ttl_seconds: float = 20.0):
+    if key in _CLIENT_CACHE:
+        val, ts = _CLIENT_CACHE[key]
+        if time.time() - ts < ttl_seconds:
+            return val
+    return None
+
+def _set_client_cache(key: str, val: any):
+    _CLIENT_CACHE[key] = (val, time.time())
+
 
 class AlpacaClient:
     """Wrapper around Alpaca SDK for paper trading and market data."""
@@ -132,7 +147,12 @@ class AlpacaClient:
         return res
     
     def get_stock_bars(self, symbol: str, days: int = 30, timeframe: TimeFrame = TimeFrame.Day) -> dict:
-        """Get historical bars for technical indicators."""
+        """Get historical bars for technical indicators with fast in-memory caching."""
+        cache_key = f"bars_{symbol}_{days}_{timeframe}"
+        cached = _get_client_cache(cache_key, ttl_seconds=20.0)
+        if cached is not None:
+            return cached
+
         start = datetime.now()
         try:
             end = datetime.now()
@@ -147,36 +167,64 @@ class AlpacaClient:
             )
             bars = self.stock_client.get_stock_bars(req)
             
-            bar_list = bars.get(symbol, []) if hasattr(bars, "get") else (bars[symbol] if symbol in bars else [])
+            if hasattr(bars, "data") and isinstance(bars.data, dict):
+                bar_list = bars.data.get(symbol, [])
+            elif hasattr(bars, "get"):
+                bar_list = bars.get(symbol, [])
+            else:
+                try:
+                    bar_list = bars[symbol]
+                except Exception:
+                    bar_list = []
             closes = [float(getattr(bar, "close", getattr(bar, "c", 0))) for bar in bar_list]
             highs = [float(getattr(bar, "high", getattr(bar, "h", 0))) for bar in bar_list]
             lows = [float(getattr(bar, "low", getattr(bar, "l", 0))) for bar in bar_list]
             volumes = [int(getattr(bar, "volume", getattr(bar, "v", 0))) for bar in bar_list]
             
+            bars_dicts = []
+            for bar in bar_list:
+                ts_val = getattr(bar, "timestamp", getattr(bar, "t", ""))
+                ts_str = ts_val.isoformat() if hasattr(ts_val, "isoformat") else str(ts_val)
+                bars_dicts.append({
+                    "open": float(getattr(bar, "open", getattr(bar, "o", 0)) or 0),
+                    "high": float(getattr(bar, "high", getattr(bar, "h", 0)) or 0),
+                    "low": float(getattr(bar, "low", getattr(bar, "l", 0)) or 0),
+                    "close": float(getattr(bar, "close", getattr(bar, "c", 0)) or 0),
+                    "volume": int(getattr(bar, "volume", getattr(bar, "v", 0)) or 0),
+                    "time": ts_str
+                })
+
             res = {
+                "bars": bars_dicts,
                 "closes": closes,
                 "highs": highs,
                 "lows": lows,
                 "volumes": volumes,
                 "current_price": closes[-1] if closes else 0
             }
+            _set_client_cache(cache_key, res)
         except Exception as e:
             logger.error(f"get_stock_bars error: {e}")
-            res = {"closes": [], "highs": [], "lows": [], "volumes": [], "current_price": 0}
+            res = {"bars": [], "closes": [], "highs": [], "lows": [], "volumes": [], "current_price": 0}
             
         self._log_call("get_stock_bars", {"symbol": symbol, "days": days}, res, start)
         return res
     
     def get_option_chain(self, underlying: str, expiration_dates: Optional[List[str]] = None) -> dict:
-        """Get options chain with Greeks for an underlying."""
+        """Get options chain with Greeks for an underlying with fast in-memory caching."""
+        cache_key = f"chain_{underlying}_{','.join(expiration_dates) if expiration_dates else 'default'}"
+        cached = _get_client_cache(cache_key, ttl_seconds=20.0)
+        if cached is not None:
+            return cached
+
         start = datetime.now()
         try:
             if expiration_dates is None:
-                # Get next 3 monthly expirations
+                # Nearest 2 weekly/monthly expirations for fast, high-performance Greeks & GEX calculation
                 today = datetime.now().date()
                 expiration_dates = []
-                for i in range(4):
-                    # Find next Friday (monthly OPEX)
+                for i in range(2):
+                    # Find next Friday (monthly/weekly OPEX)
                     days_ahead = (4 - today.weekday()) % 7
                     if days_ahead == 0:
                         days_ahead = 7
@@ -238,6 +286,7 @@ class AlpacaClient:
                 })
             
             res = {"underlying": underlying, "legs": legs, "expiration_dates": expiration_dates}
+            _set_client_cache(cache_key, res)
         except Exception as e:
             logger.error(f"get_option_chain error: {e}")
             res = {"underlying": underlying, "legs": [], "expiration_dates": expiration_dates or []}

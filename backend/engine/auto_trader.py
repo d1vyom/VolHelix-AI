@@ -1,6 +1,7 @@
 import time
 import threading
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import List, Optional, Dict
 
@@ -337,6 +338,8 @@ class AutoTrader:
         STRICT: Only executes if a candidate meets OB retest + FVG imbalance + GEX wall criteria.
         """
         self.last_run_timestamp = datetime.now().isoformat()
+        if not requested_symbol and self._stop_event.is_set():
+            return {"success": True, "executed": False, "reason": "Stopped", "scanner_diagnostics": self.scanner_diagnostics}
         
         # 1. Check open positions limit
         try:
@@ -352,30 +355,35 @@ class AutoTrader:
             active_symbols = set()
             logger.warning(f"Failed to check positions: {e}")
 
-        # 2. Evaluate target symbol or all watched symbols
+        # 2. Evaluate target symbol or all watched symbols concurrently
         mcp = AlpacaClient()
         sc = self._get_stock_client()
         valid_candidates = []
 
         symbols_to_scan = [requested_symbol] if requested_symbol else self.watched_symbols
 
-        for sym in symbols_to_scan:
+        def _evaluate_single_symbol(sym: str):
+            if not requested_symbol and self._stop_event.is_set():
+                return {"symbol": sym, "diag": {"symbol": sym, "is_valid": False, "score": 0.0, "status_label": "STOPPED", "reasons": ["Loop stopped"]}, "candidate": None}
+
             if sym in active_symbols:
-                self.scanner_diagnostics[sym] = {
+                return {
                     "symbol": sym,
-                    "is_valid": False,
-                    "score": 0.0,
-                    "status_label": "POSITION ACTIVE",
-                    "reasons": ["Position currently open in portfolio"]
+                    "diag": {
+                        "symbol": sym,
+                        "is_valid": False,
+                        "score": 0.0,
+                        "status_label": "POSITION ACTIVE",
+                        "reasons": ["Position currently open in portfolio"]
+                    },
+                    "candidate": None
                 }
-                continue
 
             try:
-                bars_data = mcp.get_stock_bars(sym, days=20)
+                bars_data = mcp.get_stock_bars(sym, days=25)
                 bars = bars_data.get("bars", [])
                 order_flow = analyze_order_flow(sym, bars)
                 chain = mcp.get_option_chain(sym)
-                gamma_prof = calculate_gamma_profile(chain.get("legs", []), order_flow.current_price)
 
                 current_price = order_flow.current_price
                 if current_price <= 0:
@@ -385,40 +393,63 @@ class AutoTrader:
                     else:
                         current_price = 575.0
 
+                gamma_prof = calculate_gamma_profile(chain.get("legs", []), current_price)
                 eval_res = evaluate_master_strategy_setup(
                     symbol=sym,
                     current_price=current_price,
                     order_flow=order_flow,
                     gamma_profile=gamma_prof
                 )
-                self.scanner_diagnostics[sym] = eval_res
 
+                cand = None
                 if eval_res["is_valid"]:
-                    valid_candidates.append({
+                    cand = {
                         "symbol": sym,
                         "eval": eval_res,
                         "current_price": current_price,
                         "order_flow": order_flow,
                         "gamma_profile": gamma_prof
-                    })
+                    }
 
+                return {
+                    "symbol": sym,
+                    "diag": eval_res,
+                    "candidate": cand
+                }
             except Exception as e:
                 logger.warning(f"Failed scan for {sym}: {e}")
-                self.scanner_diagnostics[sym] = {
+                return {
                     "symbol": sym,
-                    "is_valid": False,
-                    "score": 0.0,
-                    "status_label": "SCAN ERROR",
-                    "reasons": [str(e)]
+                    "diag": {
+                        "symbol": sym,
+                        "is_valid": False,
+                        "score": 0.0,
+                        "status_label": "SCAN ERROR",
+                        "reasons": [str(e)]
+                    },
+                    "candidate": None
                 }
+
+        # Fast parallel execution: scan all symbols concurrently
+        max_workers = min(5, len(symbols_to_scan))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            scan_results = list(executor.map(_evaluate_single_symbol, symbols_to_scan))
+
+        for item in scan_results:
+            self.scanner_diagnostics[item["symbol"]] = item["diag"]
+            if item["candidate"]:
+                valid_candidates.append(item["candidate"])
 
         # 3. STRICT MASTER STRATEGY GATE:
         # If no symbol satisfies the Master Strategy criteria (Score >= 0.70), DO NOT EXECUTE ANY TRADE!
         if not valid_candidates:
             if requested_symbol:
                 diag = self.scanner_diagnostics.get(requested_symbol, {})
-                reasons_str = " | ".join(diag.get("reasons", [])) if diag.get("reasons") else "Score < 70%"
-                msg = f"Manual scan on {requested_symbol} complete: Setup does not meet strict Master Strategy confluence ({reasons_str}). Capital preserved."
+                if diag.get("status_label") == "POSITION ACTIVE":
+                    msg = f"Position already active for {requested_symbol}. Position Guardian is managing dynamic TP/SL 24/7."
+                else:
+                    reasons_str = " | ".join(diag.get("reasons", [])) if diag.get("reasons") else "Score < 70%"
+                    msg = f"Scan on {requested_symbol} complete: Setup criteria not met ({reasons_str}). Capital preserved."
             else:
                 msg = f"Radar scan across {len(self.watched_symbols)} symbols complete: 0 setups formed with strict Master Strategy confluence. Capital preserved."
             self.last_log = msg

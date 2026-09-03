@@ -243,23 +243,44 @@ def analyze_order_flow(symbol: str, bars: List[Dict], order_book: Optional[Dict]
     fvgs = detect_fair_value_gaps(bars)
     heatmap = compute_liquidity_heatmap(bars, order_book)
 
-    unmitigated_bullish = [ob for ob in order_blocks if ob.block_type == "BULLISH" and not ob.mitigated and ob.high <= current_price]
-    nearest_bullish_ob = max(unmitigated_bullish, key=lambda ob: ob.high) if unmitigated_bullish else None
+    # Active bullish order blocks: unmitigated, or currently within retest zone (-1% to +5%)
+    unmitigated_bullish = [
+        ob for ob in order_blocks 
+        if ob.block_type == "BULLISH" and (not ob.mitigated or ob.high * 0.98 <= current_price <= ob.high * 1.05) and ob.low * 0.98 <= current_price
+    ]
+    nearest_bullish_ob = max(unmitigated_bullish, key=lambda ob: ob.high) if unmitigated_bullish else (
+        max([ob for ob in order_blocks if ob.block_type == "BULLISH" and ob.low <= current_price], key=lambda ob: ob.high) if any(ob.block_type == "BULLISH" and ob.low <= current_price for ob in order_blocks) else None
+    )
 
-    unmitigated_bearish = [ob for ob in order_blocks if ob.block_type == "BEARISH" and not ob.mitigated and ob.low >= current_price]
-    nearest_bearish_ob = min(unmitigated_bearish, key=lambda ob: ob.low) if unmitigated_bearish else None
+    unmitigated_bearish = [
+        ob for ob in order_blocks 
+        if ob.block_type == "BEARISH" and (not ob.mitigated or ob.low * 0.95 <= current_price <= ob.low * 1.02) and ob.high * 1.02 >= current_price
+    ]
+    nearest_bearish_ob = min(unmitigated_bearish, key=lambda ob: ob.low) if unmitigated_bearish else (
+        min([ob for ob in order_blocks if ob.block_type == "BEARISH" and ob.high >= current_price], key=lambda ob: ob.low) if any(ob.block_type == "BEARISH" and ob.high >= current_price for ob in order_blocks) else None
+    )
 
     unfilled_fvgs = [f for f in fvgs if not f.filled]
 
     trend_bias = "NEUTRAL"
-    if nearest_bullish_ob and not nearest_bearish_ob:
-        trend_bias = "BULLISH"
-    elif nearest_bearish_ob and not nearest_bullish_ob:
-        trend_bias = "BEARISH"
-    elif nearest_bullish_ob and nearest_bearish_ob:
-        dist_to_bull = current_price - nearest_bullish_ob.high
-        dist_to_bear = nearest_bearish_ob.low - current_price
-        trend_bias = "BULLISH" if dist_to_bull < dist_to_bear else "BEARISH"
+    closes = [float(b.get('close', 0)) for b in bars]
+    if len(closes) >= 5:
+        ma5 = sum(closes[-5:]) / 5.0
+        ma20 = sum(closes[-20:]) / min(len(closes), 20)
+        if current_price >= ma20 and ma5 >= ma20:
+            trend_bias = "BULLISH"
+        elif current_price < ma20 and ma5 < ma20:
+            trend_bias = "BEARISH"
+            
+    if trend_bias == "NEUTRAL":
+        if nearest_bullish_ob and not nearest_bearish_ob:
+            trend_bias = "BULLISH"
+        elif nearest_bearish_ob and not nearest_bullish_ob:
+            trend_bias = "BEARISH"
+        elif nearest_bullish_ob and nearest_bearish_ob:
+            dist_to_bull = current_price - nearest_bullish_ob.high
+            dist_to_bear = nearest_bearish_ob.low - current_price
+            trend_bias = "BULLISH" if dist_to_bull < dist_to_bear else "BEARISH"
 
     return OrderFlowAnalysis(
         symbol=symbol,
@@ -306,13 +327,13 @@ def calculate_master_strategy_tp_sl(
 
         sl_price = round(min(structural_support - 0.25, current_price * 0.985), 2)
 
-        # Take Profit: Target nearest unfilled FVG imbalance or Call Wall
-        unfilled_targets = [f.bottom for f in order_flow.unfilled_fvgs if f.bottom > current_price]
+        # Take Profit: Target nearest unfilled FVG imbalance or Call Wall (with minimum expansion)
+        unfilled_targets = [f.bottom for f in order_flow.unfilled_fvgs if f.bottom >= current_price * 1.02]
         if unfilled_targets:
             fvg_target = min(unfilled_targets)
             tp_price = round(fvg_target, 2)
             tp_reason = f"FVG Imbalance Fill (${tp_price:.2f})"
-        elif call_wall > current_price:
+        elif call_wall >= current_price * 1.025:
             tp_price = round(call_wall, 2)
             tp_reason = f"Gamma Call Wall Ceiling (${tp_price:.2f})"
         else:
@@ -333,12 +354,12 @@ def calculate_master_strategy_tp_sl(
 
         sl_price = round(max(structural_resist + 0.25, current_price * 1.018), 2)
 
-        unfilled_targets = [f.top for f in order_flow.unfilled_fvgs if f.top < current_price]
+        unfilled_targets = [f.top for f in order_flow.unfilled_fvgs if f.top <= current_price * 0.98]
         if unfilled_targets:
             fvg_target = max(unfilled_targets)
             tp_price = round(fvg_target, 2)
             tp_reason = f"FVG Imbalance Fill (${tp_price:.2f})"
-        elif put_wall > 0 and put_wall < current_price:
+        elif put_wall > 0 and put_wall <= current_price * 0.975:
             tp_price = round(put_wall, 2)
             tp_reason = f"Gamma Put Wall Floor (${tp_price:.2f})"
         else:
@@ -395,11 +416,14 @@ def evaluate_master_strategy_setup(
         if -0.01 <= dist_to_ob <= 0.025:
             ob_score = 0.40 * ob.strength
             reasons.append(f"Bullish OB Demand Retest at ${ob.low:.2f}-${ob.high:.2f} (Strength: {ob.strength:.2f})")
-        elif 0.025 < dist_to_ob <= 0.05:
-            ob_score = 0.20
-            reasons.append(f"Near Bullish OB (${ob.high:.2f}, +{dist_to_ob*100:.1f}%)")
+        elif 0.025 < dist_to_ob <= 0.06:
+            ob_score = 0.35 * ob.strength
+            reasons.append(f"Bullish Structure Expansion above OB (${ob.high:.2f}, +{dist_to_ob*100:.1f}%)")
+        elif 0.06 < dist_to_ob <= 0.12:
+            ob_score = 0.25
+            reasons.append(f"Bullish Trend Continuation above OB (${ob.high:.2f}, +{dist_to_ob*100:.1f}%)")
         else:
-            ob_score = 0.10
+            ob_score = 0.15
             reasons.append(f"Bullish OB Distant (${ob.high:.2f}, +{dist_to_ob*100:.1f}%)")
     elif not is_bullish and order_flow.nearest_bearish_ob:
         ob = order_flow.nearest_bearish_ob
@@ -407,12 +431,21 @@ def evaluate_master_strategy_setup(
         if -0.01 <= dist_to_ob <= 0.025:
             ob_score = 0.40 * ob.strength
             reasons.append(f"Bearish OB Supply Rejection at ${ob.low:.2f}-${ob.high:.2f} (Strength: {ob.strength:.2f})")
-        elif 0.025 < dist_to_ob <= 0.05:
-            ob_score = 0.20
-            reasons.append(f"Near Bearish OB (${ob.low:.2f}, -{dist_to_ob*100:.1f}%)")
+        elif 0.025 < dist_to_ob <= 0.06:
+            ob_score = 0.35 * ob.strength
+            reasons.append(f"Bearish Structure Breakdown below OB (${ob.low:.2f}, -{dist_to_ob*100:.1f}%)")
+        elif 0.06 < dist_to_ob <= 0.12:
+            ob_score = 0.25
+            reasons.append(f"Bearish Trend Continuation below OB (${ob.low:.2f}, -{dist_to_ob*100:.1f}%)")
         else:
-            ob_score = 0.10
+            ob_score = 0.15
             reasons.append(f"Bearish OB Distant (${ob.low:.2f})")
+    elif trend_bias == "BULLISH":
+        ob_score = 0.25
+        reasons.append("Institutional Bullish Momentum & Trend Structure Confirmed")
+    elif trend_bias == "BEARISH":
+        ob_score = 0.25
+        reasons.append("Institutional Bearish Momentum & Trend Structure Confirmed")
     else:
         ob_score = 0.05
         reasons.append("No active unmitigated Order Block in structure")
@@ -421,19 +454,33 @@ def evaluate_master_strategy_setup(
     fvg_score = 0.0
     if is_bullish:
         valid_fvgs = [f for f in order_flow.unfilled_fvgs if f.bottom > current_price]
+        discount_fvgs = [f for f in order_flow.unfilled_fvgs if f.bottom <= current_price <= f.top * 1.05]
         if valid_fvgs:
             target_fvg = min(valid_fvgs, key=lambda f: f.bottom)
             fvg_score = 0.30
             reasons.append(f"Targeting Unfilled BISI Gap at ${target_fvg.bottom:.2f} (+{((target_fvg.bottom-current_price)/current_price)*100:.1f}%)")
+        elif discount_fvgs:
+            fvg_score = 0.30
+            reasons.append(f"Bullish FVG Discount Support Reached at ${discount_fvgs[0].bottom:.2f}")
+        elif len(order_flow.unfilled_fvgs) > 0:
+            fvg_score = 0.20
+            reasons.append("Dynamic Imbalance Gap Present in Trend")
         else:
             fvg_score = 0.10
             reasons.append("No unfilled upside FVG (Secondary Target Active)")
     else:
         valid_fvgs = [f for f in order_flow.unfilled_fvgs if f.top < current_price]
+        premium_fvgs = [f for f in order_flow.unfilled_fvgs if f.bottom * 0.95 <= current_price <= f.top]
         if valid_fvgs:
             target_fvg = max(valid_fvgs, key=lambda f: f.top)
             fvg_score = 0.30
             reasons.append(f"Targeting Unfilled SIBI Gap at ${target_fvg.top:.2f} (-{((current_price-target_fvg.top)/current_price)*100:.1f}%)")
+        elif premium_fvgs:
+            fvg_score = 0.30
+            reasons.append(f"Bearish FVG Premium Resistance Reached at ${premium_fvgs[0].top:.2f}")
+        elif len(order_flow.unfilled_fvgs) > 0:
+            fvg_score = 0.20
+            reasons.append("Dynamic Imbalance Gap Present in Trend")
         else:
             fvg_score = 0.10
             reasons.append("No unfilled downside FVG (Secondary Target Active)")
@@ -442,6 +489,7 @@ def evaluate_master_strategy_setup(
     gex_score = 0.0
     call_wall = getattr(gamma_profile, "call_wall", 0.0) if gamma_profile else 0.0
     put_wall = getattr(gamma_profile, "put_wall", 0.0) if gamma_profile else 0.0
+    gamma_regime = getattr(gamma_profile, "regime", "") if gamma_profile else ""
 
     if is_bullish:
         if put_wall > 0 and current_price >= put_wall:
@@ -450,6 +498,9 @@ def evaluate_master_strategy_setup(
         elif call_wall > current_price:
             gex_score = 0.15
             reasons.append(f"Room to Gamma Call Wall (${call_wall:.2f})")
+        elif gamma_regime == "POSITIVE_GAMMA":
+            gex_score = 0.15
+            reasons.append("Positive Dealer Gamma Stability Confirmed")
         else:
             gex_score = 0.10
     else:
@@ -459,6 +510,9 @@ def evaluate_master_strategy_setup(
         elif put_wall < current_price:
             gex_score = 0.15
             reasons.append(f"Room to Gamma Put Wall (${put_wall:.2f})")
+        elif gamma_regime == "POSITIVE_GAMMA":
+            gex_score = 0.15
+            reasons.append("Positive Dealer Gamma Stability Confirmed")
         else:
             gex_score = 0.10
 
