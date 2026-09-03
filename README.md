@@ -6,7 +6,6 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
 [![Alpaca API](https://img.shields.io/badge/Broker-Alpaca_Paper_Trading-yellow.svg)](https://alpaca.markets/)
 [![Tests](https://img.shields.io/badge/Tests-47%2F47_Passed-brightgreen.svg)]()
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 > **Autonomous Institutional Options Trading Swarm with Deterministic Zero-Hallucination Risk Gate & 24/7 Position Guardian** 
 
