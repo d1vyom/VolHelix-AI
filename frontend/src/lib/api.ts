@@ -91,6 +91,10 @@ export interface AlpacaOrder {
   type: string;
   status: string;
   filled_avg_price?: number;
+  limit_price?: number;
+  stop_price?: number;
+  order_class?: string;
+  time_in_force?: string;
   created_at: string;
 }
 
@@ -249,6 +253,28 @@ export async function closeAlpacaPosition(symbol: string): Promise<AlpacaCloseRe
       body: JSON.stringify({ symbol }),
     });
     return await safeJson<AlpacaCloseResponse>(res, { success: false });
+  } catch {
+    return { success: false };
+  }
+}
+
+export async function cancelAlpacaOrder(orderId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/api/alpaca/orders/${encodeURIComponent(orderId)}`, {
+      method: "DELETE",
+    });
+    return await safeJson(res, { success: false });
+  } catch {
+    return { success: false };
+  }
+}
+
+export async function cancelAllAlpacaOrders(): Promise<{ success: boolean; cancelled?: number; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/api/alpaca/cancel-all`, {
+      method: "POST",
+    });
+    return await safeJson(res, { success: false });
   } catch {
     return { success: false };
   }

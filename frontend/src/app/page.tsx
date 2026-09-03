@@ -10,7 +10,15 @@ import {
   Bar
 } from "recharts";
 import { CandlestickChart } from "../components/CandlestickChart";
-import { CandlestickChart as CandleIcon, LineChart as LineIcon, RefreshCw } from "lucide-react";
+import { 
+  CandlestickChart as CandleIcon, 
+  LineChart as LineIcon, 
+  RefreshCw, 
+  Clock, 
+  XCircle, 
+  Trash2, 
+  AlertCircle 
+} from "lucide-react";
 import {
   getAlpacaAccount,
   getAlpacaPositions,
@@ -19,6 +27,8 @@ import {
   getAlpacaBars,
   submitAlpacaOrder,
   closeAlpacaPosition,
+  cancelAlpacaOrder,
+  cancelAllAlpacaOrders,
   executeBotTrade,
   getOrderFlowAnalytics,
   OrderFlowData,
@@ -43,7 +53,7 @@ interface AgentLog {
   confidence: number;
 }
 
-type DockTab = "positions" | "orders" | "debate" | "riskgate" | "history";
+type DockTab = "positions" | "pending" | "orders" | "debate" | "riskgate" | "history";
 
 export default function BybitTradingTerminal() {
   const [activeTab, setActiveTab] = useState<DockTab>("positions");
@@ -71,6 +81,22 @@ export default function BybitTradingTerminal() {
   });
   const [positions, setPositions] = useState<AlpacaPosition[]>([]);
   const [orders, setOrders] = useState<AlpacaOrder[]>([]);
+
+  // Computed pending orders (queued for market open / awaiting fill)
+  const pendingOrders = useMemo(() => {
+    return orders.filter((o) => {
+      const s = (o.status || "").toLowerCase();
+      return ["accepted", "new", "pending_new", "held", "open", "calculated"].includes(s);
+    });
+  }, [orders]);
+
+  // Primary executed entry orders (excluding internal held bracket children)
+  const pendingParentTrades = useMemo(() => {
+    return pendingOrders.filter((o) => {
+      const s = (o.status || "").toLowerCase();
+      return s !== "held";
+    });
+  }, [pendingOrders]);
   const [quote, setQuote] = useState<AlpacaQuote>({
     symbol: "SPY",
     bid: 574.80,
@@ -370,6 +396,34 @@ export default function BybitTradingTerminal() {
     }
   };
 
+  const handleCancelOrder = async (orderId: string) => {
+    try {
+      const res = await cancelAlpacaOrder(orderId);
+      if (res && res.success) {
+        showToast("Order cancelled successfully");
+        await refreshAccountAndPositions();
+      } else {
+        showToast(res.error || "Failed to cancel order");
+      }
+    } catch {
+      showToast("Error cancelling order");
+    }
+  };
+
+  const handleCancelAllOrders = async () => {
+    try {
+      const res = await cancelAllAlpacaOrders();
+      if (res && res.success) {
+        showToast(`Cancelled ${res.cancelled ?? 0} pending order(s)`);
+        await refreshAccountAndPositions();
+      } else {
+        showToast("Failed to cancel orders");
+      }
+    } catch {
+      showToast("Error cancelling orders");
+    }
+  };
+
   const handleToggleAutoTrading = async () => {
     setIsTogglingAuto(true);
     try {
@@ -638,7 +692,8 @@ export default function BybitTradingTerminal() {
               <div className="flex gap-2">
                 {[
                   { key: "positions", label: `Positions (${positions.length})` },
-                  { key: "orders", label: `Orders (${orders.length})` },
+                  { key: "pending", label: `Pending Orders (${pendingOrders.length})` },
+                  { key: "orders", label: `Order History (${orders.length})` },
                   { key: "debate", label: "Agent Debate Stream" },
                   { key: "riskgate", label: "Deterministic Risk Gate (10/10)" },
                 ].map((t) => (
@@ -678,10 +733,102 @@ export default function BybitTradingTerminal() {
               {activeTab === "positions" && (
                 <div>
                   {positions.length === 0 ? (
-                    <div className="text-center py-10 text-[#878996]">
-                      <p className="font-semibold text-[#f5f5f5]">No Active Positions in Alpaca Paper Account</p>
-                      <p className="text-[11px] mt-1">Execute a trade from the panel on the right to open a live paper position.</p>
-                    </div>
+                    pendingParentTrades.length > 0 ? (
+                      <div className="space-y-3">
+                        <div className="p-3 rounded-lg bg-[#1c1d22] border border-[#f7a600]/40 flex items-center justify-between shadow-md">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-[#f7a600]/15 flex items-center justify-center text-[#f7a600] shrink-0">
+                              <Clock className="w-4 h-4 animate-spin" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <p className="font-bold text-xs text-[#f5f5f5]">
+                                  {pendingParentTrades.length} Trade{pendingParentTrades.length > 1 ? "s" : ""} Executed &mdash; Pending Market Fill
+                                </p>
+                                <span className="px-1.5 py-0.5 rounded bg-[#f7a600]/20 text-[#f7a600] text-[10px] font-bold">
+                                  QUEUED ON ALPACA
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-[#878996] mt-0.5">
+                                US stock market is closed. Orders are accepted on Alpaca paper broker and queued for 9:30 AM EDT open matching.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setActiveTab("pending")}
+                            className="px-3 py-1.5 rounded bg-[#f7a600] text-[#0d0e12] hover:bg-[#ffb726] text-xs font-bold transition-colors cursor-pointer shrink-0"
+                          >
+                            View Pending Orders ({pendingOrders.length}) &rarr;
+                          </button>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                          <div className="text-[10px] font-bold text-[#878996] uppercase mb-1.5 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#f7a600]" />
+                            <span>Executed Orders Queued to Become Positions at Open</span>
+                          </div>
+                          <table className="w-full text-left text-xs">
+                            <thead>
+                              <tr className="border-b border-[#26282f] text-[#5e6673] uppercase text-[10px]">
+                                <th className="py-2 px-2">Symbol</th>
+                                <th className="py-2 px-2">Side</th>
+                                <th className="py-2 px-2 text-right">Qty</th>
+                                <th className="py-2 px-2 text-right">Order Type</th>
+                                <th className="py-2 px-2 text-right">Est. Price</th>
+                                <th className="py-2 px-2 text-right">Status</th>
+                                <th className="py-2 px-2 text-right">Time</th>
+                                <th className="py-2 px-2 text-right">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {pendingParentTrades.map((ord) => (
+                                <tr key={ord.id} className="border-b border-[#26282f]/50 hover:bg-[#1c1d22]/50">
+                                  <td className="py-2.5 px-2 font-bold text-[#f5f5f5] flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#f7a600] animate-pulse" />
+                                    {ord.symbol}
+                                  </td>
+                                  <td className="py-2.5 px-2">
+                                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                      ord.side === "BUY" ? "bg-[#20b26c]/15 text-[#20b26c]" : "bg-[#ef454a]/15 text-[#ef454a]"
+                                    }`}>
+                                      {ord.side}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-2 text-right text-[#f5f5f5]">{ord.qty}</td>
+                                  <td className="py-2.5 px-2 text-right text-[#878996]">
+                                    {ord.order_class ? `${ord.order_class.toUpperCase()} BRACKET` : (ord.type || "MARKET")}
+                                  </td>
+                                  <td className="py-2.5 px-2 text-right text-[#f5f5f5]">
+                                    {ord.limit_price ? `$${ord.limit_price.toFixed(2)}` : (ord.filled_avg_price ? `$${ord.filled_avg_price.toFixed(2)}` : "Market")}
+                                  </td>
+                                  <td className="py-2.5 px-2 text-right">
+                                    <span className="px-1.5 py-0.2 rounded bg-[#f7a600]/15 text-[#f7a600] text-[10px] font-bold">
+                                      QUEUED (MARKET OPEN)
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-2 text-right text-[#5e6673] text-[11px]">
+                                    {ord.created_at ? new Date(ord.created_at).toLocaleTimeString() : "-"}
+                                  </td>
+                                  <td className="py-2.5 px-2 text-right">
+                                    <button
+                                      onClick={() => handleCancelOrder(ord.id)}
+                                      className="px-2 py-0.5 rounded bg-[#26282f] hover:bg-[#ef454a]/20 hover:text-[#ef454a] text-[#878996] text-[10px] transition-colors cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-10 text-[#878996]">
+                        <p className="font-semibold text-[#f5f5f5]">No Active or Pending Positions</p>
+                        <p className="text-[11px] mt-1">Execute a trade from the panel on the right or trigger Auto-Pilot.</p>
+                      </div>
+                    )
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs">
@@ -737,6 +884,111 @@ export default function BybitTradingTerminal() {
                 </div>
               )}
 
+              {/* Dedicated Pending Orders Dock */}
+              {activeTab === "pending" && (
+                <div>
+                  {pendingOrders.length === 0 ? (
+                    <div className="text-center py-10 text-[#878996]">
+                      <p className="font-semibold text-[#f5f5f5]">No Pending Orders on Broker</p>
+                      <p className="text-[11px] mt-1">All orders have been filled or closed.</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="mb-2.5 flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs text-[#878996]">
+                          <span className="w-2 h-2 rounded-full bg-[#f7a600] animate-pulse" />
+                          <span>
+                            {pendingOrders.length} Order{pendingOrders.length > 1 ? "s" : ""} Resting / Queued on Alpaca Paper Broker
+                          </span>
+                        </div>
+                        <button
+                          onClick={handleCancelAllOrders}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#ef454a]/15 text-[#ef454a] hover:bg-[#ef454a]/25 text-[11px] font-semibold transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Cancel All Pending ({pendingOrders.length})</span>
+                        </button>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="border-b border-[#26282f] text-[#5e6673] uppercase text-[10px]">
+                              <th className="py-2 px-2">Order ID</th>
+                              <th className="py-2 px-2">Symbol</th>
+                              <th className="py-2 px-2">Side</th>
+                              <th className="py-2 px-2 text-right">Qty</th>
+                              <th className="py-2 px-2 text-right">Type</th>
+                              <th className="py-2 px-2 text-right">Price</th>
+                              <th className="py-2 px-2 text-right">Status / Queue</th>
+                              <th className="py-2 px-2 text-right">Time</th>
+                              <th className="py-2 px-2 text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pendingOrders.map((ord) => {
+                              const s = (ord.status || "").toLowerCase();
+                              let statusText = ord.status;
+                              let statusBg = "bg-[#26282f] text-[#f7a600]";
+                              if (s === "accepted") {
+                                statusText = "QUEUED FOR OPEN";
+                                statusBg = "bg-[#f7a600]/15 text-[#f7a600]";
+                              } else if (s === "held") {
+                                statusText = "BRACKET HELD";
+                                statusBg = "bg-[#3a3b45] text-[#878996]";
+                              } else if (s === "new" || s === "open") {
+                                statusText = "RESTING LIMIT";
+                                statusBg = "bg-[#20b26c]/15 text-[#20b26c]";
+                              }
+
+                              return (
+                                <tr key={ord.id} className="border-b border-[#26282f]/50 hover:bg-[#1c1d22]/50">
+                                  <td className="py-2 px-2 text-[#878996] text-[11px] truncate max-w-[120px]" title={ord.id}>
+                                    {ord.id.slice(0, 8)}...
+                                  </td>
+                                  <td className="py-2 px-2 font-bold text-[#f5f5f5]">{ord.symbol}</td>
+                                  <td className="py-2 px-2">
+                                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                      ord.side === "BUY" ? "text-[#20b26c]" : "text-[#ef454a]"
+                                    }`}>
+                                      {ord.side}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-2 text-right text-[#f5f5f5]">{ord.qty}</td>
+                                  <td className="py-2 px-2 text-right text-[#878996]">
+                                    {ord.type || "MARKET"}
+                                  </td>
+                                  <td className="py-2 px-2 text-right text-[#f5f5f5]">
+                                    {ord.limit_price ? `$${ord.limit_price.toFixed(2)}` : (ord.stop_price ? `Stop $${ord.stop_price.toFixed(2)}` : "Market")}
+                                  </td>
+                                  <td className="py-2.5 px-2 text-right">
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${statusBg}`}>
+                                      {statusText}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-2 text-right text-[#5e6673] text-[11px]">
+                                    {ord.created_at ? new Date(ord.created_at).toLocaleTimeString() : "-"}
+                                  </td>
+                                  <td className="py-2 px-2 text-right">
+                                    <button
+                                      onClick={() => handleCancelOrder(ord.id)}
+                                      className="px-2 py-0.5 rounded bg-[#26282f] hover:bg-[#ef454a]/20 hover:text-[#ef454a] text-[#878996] text-[10px] transition-colors cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Order History Dock */}
               {activeTab === "orders" && (
                 <div>
                   {orders.length === 0 ? (
@@ -772,7 +1024,9 @@ export default function BybitTradingTerminal() {
                                 {ord.filled_avg_price ? `$${ord.filled_avg_price.toFixed(2)}` : "-"}
                               </td>
                               <td className="py-2 px-2 text-right">
-                                <span className="px-1.5 py-0.2 rounded bg-[#26282f] text-[#f7a600] text-[10px] font-bold">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  ord.status === "filled" ? "bg-[#20b26c]/15 text-[#20b26c]" : "bg-[#26282f] text-[#f7a600]"
+                                }`}>
                                   {ord.status}
                                 </span>
                               </td>

@@ -172,8 +172,19 @@ class AutoTrader:
                     continue
 
             else:
-                # Case B: Position is no longer open in Alpaca!
-                # If trade was opened > 8 seconds ago, it was closed on the broker (e.g. bracket child filled)
+                # Case B: Position is not currently active in Alpaca filled positions!
+                # 1. First verify if the order is still working or pending on the broker
+                try:
+                    open_orders = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
+                    matching_open = [o for o in open_orders if o.symbol == sym]
+                    if matching_open:
+                        # The order is still pending execution on Alpaca (e.g. queued for market open or resting limit)
+                        # Keep trade as OPEN awaiting execution
+                        continue
+                except Exception as e:
+                    logger.debug(f"Failed checking open orders for {sym}: {e}")
+
+                # 2. Only if NO open/pending orders exist, check if a filled exit occurred on broker
                 time_elapsed = 999
                 if entry_time_str:
                     try:
@@ -181,27 +192,28 @@ class AutoTrader:
                     except Exception:
                         time_elapsed = 999
 
-                if time_elapsed > 8:
-                    exit_price = tp_price if tp_price else entry_price
+                if time_elapsed > 15:
+                    exit_price = None
                     try:
                         orders = client.get_orders(GetOrdersRequest(status="closed", limit=10))
-                        closed_order = next((o for o in orders if o.symbol == sym and o.filled_avg_price), None)
+                        closed_order = next((o for o in orders if o.symbol == sym and o.filled_avg_price and float(o.filled_avg_price) > 0), None)
                         if closed_order and closed_order.filled_avg_price:
                             exit_price = float(closed_order.filled_avg_price)
                     except Exception:
                         pass
 
-                    realized_pnl = round((exit_price - entry_price) * 1.0, 2)
-                    exit_type = "TAKE_PROFIT" if (tp_price and exit_price >= tp_price * 0.99) else "STOP_LOSS"
-                    trade.status = TradeStatus.CLOSED
-                    trade.realized_pnl = realized_pnl
-                    trade.exit_time = datetime.now().isoformat()
-                    trade.exit_price = exit_price
-                    asyncio.run(trade_log.save_trade(trade))
+                    if exit_price is not None:
+                        realized_pnl = round((exit_price - entry_price) * 1.0, 2)
+                        exit_type = "TAKE_PROFIT" if (tp_price and exit_price >= tp_price * 0.99) else "STOP_LOSS"
+                        trade.status = TradeStatus.CLOSED
+                        trade.realized_pnl = realized_pnl
+                        trade.exit_time = datetime.now().isoformat()
+                        trade.exit_price = exit_price
+                        asyncio.run(trade_log.save_trade(trade))
 
-                    msg = f"Position {sym} closed on broker (Bracket fulfilled). Exit: ${exit_price:.2f} | Realized PnL: ${realized_pnl:+.2f}"
-                    logger.info(msg)
-                    self._emit_guardian_event(exit_type, sym, exit_price, realized_pnl, msg)
+                        msg = f"Position {sym} closed on broker (Bracket fulfilled). Exit: ${exit_price:.2f} | Realized PnL: ${realized_pnl:+.2f}"
+                        logger.info(msg)
+                        self._emit_guardian_event(exit_type, sym, exit_price, realized_pnl, msg)
 
     def _close_position_and_finalize_trade(
         self,

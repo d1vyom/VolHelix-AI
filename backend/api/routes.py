@@ -258,9 +258,9 @@ def get_alpaca_positions():
         return []
 
 @router.get("/api/alpaca/orders")
-def get_alpaca_orders(limit: int = 15):
+def get_alpaca_orders(limit: int = 50):
     cache_key = f"orders_{limit}"
-    cached = _get_cached(cache_key, ttl=2.5)
+    cached = _get_cached(cache_key, ttl=1.5)
     if cached is not None:
         return cached
     try:
@@ -273,15 +273,39 @@ def get_alpaca_orders(limit: int = 15):
                 "symbol": o.symbol,
                 "qty": float(o.qty or 0.0),
                 "side": str(o.side).replace("OrderSide.", ""),
-                "type": str(o.type),
+                "type": str(o.type).replace("OrderType.", ""),
                 "status": str(o.status).replace("OrderStatus.", ""),
                 "filled_avg_price": float(o.filled_avg_price or 0.0) if o.filled_avg_price else None,
+                "limit_price": float(o.limit_price or 0.0) if getattr(o, "limit_price", None) else None,
+                "stop_price": float(o.stop_price or 0.0) if getattr(o, "stop_price", None) else None,
+                "order_class": str(getattr(o, "order_class", "") or "").replace("OrderClass.", ""),
+                "time_in_force": str(getattr(o, "time_in_force", "") or "").replace("TimeInForce.", ""),
                 "created_at": o.created_at.isoformat() if o.created_at else "",
             })
         _set_cached(cache_key, res)
         return res
     except Exception:
         return []
+
+@router.delete("/api/alpaca/orders/{order_id}")
+def cancel_alpaca_order(order_id: str):
+    try:
+        client = _get_alpaca_trading_client()
+        client.cancel_order_by_id(order_id)
+        _invalidate_cache()
+        return {"success": True, "order_id": order_id}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.post("/api/alpaca/cancel-all")
+def cancel_all_alpaca_orders():
+    try:
+        client = _get_alpaca_trading_client()
+        res = client.cancel_orders()
+        _invalidate_cache()
+        return {"success": True, "cancelled": len(res) if res else 0}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 @router.get("/api/alpaca/quote")
 def get_alpaca_quote(symbol: str = "SPY"):
