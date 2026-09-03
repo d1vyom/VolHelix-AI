@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --animate-fade-in: fadeIn 0.2s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes bybitPulse {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.06); }
+}
+
+:root {
+  --background: #121214;
+  --foreground: #f5f5f5;
+}
+
+body {
+  background-color: #121214;
+  color: #f5f5f5;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(247, 166, 0, 0.05) 0%, transparent 45%),
+    radial-gradient(circle at 100% 30%, rgba(32, 178, 108, 0.03) 0%, transparent 40%),
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.02) 1px, transparent 0);
+  background-size: 100% 100%, 100% 100%, 20px 20px;
+  background-attachment: fixed;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Bybit Pro Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: #121214;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #26282f;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #f7a600;
+}
+
+/* Bybit Card Panels */
+.bybit-panel {
+  background: #18191f;
+  border: 1px solid #26282f;
+}
+
+.bybit-panel-header {
+  background: #1c1d22;
+  border-bottom: 1px solid #26282f;
+}
+
+.bybit-panel-gold {
+  background: #18191f;
+  border: 1px solid rgba(247, 166, 0, 0.4);
+  box-shadow: 0 0 16px -3px rgba(247, 166, 0, 0.15);
+}
+
+::selection {
+  background: rgba(247, 166, 0, 0.35);
+  color: #fff;
+}
