@@ -40,4 +40,5 @@ class TradeRecord(BaseModel):
     realized_pnl: float = 0.0
     take_profit_price: Optional[float] = None
     stop_loss_price: Optional[float] = None
+    exit_price: Optional[float] = None
     mcp_logs: List[MCPCallLog] = Field(default_factory=list)
