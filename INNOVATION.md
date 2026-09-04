@@ -6,7 +6,7 @@
 
 ---
 
-## ⚡ 60-Second Summary 
+## 60-Second Summary 
 
 | Question | The VolHelix AI Answer | Architectural Implementation |
 |---|---|---|

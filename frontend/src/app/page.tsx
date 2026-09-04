@@ -592,7 +592,7 @@ export default function BybitTradingTerminal() {
       if (res && res.success) {
         showToast(
           enable
-            ? "⚡ Dev Sim Override Enabled: Paper trading unlocked outside market hours"
+            ? "Dev Sim Override Enabled: Paper trading unlocked outside market hours"
             : "Dev Sim Disabled: Strict US market hours enforced"
         );
       }
@@ -1462,7 +1462,7 @@ export default function BybitTradingTerminal() {
                       }`}
                       title="Toggle Simulation Override to allow paper trading outside regular US market hours"
                     >
-                      ⚡ Dev Sim: {isSimActive ? "ON" : "OFF"}
+                      Dev Sim: {isSimActive ? "ON" : "OFF"}
                     </button>
                   </div>
                 );
@@ -1500,7 +1500,7 @@ export default function BybitTradingTerminal() {
                 <div className="space-y-1">
                   <div className="flex justify-between text-[10px] text-[#878996]">
                     <span>Execution Order Type</span>
-                    <span className="text-[#20b26c] font-bold">⚡ Market Order Preferred</span>
+                    <span className="text-[#20b26c] font-bold">Market Order Preferred</span>
                   </div>
                   <div className="grid grid-cols-2 gap-1 p-1 bg-[#121214] rounded border border-[#26282f]">
                     <button

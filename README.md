@@ -17,7 +17,7 @@
 
 ---
 
-## ⚡ Executive Summary
+## Executive Summary
 
 Traditional LLM trading bots suffer from a catastrophic vulnerability: **hallucinatory drift** and **uncontrolled capital drawdown**. When an LLM trades unconstrained, it inevitably generates high-confidence, capital-destructive decisions.
 
@@ -27,7 +27,7 @@ Traditional LLM trading bots suffer from a catastrophic vulnerability: **halluci
 3. **Deterministic Zero-LLM Risk Gate**: 10 hardcoded mathematical invariants that strictly veto LLMs with zero tolerance for hallucination.
 4. **24/7 Decoupled Position Guardian**: Background daemon independently monitoring active positions every 5s, enforcing dynamic TP/SL exits even when Auto-Pilot is turned OFF.
 5. **Complete Order Lifecycle**: Immediate Market orders routing to **Positions**, Limit orders queuing to **Pending** with auto-fill matching, and closed trades transferring to **History**.
-6. **Market Hours Gating & Dev Simulation Mode**: Strict US trading hours enforcement (09:30–16:00 ET) with a **⚡ Dev Sim** toggle for off-hours evaluation.
+6. **Market Hours Gating & Dev Simulation Mode**: Strict US trading hours enforcement (09:30–16:00 ET) with a **Dev Sim** toggle for off-hours evaluation.
 7. **Zero-Lag Terminal with IST Timeline**: High-frequency in-memory TTL caching (6.2ms), memoized canvas rendering, and Indian Standard Time (IST, UTC+5:30) dual-market clock integration.
 8. **Interactive 3D Derivatives & Vol Lab**: WebGL implied volatility surface with Black-Scholes inversion and Markov regime classification.
 9. **Live Quantitative Analytics & Audited Trade Ledger**: Real-time Net P&L, Win Rate %, Profit Factor, and Average Win/Loss tied to real-time broker completions.
@@ -106,12 +106,12 @@ In production trading, operators often pause scanning to prevent new risk. Howev
 
 ### 3. End-to-End Order Lifecycle & Tab Management
 - **Market Orders &rarr; Positions Tab**: Executed immediately at current market price, seamlessly populating the active **Positions Tab** with live unrealized P&L.
-- **Limit Orders &rarr; Pending Tab**: Queued in the **Pending Tab** with live distance indicators. The Guardian automatically fills them when spot price touches the limit, or operators can trigger an instant fill via **⚡ Fill Now**.
+- **Limit Orders &rarr; Pending Tab**: Queued in the **Pending Tab** with live distance indicators. The Guardian automatically fills them when spot price touches the limit, or operators can trigger an instant fill via **Fill Now**.
 - **Completed Trades &rarr; History Tab & Ledger**: Closing a position (manually, via Take-Profit, or via Stop-Loss) instantly transfers the trade to the **History Tab**, driving real-time Quantitative Analytics (Realized Net P&L, Win Rate %, Profit Factor, Average Win/Loss) and an Audited Trade Ledger.
 
 ### 4. Market Hours Gating & Dev Sim Mode
 - **Strict Market Hours Enforcement**: Live trading strictly enforces US market hours (**09:30 – 16:00 ET, Monday–Friday**) on both backend API and frontend terminal.
-- **⚡ Dev Sim Mode**: A dedicated toggle in the trade panel allows developers and hackathon judges to execute paper trades and test order lifecycles outside of regular market hours.
+- **Dev Sim Mode**: A dedicated toggle in the trade panel allows developers and hackathon judges to execute paper trades and test order lifecycles outside of regular market hours.
 
 ### 5. Indian Standard Time (IST) & Dual Clocks
 - **IST Candlestick Timeline**: Candlestick timestamps, time axis, and tooltip badges are automatically formatted in **Indian Standard Time (IST, UTC+5:30)** for intuitive monitoring.

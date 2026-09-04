@@ -91,7 +91,7 @@ Rather than fixed IV thresholds, VolHelix uses a **Hidden Markov Model** to dete
 | 😴 **Low Vol** | < 15 | < 25th | Buy cheap directional plays, calendar spreads | 2.0% NAV |
 | 😐 **Normal** | 15–20 | 25th–50th | Balanced: Iron condors, vertical spreads | 2.5% NAV |
 | 😰 **Elevated** | 20–30 | 50th–80th | Sell rich premium: Credit spreads, short strangles | 2.0% NAV |
-| ⚡ **Squeeze** | BB-detected | Any | Long straddles, debit breakout plays | 1.5% NAV |
+| **Squeeze** | BB-detected | Any | Long straddles, debit breakout plays | 1.5% NAV |
 | 🔥 **Crisis** | > 30 | > 80th | Defensive: protective puts, reduce all, cash | 1.0% NAV |
 
 > **Why this wins:** Dynamically adapting strategy to regime shows quantitative sophistication. Most competitors will use static if/else rules.
