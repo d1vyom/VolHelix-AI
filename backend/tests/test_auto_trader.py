@@ -176,6 +176,7 @@ def test_trigger_cycle_scans_only_target_symbol():
     with patch.object(trader, "_get_trading_client") as mock_tc, \
          patch("backend.engine.auto_trader.AlpacaClient") as mock_mcp, \
          patch.object(trader, "_get_stock_client") as mock_sc, \
+         patch("backend.utils.market_hours.is_market_open", return_value=True), \
          patch.object(trader, "ensure_guardian_running"):
         
         mock_tc.return_value.get_all_positions.return_value = []

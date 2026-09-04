@@ -5,7 +5,7 @@
 [![Next.js 16](https://img.shields.io/badge/Next.js-16.3-black.svg)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
 [![Alpaca API](https://img.shields.io/badge/Broker-Alpaca_Paper_Trading-yellow.svg)](https://alpaca.markets/)
-[![Tests](https://img.shields.io/badge/Tests-47%2F47_Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-50%2F50_Passed-brightgreen.svg)]()
 
 > **Autonomous Institutional Options Trading Swarm with Deterministic Zero-Hallucination Risk Gate & 24/7 Position Guardian** 
 
@@ -25,8 +25,9 @@ Traditional LLM trading bots suffer from a catastrophic vulnerability: **halluci
 1. **Multi-Agent Debate Swarm**: Autonomous specialization with an adversarial Devil's Advocate.
 2. **Master Order Flow Confluence Gate**: Smart Money Concepts (SMC Order Blocks, Fair Value Gaps) combined with institutional Options Gamma Exposure (GEX).
 3. **Deterministic Zero-LLM Risk Gate**: 10 hardcoded mathematical invariants that strictly veto LLMs.
-4. **24/7 Position Guardian**: An autonomous watchdog that guarantees active positions continue to auto-close at dynamic Take-Profit and Stop-Loss levels—**even when Auto-Pilot is turned off**.
+4. **24/7 Position Guardian & Order Lifecycle**: Resting limit order matching, dynamic TP/SL auto-exits, and strict market hours gating.
 5. **Interactive 3D Derivatives & Vol Lab**: WebGL implied volatility surface with Black-Scholes inversion and Markov regime classification.
+6. **Live Quantitative Order History & Audited Trade Ledger**: Instant metrics (Net P&L, Win Rate %, Profit Factor, Avg Win/Loss) tied to real-time broker completions.
 
 ---
 
@@ -133,6 +134,12 @@ The Risk Gate has **ZERO LLM involvement** and cannot be overridden by prompt in
 - **Smart In-Memory TTL Caching**: High-frequency scans leverage in-memory quote and options chain caching (20s TTL), delivering sub-second response times on manual and automated cycles.
 - **Dynamic Structure Expansion & FVG Mitigation**: The Confluence Gate recognizes both active Order Block retests and Fair Value Gap discount support/expansion, ensuring high-probability trades with $R:R \ge 2.0:1$ execute promptly without starvation.
 
+### 9. Institutional Market Hours Gating & End-to-End Order Lifecycle
+- **Strict Market Hours Enforcement**: Regular US trading hours (**09:30 – 16:00 ET, Monday–Friday**) are strictly gated on both backend API and frontend terminal, rejecting off-hours orders unless the **⚡ Dev Sim** toggle is enabled for paper simulation.
+- **Preferred Market Orders & Instant Positions**: Manual trade panel prioritizes immediate execution at current market price, seamlessly routing orders directly into the **Positions Tab**.
+- **Resting Limit Orders & Auto-Fill Lifecycle**: Limit orders queue into the **Pending Tab** with live distance metrics; the `AutoTrader` Guardian automatically fills them when market price touches the limit, or operators can trigger an instant fill via **⚡ Fill Now**.
+- **Completed Trades &rarr; Audited History & Ledger**: Closed trades (manual close, TP hit, or SL safeguard) automatically transfer to the **History Tab**, driving real-time Quantitative Analytics (Realized Net P&L, Win Rate %, Profit Factor, Avg Win/Loss) and a comprehensive Audited Trade Ledger.
+
 ---
 
 ## 💻 Tech Stack
@@ -201,8 +208,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 The test suite covers algorithmic pricing, Kelly position sizing, HMM regime transitions, consensus quorum, and the 24/7 Position Guardian lifecycle:
 
 ```bash
-# Run backend pytest suite (47 / 47 passing)
-.\env\Scripts\python.exe -m pytest backend/tests
+# Run backend pytest suite (50 / 50 passing)
+.\env\Scripts\python.exe -m pytest backend/tests -v
 
 # Run frontend linting & production build
 cd frontend

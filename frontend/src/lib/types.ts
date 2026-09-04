@@ -10,7 +10,8 @@ export type StrategyType =
   | "PROTECTIVE_PUT" 
   | "CASH";
 
-export type TradeStatus = "OPEN" | "CLOSED" | "STOPPED_OUT" | "TAKE_PROFIT" | "FILLED" | string;
+export type TradeStatus = "PENDING" | "OPEN" | "CLOSED" | "STOPPED_OUT" | "TAKE_PROFIT" | "CANCELLED" | "FILLED" | string;
+export type OrderType = "MARKET" | "LIMIT";
 
 export interface OptionLeg {
   action: "BUY" | "SELL";
@@ -47,6 +48,10 @@ export interface TradeProposal {
   regime_at_entry?: string;
   take_profit?: number;
   stop_loss?: number;
+  order_type?: string;
+  limit_price?: number;
+  side?: string;
+  qty?: number;
 }
 
 export interface TradeRecord {
@@ -58,6 +63,26 @@ export interface TradeRecord {
   realized_pnl?: number;
   take_profit_price?: number;
   stop_loss_price?: number;
+  exit_price?: number;
+  current_price?: number;
+  id?: string;
+  symbol?: string;
+  strategy?: string;
+  side?: string;
+  qty?: number;
+  entry_price?: number;
+  timestamp?: string;
+}
+
+export interface MarketClockStatus {
+  is_open: boolean;
+  raw_is_open: boolean;
+  simulation_active: boolean;
+  simulation_override?: boolean;
+  current_time_et: string;
+  next_open?: string;
+  next_close?: string;
+  reason: string;
 }
 
 export interface PortfolioSnapshot {

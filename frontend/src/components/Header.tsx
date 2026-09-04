@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef } from "react";
 import { Clock, Download, Play, Zap, ChevronDown, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getAlpacaAccount, getAlpacaQuote, AlpacaQuote, AlpacaAccount } from "../lib/api";
+import { getAlpacaAccount, getAlpacaQuote, getMarketStatus, AlpacaQuote, AlpacaAccount } from "../lib/api";
+import { MarketClockStatus } from "../lib/types";
 
 const TICKERS = [
   { symbol: "SPY", name: "S&P 500 ETF", market: "USDT-OPT" },
@@ -23,6 +24,7 @@ export function Header() {
 
   const [timeStr, setTimeStr] = useState("");
   const [isMarketOpen, setIsMarketOpen] = useState(false);
+  const [marketClock, setMarketClock] = useState<MarketClockStatus | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
@@ -82,13 +84,15 @@ export function Header() {
 
     const fetchMarketInfo = async () => {
       try {
-        const [q, acc] = await Promise.all([
+        const [q, acc, mkt] = await Promise.all([
           getAlpacaQuote(selectedTicker),
           getAlpacaAccount(),
+          getMarketStatus(),
         ]);
         if (!isMounted) return;
         setQuote(q);
         setAccount(acc);
+        setMarketClock(mkt);
       } catch {
         // ignore
       }
@@ -253,10 +257,10 @@ export function Header() {
         <div className="hidden xl:flex items-center gap-1.5 text-[11px] font-mono text-[#878996] border-l border-[#26282f] pl-3">
           <Clock className="w-3 h-3 text-[#f7a600]" />
           <span className="text-[#f5f5f5]">{timeStr || "14:30:00 ET"}</span>
-          <span className={`px-1 py-0.2 rounded text-[9px] font-bold ${
-            isMarketOpen ? "bg-[#20b26c]/15 text-[#20b26c]" : "bg-[#26282f] text-[#878996]"
+          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+            (marketClock?.is_open || isMarketOpen) ? "bg-[#20b26c]/15 text-[#20b26c]" : "bg-[#26282f] text-[#878996]"
           }`}>
-            {isMarketOpen ? "OPEN" : "CLOSED"}
+            {(marketClock?.is_open || isMarketOpen) ? (marketClock?.simulation_override ? "SIM OPEN" : "OPEN") : "CLOSED"}
           </span>
         </div>
       </div>

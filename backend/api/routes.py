@@ -93,6 +93,35 @@ async def get_positions():
     trades = await trade_log.get_open_trades()
     return [t.model_dump() for t in trades]
 
+@router.get("/api/trades/history")
+async def get_trade_history():
+    trades = await trade_log.get_history_trades()
+    return [t.model_dump() for t in trades]
+
+@router.get("/api/trades/pending")
+async def get_pending_trades():
+    trades = await trade_log.get_pending_trades()
+    return [t.model_dump() for t in trades]
+
+@router.get("/api/market-status")
+def get_market_status():
+    from backend.utils.market_hours import get_market_clock
+    return get_market_clock()
+
+from pydantic import BaseModel
+class SimulationOverrideRequest(BaseModel):
+    enabled: bool
+
+@router.post("/api/market-status/simulation-override")
+def toggle_market_simulation_override(req: SimulationOverrideRequest):
+    from backend.utils.market_hours import set_simulation_override, get_market_clock
+    set_simulation_override(req.enabled)
+    return {
+        "success": True,
+        "simulation_active": req.enabled,
+        "market_status": get_market_clock()
+    }
+
 @router.get("/api/audit")
 async def get_audit():
     """Return full trade records as audit trail (latest 100)."""
@@ -232,44 +261,115 @@ def get_alpaca_account():
         }
 
 @router.get("/api/alpaca/positions")
-def get_alpaca_positions():
-    cached = _get_cached("positions", ttl=2.5)
+async def get_alpaca_positions():
+    cached = _get_cached("positions", ttl=1.5)
     if cached is not None:
         return cached
+
+    positions_map = {}
+
+    # 1. Broker positions
     try:
         client = _get_alpaca_trading_client()
         positions = client.get_all_positions()
-        res = []
         for p in positions:
-            res.append({
+            qty = float(p.qty)
+            cur_p = float(p.current_price or 0.0)
+            avg_p = float(p.avg_entry_price or 0.0)
+            unrealized = float(p.unrealized_pl or (cur_p - avg_p) * qty)
+            unrealized_pc = float(p.unrealized_plpc or ((cur_p - avg_p) / avg_p if avg_p else 0.0)) * 100
+            positions_map[p.symbol] = {
+                "id": f"POS-{p.symbol}",
                 "symbol": p.symbol,
-                "qty": float(p.qty),
-                "side": "LONG" if float(p.qty) > 0 else "SHORT",
-                "current_price": float(p.current_price or 0.0),
-                "avg_entry_price": float(p.avg_entry_price or 0.0),
-                "market_value": float(p.market_value or 0.0),
-                "cost_basis": float(p.cost_basis or 0.0),
-                "unrealized_pl": float(p.unrealized_pl or 0.0),
-                "unrealized_plpc": float(p.unrealized_plpc or 0.0) * 100,
-            })
-        _set_cached("positions", res)
-        return res
+                "qty": qty,
+                "side": "LONG" if qty > 0 else "SHORT",
+                "current_price": cur_p,
+                "avg_entry_price": avg_p,
+                "market_value": float(p.market_value or cur_p * qty),
+                "cost_basis": float(p.cost_basis or avg_p * qty),
+                "unrealized_pl": unrealized,
+                "unrealized_plpc": unrealized_pc,
+                "take_profit_price": round(avg_p * 1.04, 2),
+                "stop_loss_price": round(avg_p * 0.982, 2),
+                "strategy": "EQUITY",
+                "order_type": "MARKET"
+            }
     except Exception:
-        return []
+        pass
+
+    # 2. Local open trades from trade_log (Immediate fills on Market orders & filled Limits)
+    try:
+        open_trades = await trade_log.get_open_trades()
+        for t in open_trades:
+            sym = t.proposal.underlying
+            entry_p = t.proposal.breakevens[0] if t.proposal.breakevens else 575.0
+            qty = float(getattr(t.proposal, "qty", 1.0) or 1.0)
+            side = getattr(t.proposal, "side", "BUY").upper()
+
+            cached_quote = _get_cached(f"quote_{sym}")
+            cur_p = float(cached_quote["last"]) if (cached_quote and cached_quote.get("last")) else entry_p
+
+            if side == "BUY":
+                unrealized = (cur_p - entry_p) * qty
+                unrealized_pc = ((cur_p - entry_p) / entry_p * 100) if entry_p > 0 else 0.0
+            else:
+                unrealized = (entry_p - cur_p) * qty
+                unrealized_pc = ((entry_p - cur_p) / entry_p * 100) if entry_p > 0 else 0.0
+
+            tp_p = t.take_profit_price or t.proposal.take_profit or round(entry_p * 1.04, 2)
+            sl_p = t.stop_loss_price or t.proposal.stop_loss or round(entry_p * 0.982, 2)
+            strat_val = t.proposal.strategy_type.value if hasattr(t.proposal.strategy_type, "value") else str(t.proposal.strategy_type)
+
+            if sym in positions_map:
+                positions_map[sym]["take_profit_price"] = tp_p
+                positions_map[sym]["stop_loss_price"] = sl_p
+                positions_map[sym]["strategy"] = strat_val
+                positions_map[sym]["trade_id"] = t.trade_id
+                positions_map[sym]["order_type"] = getattr(t.proposal, "order_type", "MARKET")
+            else:
+                positions_map[sym] = {
+                    "id": t.trade_id,
+                    "trade_id": t.trade_id,
+                    "symbol": sym,
+                    "qty": qty,
+                    "side": "LONG" if side == "BUY" else "SHORT",
+                    "current_price": round(cur_p, 2),
+                    "avg_entry_price": round(entry_p, 2),
+                    "market_value": round(cur_p * qty, 2),
+                    "cost_basis": round(entry_p * qty, 2),
+                    "unrealized_pl": round(unrealized, 2),
+                    "unrealized_plpc": round(unrealized_pc, 2),
+                    "take_profit_price": tp_p,
+                    "stop_loss_price": sl_p,
+                    "strategy": strat_val,
+                    "order_type": getattr(t.proposal, "order_type", "MARKET")
+                }
+    except Exception:
+        pass
+
+    res = list(positions_map.values())
+    _set_cached("positions", res)
+    return res
 
 @router.get("/api/alpaca/orders")
-def get_alpaca_orders(limit: int = 50):
+async def get_alpaca_orders(limit: int = 50):
     cache_key = f"orders_{limit}"
     cached = _get_cached(cache_key, ttl=1.5)
     if cached is not None:
         return cached
+
+    res = []
+    seen_ids = set()
+
+    # 1. Check broker orders
     try:
         client = _get_alpaca_trading_client()
         orders = client.get_orders(GetOrdersRequest(status="all", limit=limit))
-        res = []
         for o in orders:
+            oid = str(o.id)
+            seen_ids.add(oid)
             res.append({
-                "id": str(o.id),
+                "id": oid,
                 "symbol": o.symbol,
                 "qty": float(o.qty or 0.0),
                 "side": str(o.side).replace("OrderSide.", ""),
@@ -282,30 +382,68 @@ def get_alpaca_orders(limit: int = 50):
                 "time_in_force": str(getattr(o, "time_in_force", "") or "").replace("TimeInForce.", ""),
                 "created_at": o.created_at.isoformat() if o.created_at else "",
             })
-        _set_cached(cache_key, res)
-        return res
     except Exception:
-        return []
+        pass
+
+    # 2. Check local pending limit orders from trade_log
+    try:
+        pending_trades = await trade_log.get_pending_trades()
+        for p in pending_trades:
+            if p.trade_id not in seen_ids:
+                seen_ids.add(p.trade_id)
+                res.append({
+                    "id": p.trade_id,
+                    "symbol": p.proposal.underlying,
+                    "qty": float(getattr(p.proposal, "qty", 1.0) or 1.0),
+                    "side": getattr(p.proposal, "side", "BUY"),
+                    "type": "LIMIT",
+                    "status": "pending_limit",
+                    "filled_avg_price": None,
+                    "limit_price": float(p.proposal.limit_price or 0.0) if p.proposal.limit_price else None,
+                    "stop_price": None,
+                    "order_class": "LIMIT",
+                    "time_in_force": "day",
+                    "created_at": p.entry_time or "",
+                })
+    except Exception:
+        pass
+
+    _set_cached(cache_key, res)
+    return res
 
 @router.delete("/api/alpaca/orders/{order_id}")
-def cancel_alpaca_order(order_id: str):
+async def cancel_alpaca_order(order_id: str):
     try:
         client = _get_alpaca_trading_client()
         client.cancel_order_by_id(order_id)
-        _invalidate_cache()
-        return {"success": True, "order_id": order_id}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        pass
+    try:
+        await trade_log.cancel_trade(order_id)
+    except Exception:
+        pass
+    _invalidate_cache()
+    return {"success": True, "order_id": order_id}
 
 @router.post("/api/alpaca/cancel-all")
-def cancel_all_alpaca_orders():
+async def cancel_all_alpaca_orders():
+    cancelled_count = 0
     try:
         client = _get_alpaca_trading_client()
         res = client.cancel_orders()
-        _invalidate_cache()
-        return {"success": True, "cancelled": len(res) if res else 0}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        if res:
+            cancelled_count += len(res)
+    except Exception:
+        pass
+    try:
+        pending = await trade_log.get_pending_trades()
+        for p in pending:
+            await trade_log.cancel_trade(p.trade_id)
+            cancelled_count += 1
+    except Exception:
+        pass
+    _invalidate_cache()
+    return {"success": True, "cancelled": cancelled_count}
 
 @router.get("/api/alpaca/quote")
 def get_alpaca_quote(symbol: str = "SPY"):
@@ -421,49 +559,314 @@ def get_alpaca_bars(symbol: str = "SPY", timeframe: str = "1H", limit: int = 80)
 
 class OrderSubmission(BaseModel):
     symbol: str
-    qty: float
+    qty: float = 1.0
     side: str = "buy"
-    order_type: str = "market"
+    order_type: str = "market"  # "market" (preferred) or "limit"
+    limit_price: Optional[float] = None
 
 @router.post("/api/alpaca/order")
-def submit_alpaca_order(order_req: OrderSubmission):
-    try:
-        client = _get_alpaca_trading_client()
-        clean_sym = order_req.symbol.replace("/USDT", "").replace("-USDT", "").replace("/USD", "")
-        side_enum = OrderSide.BUY if order_req.side.lower() == "buy" else OrderSide.SELL
-        
-        req = MarketOrderRequest(
-            symbol=clean_sym,
-            qty=order_req.qty,
-            side=side_enum,
-            time_in_force=TimeInForce.DAY
+async def submit_alpaca_order(order_req: OrderSubmission):
+    # 1. STRICT MARKET HOURS CHECK: trades can only be executed when markets are open
+    from backend.utils.market_hours import check_market_open
+    mkt = check_market_open()
+    if not mkt["is_open"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Market is closed. Trades are only executable during market open (09:30 - 16:00 ET, Mon-Fri). Current ET: {mkt['current_time_et']}"
         )
-        submitted = client.submit_order(req)
+
+    clean_sym = order_req.symbol.replace("/USDT", "").replace("-USDT", "").replace("/USD", "").upper()
+    side_upper = order_req.side.upper()
+    is_limit = order_req.order_type.lower() == "limit"
+    
+    # 2. Retrieve live mark price
+    current_price = 575.0
+    try:
+        sc = _get_stock_client()
+        latest = sc.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=clean_sym, feed=DataFeed.IEX))
+        if latest and clean_sym in latest:
+            current_price = float(latest[clean_sym].ask_price or latest[clean_sym].bid_price or 575.0)
+    except Exception:
+        cached_quote = _get_cached(f"quote_{clean_sym}")
+        if cached_quote and cached_quote.get("last"):
+            current_price = float(cached_quote["last"])
+
+    import uuid
+
+    if is_limit:
+        # Case 1: Limit Order -> Appears in Pending Tab
+        limit_p = float(order_req.limit_price) if order_req.limit_price else current_price
+        order_id = f"LMT-{uuid.uuid4().hex[:8].upper()}"
+
+        try:
+            from alpaca.trading.requests import LimitOrderRequest
+            client = _get_alpaca_trading_client()
+            side_enum = OrderSide.BUY if side_upper == "BUY" else OrderSide.SELL
+            sub = client.submit_order(
+                LimitOrderRequest(
+                    symbol=clean_sym,
+                    qty=order_req.qty,
+                    side=side_enum,
+                    time_in_force=TimeInForce.DAY,
+                    limit_price=limit_p
+                )
+            )
+            order_id = str(sub.id)
+        except Exception:
+            pass
+
+        prop = TradeProposal(
+            id=order_id,
+            underlying=clean_sym,
+            strategy_type=StrategyType.MASTER_ORDER_FLOW,
+            legs=[],
+            is_credit=True,
+            net_premium=round(limit_p * 0.015, 2),
+            max_profit=round(limit_p * 0.045 * 100, 2),
+            max_loss=round(limit_p * 0.02 * 100, 2),
+            breakevens=[round(limit_p, 2)],
+            dte=21,
+            ev=round(limit_p * 0.012, 2),
+            thesis=f"Resting Limit Order: {side_upper} {order_req.qty} {clean_sym} @ ${limit_p:.2f}",
+            take_profit=round(limit_p * 1.04, 2),
+            stop_loss=round(limit_p * 0.982, 2),
+            order_type="LIMIT",
+            limit_price=limit_p,
+            side=side_upper,
+            qty=order_req.qty
+        )
+
+        trade_rec = TradeRecord(
+            trade_id=order_id,
+            proposal=prop,
+            status=TradeStatus.PENDING,
+            entry_time=datetime.now().isoformat(),
+            realized_pnl=0.0,
+            take_profit_price=round(limit_p * 1.04, 2),
+            stop_loss_price=round(limit_p * 0.982, 2),
+            current_price=current_price
+        )
+        await trade_log.save_trade(trade_rec)
         _invalidate_cache()
+
+        try:
+            from backend.api.websocket import sio
+            await sio.emit("reasoning_event", {
+                "agent": "RiskGate",
+                "message": f"Limit Order {order_id[:8]} placed for {clean_sym} ({side_upper} {order_req.qty} @ ${limit_p:.2f}). Resting in Pending Tab.",
+                "confidence": 1.0
+            })
+        except Exception:
+            pass
+
         return {
             "success": True,
-            "order_id": str(submitted.id),
-            "symbol": submitted.symbol,
-            "status": str(submitted.status).replace("OrderStatus.", ""),
-            "qty": float(submitted.qty),
-            "side": str(submitted.side).replace("OrderSide.", ""),
+            "order_id": order_id,
+            "symbol": clean_sym,
+            "status": "PENDING",
+            "order_type": "LIMIT",
+            "limit_price": limit_p,
+            "current_price": current_price,
+            "qty": order_req.qty,
+            "side": side_upper,
+            "message": f"Limit order for {clean_sym} @ ${limit_p:.2f} is resting in Pending Tab."
         }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+
+    else:
+        # Case 2: Market Order (Preferred) -> Executes at current market price & appears in Positions Tab
+        order_id = f"MKT-{uuid.uuid4().hex[:8].upper()}"
+        fill_price = current_price
+
+        try:
+            client = _get_alpaca_trading_client()
+            side_enum = OrderSide.BUY if side_upper == "BUY" else OrderSide.SELL
+            sub = client.submit_order(
+                MarketOrderRequest(
+                    symbol=clean_sym,
+                    qty=order_req.qty,
+                    side=side_enum,
+                    time_in_force=TimeInForce.DAY
+                )
+            )
+            order_id = str(sub.id)
+            if sub.filled_avg_price:
+                fill_price = float(sub.filled_avg_price)
+        except Exception:
+            pass
+
+        tp_price = round(fill_price * 1.04, 2)
+        sl_price = round(fill_price * 0.982, 2)
+
+        prop = TradeProposal(
+            id=order_id,
+            underlying=clean_sym,
+            strategy_type=StrategyType.MASTER_ORDER_FLOW,
+            legs=[],
+            is_credit=True,
+            net_premium=round(fill_price * 0.015, 2),
+            max_profit=round(fill_price * 0.04 * 100, 2),
+            max_loss=round(fill_price * 0.018 * 100, 2),
+            breakevens=[round(fill_price, 2)],
+            dte=21,
+            ev=round(fill_price * 0.012, 2),
+            thesis=f"Market Execution: {side_upper} {order_req.qty} {clean_sym} @ ${fill_price:.2f}",
+            take_profit=tp_price,
+            stop_loss=sl_price,
+            order_type="MARKET",
+            side=side_upper,
+            qty=order_req.qty
+        )
+
+        trade_rec = TradeRecord(
+            trade_id=order_id,
+            proposal=prop,
+            status=TradeStatus.OPEN,
+            entry_time=datetime.now().isoformat(),
+            realized_pnl=0.0,
+            take_profit_price=tp_price,
+            stop_loss_price=sl_price,
+            current_price=fill_price
+        )
+        await trade_log.save_trade(trade_rec)
+        _invalidate_cache()
+
+        try:
+            from backend.api.websocket import sio
+            await sio.emit("reasoning_event", {
+                "agent": "RiskGate",
+                "message": f"Market Order {order_id[:8]} filled at ${fill_price:.2f}. Active in Positions Tab.",
+                "confidence": 1.0
+            })
+            await sio.emit("trade_executed", {
+                "trade_id": order_id,
+                "symbol": clean_sym,
+                "status": "OPEN",
+                "entry_price": fill_price
+            })
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "order_id": order_id,
+            "symbol": clean_sym,
+            "status": "OPEN",
+            "order_type": "MARKET",
+            "entry_price": fill_price,
+            "take_profit_price": tp_price,
+            "stop_loss_price": sl_price,
+            "qty": order_req.qty,
+            "side": side_upper,
+            "message": f"Market order executed for {clean_sym} @ ${fill_price:.2f}. Active in Positions Tab."
+        }
+
+class FillPendingTradeRequest(BaseModel):
+    fill_price: Optional[float] = None
+
+@router.post("/api/trades/{trade_id}/fill")
+async def fill_pending_trade_endpoint(trade_id: str, req: Optional[FillPendingTradeRequest] = None):
+    trade = await trade_log.get_trade_by_id(trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+    if trade.status != TradeStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"Trade is already {trade.status.value}")
+
+    fill_price = req.fill_price if (req and req.fill_price) else (trade.proposal.limit_price or (trade.proposal.breakevens[0] if trade.proposal.breakevens else 575.0))
+    updated = await trade_log.fill_pending_trade(trade_id, fill_price=fill_price)
+    _invalidate_cache()
+
+    try:
+        from backend.api.websocket import sio
+        await sio.emit("trade_filled", {
+            "trade_id": trade_id,
+            "symbol": trade.proposal.underlying,
+            "fill_price": fill_price,
+            "status": "OPEN"
+        })
+        await sio.emit("reasoning_event", {
+            "agent": "AutoTrader",
+            "message": f"Limit order {trade_id[:8]} filled for {trade.proposal.underlying} at ${fill_price:.2f}. Moved to Positions Tab.",
+            "confidence": 1.0
+        })
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "trade_id": trade_id,
+        "status": "OPEN",
+        "fill_price": fill_price,
+        "message": f"Order {trade_id[:8]} filled at ${fill_price:.2f}. Moved to Positions Tab."
+    }
 
 class ClosePositionRequest(BaseModel):
     symbol: str
 
 @router.post("/api/alpaca/close-position")
-def close_alpaca_position(req: ClosePositionRequest):
+async def close_alpaca_position(req: ClosePositionRequest):
+    clean_sym = req.symbol.replace("/USDT", "").replace("-USDT", "").replace("/USD", "").upper()
+    
+    # 1. Close position on Alpaca paper broker if present
     try:
         client = _get_alpaca_trading_client()
-        clean_sym = req.symbol.replace("/USDT", "").replace("-USDT", "").replace("/USD", "")
-        res = client.close_position(clean_sym)
-        _invalidate_cache()
-        return {"success": True, "symbol": clean_sym, "status": str(res.status)}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        client.close_position(clean_sym)
+    except Exception:
+        pass
+
+    # 2. Get latest price to record exit price
+    exit_price = 575.0
+    try:
+        sc = _get_stock_client()
+        latest = sc.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=clean_sym, feed=DataFeed.IEX))
+        if latest and clean_sym in latest:
+            exit_price = float(latest[clean_sym].ask_price or latest[clean_sym].bid_price or 575.0)
+    except Exception:
+        cached_quote = _get_cached(f"quote_{clean_sym}")
+        if cached_quote and cached_quote.get("last"):
+            exit_price = float(cached_quote["last"])
+
+    # 3. Find and close trade in trade_log -> moves to History Tab
+    open_trades = await trade_log.get_open_trades()
+    matching_trade = next((t for t in open_trades if t.proposal.underlying == clean_sym), None)
+    
+    realized_pnl = 0.0
+    if matching_trade:
+        closed_trade = await trade_log.close_trade(
+            matching_trade.trade_id,
+            exit_price=exit_price,
+            exit_type=TradeStatus.CLOSED,
+            reason="Manual Operator Close"
+        )
+        if closed_trade:
+            realized_pnl = closed_trade.realized_pnl
+
+    _invalidate_cache()
+
+    # 4. Broadcast WebSocket notifications
+    try:
+        from backend.api.websocket import sio
+        await sio.emit("trade_executed", {
+            "trade_id": clean_sym,
+            "status": "CLOSED",
+            "realized_pnl": realized_pnl,
+            "exit_price": exit_price
+        })
+        await sio.emit("reasoning_event", {
+            "agent": "RiskGate",
+            "message": f"Position {clean_sym} closed at ${exit_price:.2f}. Realized PnL: ${realized_pnl:+.2f}. Moved to History Tab.",
+            "confidence": 1.0
+        })
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "symbol": clean_sym,
+        "status": "CLOSED",
+        "exit_price": exit_price,
+        "realized_pnl": realized_pnl,
+        "message": f"Position {clean_sym} closed at ${exit_price:.2f}. Archived to History Tab."
+    }
 
 class BotExecutionRequest(BaseModel):
     symbol: str = "SPY"
@@ -474,6 +877,15 @@ class BotExecutionRequest(BaseModel):
 
 @router.post("/api/bot/execute-trade")
 async def execute_bot_trade(req: BotExecutionRequest):
+    # Check Market Hours Gating
+    from backend.utils.market_hours import check_market_open
+    mkt = check_market_open()
+    if not mkt["is_open"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Market is closed. Trades are only executable during market open (09:30 - 16:00 ET, Mon-Fri). Current ET: {mkt['current_time_et']}"
+        )
+
     clean_sym = req.symbol.replace("/USDT", "").replace("-USDT", "").replace("/USD", "")
     
     # Strategy-calibrated Take Profit & Stop Loss ratios

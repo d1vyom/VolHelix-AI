@@ -17,7 +17,13 @@ import {
   Clock, 
   XCircle, 
   Trash2, 
-  AlertCircle 
+  AlertCircle,
+  Lock,
+  CheckCircle2,
+  DollarSign,
+  Award,
+  Layers,
+  Zap
 } from "lucide-react";
 import {
   getAlpacaAccount,
@@ -29,6 +35,10 @@ import {
   closeAlpacaPosition,
   cancelAlpacaOrder,
   cancelAllAlpacaOrders,
+  fillPendingTrade,
+  getMarketStatus,
+  setMarketSimulationOverride,
+  getTradeHistory,
   executeBotTrade,
   getOrderFlowAnalytics,
   OrderFlowData,
@@ -43,6 +53,7 @@ import {
   AlpacaQuote,
   AlpacaBar
 } from "../lib/api";
+import { MarketClockStatus, TradeRecord } from "../lib/types";
 
 interface AgentLog {
   id: string;
@@ -62,6 +73,8 @@ export default function BybitTradingTerminal() {
   const [chartType, setChartType] = useState<"CANDLE" | "LINE">("CANDLE");
   const [tradeMode, setTradeMode] = useState<"BOT" | "MANUAL">("BOT");
   const [orderSide, setOrderSide] = useState<"BUY" | "SELL">("BUY");
+  const [orderType, setOrderType] = useState<"market" | "limit">("market");
+  const [limitPrice, setLimitPrice] = useState<number>(575.0);
   const [orderQty, setOrderQty] = useState(1);
   const [selectedStrategy, setSelectedStrategy] = useState("MASTER_ORDER_FLOW");
   const [orderFlow, setOrderFlow] = useState<OrderFlowData | null>(null);
@@ -70,6 +83,9 @@ export default function BybitTradingTerminal() {
   const [kellyPercent, setKellyPercent] = useState(80);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [marketClock, setMarketClock] = useState<MarketClockStatus | null>(null);
+  const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>([]);
+  const [isFillingOrder, setIsFillingOrder] = useState<string | null>(null);
 
   const [account, setAccount] = useState<AlpacaAccount>({
     equity: 100000.0,
@@ -97,6 +113,42 @@ export default function BybitTradingTerminal() {
       return s !== "held";
     });
   }, [pendingOrders]);
+
+  // Computed closed trades for history & ledger analytics
+  const closedTrades = useMemo(() => {
+    return tradeHistory.filter((t) => ["closed", "cancelled"].includes((t.status || "").toLowerCase()));
+  }, [tradeHistory]);
+
+  const historyMetrics = useMemo(() => {
+    const total = closedTrades.length;
+    if (total === 0) {
+      return { total: 0, netPnl: 0, winRate: 0, profitFactor: 0, wins: 0, losses: 0, avgWin: 0, avgLoss: 0 };
+    }
+    let wins = 0;
+    let losses = 0;
+    let grossWin = 0;
+    let grossLoss = 0;
+    let netPnl = 0;
+
+    closedTrades.forEach((t) => {
+      const pnl = t.realized_pnl ?? 0;
+      netPnl += pnl;
+      if (pnl > 0) {
+        wins++;
+        grossWin += pnl;
+      } else if (pnl < 0) {
+        losses++;
+        grossLoss += Math.abs(pnl);
+      }
+    });
+
+    const winRate = total > 0 ? (wins / total) * 100 : 0;
+    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? 99.9 : 0;
+    const avgWin = wins > 0 ? grossWin / wins : 0;
+    const avgLoss = losses > 0 ? grossLoss / losses : 0;
+
+    return { total, netPnl, winRate, profitFactor, wins, losses, avgWin, avgLoss };
+  }, [closedTrades]);
   const [quote, setQuote] = useState<AlpacaQuote>({
     symbol: "SPY",
     bid: 574.80,
@@ -134,14 +186,18 @@ export default function BybitTradingTerminal() {
 
   const refreshAccountAndPositions = useCallback(async () => {
     try {
-      const [acc, pos, ord] = await Promise.all([
+      const [acc, pos, ord, hist, mkt] = await Promise.all([
         getAlpacaAccount(),
         getAlpacaPositions(),
         getAlpacaOrders(),
+        getTradeHistory(),
+        getMarketStatus(),
       ]);
       setAccount(acc);
       setPositions(pos);
       setOrders(ord);
+      setTradeHistory(hist);
+      setMarketClock(mkt);
     } catch {
       // ignore
     }
@@ -309,21 +365,71 @@ export default function BybitTradingTerminal() {
   };
 
   const handleManualOrder = async () => {
+    // Market hours gating check
+    if (!marketClock?.is_open && !marketClock?.simulation_override) {
+      showToast("Market Closed! Trades only executable when US markets are open (09:30-16:00 ET). Enable Dev Sim to test.");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const cleanSym = selectedTicker;
-      const res = await submitAlpacaOrder(cleanSym, orderQty, orderSide.toLowerCase() as "buy" | "sell");
+      const targetLimitPrice = orderType === "limit" ? limitPrice : undefined;
+      const res = await submitAlpacaOrder(
+        cleanSym,
+        orderQty,
+        orderSide.toLowerCase() as "buy" | "sell",
+        orderType,
+        targetLimitPrice
+      );
       if (res && res.success) {
-        showToast(`Order Placed on Alpaca! Status: ${res.status}`);
+        if (orderType === "market") {
+          showToast(`Market Order Executed @ $${quote.last?.toFixed(2) || "market"}! Moved to Positions.`);
+          setActiveTab("positions");
+        } else {
+          showToast(`Limit Order Placed @ $${targetLimitPrice?.toFixed(2)}! Moved to Pending Tab.`);
+          setActiveTab("pending");
+        }
         await refreshAccountAndPositions();
       } else {
-        showToast(res.error || "Order Sent to Alpaca Paper");
+        showToast(res.error || "Order rejected by broker");
+        await refreshAccountAndPositions();
+      }
+    } catch (e: any) {
+      showToast(e?.message || "Order submission failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleFillPending = async (orderId: string, fillPrice?: number) => {
+    setIsFillingOrder(orderId);
+    try {
+      const targetPrice = fillPrice || quote.last || 575.0;
+      const res = await fillPendingTrade(orderId, targetPrice);
+      if (res && res.success) {
+        showToast(`Order ${orderId.slice(0, 8)} Filled @ $${targetPrice.toFixed(2)}! Moved to Positions.`);
+        await refreshAccountAndPositions();
+        setActiveTab("positions");
+      } else {
+        showToast(res.error || "Fill failed");
+      }
+    } catch {
+      showToast("Error filling pending order");
+    } finally {
+      setIsFillingOrder(null);
+    }
+  };
+
+  const handleToggleSimulationOverride = async (enable: boolean) => {
+    try {
+      const res = await setMarketSimulationOverride(enable);
+      if (res && res.success) {
+        showToast(enable ? "Market Simulation Override Enabled (Trading Allowed)" : "Market Simulation Override Disabled (Strict Hours)");
         await refreshAccountAndPositions();
       }
     } catch {
-      showToast("Order submitted");
-    } finally {
-      setIsSubmitting(false);
+      showToast("Failed to toggle simulation mode");
     }
   };
 
@@ -353,6 +459,11 @@ export default function BybitTradingTerminal() {
   }, [selectedStrategy, midPrice]);
 
   const handleBotTrade = async () => {
+    if (!marketClock?.is_open && !marketClock?.simulation_override) {
+      showToast("Market Closed! Trades only executable when US markets are open (09:30-16:00 ET). Enable Dev Sim to test.");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const cleanSym = selectedTicker;
@@ -693,7 +804,8 @@ export default function BybitTradingTerminal() {
                 {[
                   { key: "positions", label: `Positions (${positions.length})` },
                   { key: "pending", label: `Pending Orders (${pendingOrders.length})` },
-                  { key: "orders", label: `Order History (${orders.length})` },
+                  { key: "history", label: `History & Ledger (${closedTrades.length})` },
+                  { key: "orders", label: `Broker Orders (${orders.length})` },
                   { key: "debate", label: "Agent Debate Stream" },
                   { key: "riskgate", label: "Deterministic Risk Gate (10/10)" },
                 ].map((t) => (
@@ -733,102 +845,24 @@ export default function BybitTradingTerminal() {
               {activeTab === "positions" && (
                 <div>
                   {positions.length === 0 ? (
-                    pendingParentTrades.length > 0 ? (
-                      <div className="space-y-3">
-                        <div className="p-3 rounded-lg bg-[#1c1d22] border border-[#f7a600]/40 flex items-center justify-between shadow-md">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-[#f7a600]/15 flex items-center justify-center text-[#f7a600] shrink-0">
-                              <Clock className="w-4 h-4 animate-spin" />
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <p className="font-bold text-xs text-[#f5f5f5]">
-                                  {pendingParentTrades.length} Trade{pendingParentTrades.length > 1 ? "s" : ""} Executed &mdash; Pending Market Fill
-                                </p>
-                                <span className="px-1.5 py-0.5 rounded bg-[#f7a600]/20 text-[#f7a600] text-[10px] font-bold">
-                                  QUEUED ON ALPACA
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-[#878996] mt-0.5">
-                                US stock market is closed. Orders are accepted on Alpaca paper broker and queued for 9:30 AM EDT open matching.
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => setActiveTab("pending")}
-                            className="px-3 py-1.5 rounded bg-[#f7a600] text-[#0d0e12] hover:bg-[#ffb726] text-xs font-bold transition-colors cursor-pointer shrink-0"
-                          >
-                            View Pending Orders ({pendingOrders.length}) &rarr;
-                          </button>
-                        </div>
-
-                        <div className="overflow-x-auto">
-                          <div className="text-[10px] font-bold text-[#878996] uppercase mb-1.5 flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#f7a600]" />
-                            <span>Executed Orders Queued to Become Positions at Open</span>
-                          </div>
-                          <table className="w-full text-left text-xs">
-                            <thead>
-                              <tr className="border-b border-[#26282f] text-[#5e6673] uppercase text-[10px]">
-                                <th className="py-2 px-2">Symbol</th>
-                                <th className="py-2 px-2">Side</th>
-                                <th className="py-2 px-2 text-right">Qty</th>
-                                <th className="py-2 px-2 text-right">Order Type</th>
-                                <th className="py-2 px-2 text-right">Est. Price</th>
-                                <th className="py-2 px-2 text-right">Status</th>
-                                <th className="py-2 px-2 text-right">Time</th>
-                                <th className="py-2 px-2 text-right">Action</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {pendingParentTrades.map((ord) => (
-                                <tr key={ord.id} className="border-b border-[#26282f]/50 hover:bg-[#1c1d22]/50">
-                                  <td className="py-2.5 px-2 font-bold text-[#f5f5f5] flex items-center gap-1.5">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-[#f7a600] animate-pulse" />
-                                    {ord.symbol}
-                                  </td>
-                                  <td className="py-2.5 px-2">
-                                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
-                                      ord.side === "BUY" ? "bg-[#20b26c]/15 text-[#20b26c]" : "bg-[#ef454a]/15 text-[#ef454a]"
-                                    }`}>
-                                      {ord.side}
-                                    </span>
-                                  </td>
-                                  <td className="py-2.5 px-2 text-right text-[#f5f5f5]">{ord.qty}</td>
-                                  <td className="py-2.5 px-2 text-right text-[#878996]">
-                                    {ord.order_class ? `${ord.order_class.toUpperCase()} BRACKET` : (ord.type || "MARKET")}
-                                  </td>
-                                  <td className="py-2.5 px-2 text-right text-[#f5f5f5]">
-                                    {ord.limit_price ? `$${ord.limit_price.toFixed(2)}` : (ord.filled_avg_price ? `$${ord.filled_avg_price.toFixed(2)}` : "Market")}
-                                  </td>
-                                  <td className="py-2.5 px-2 text-right">
-                                    <span className="px-1.5 py-0.2 rounded bg-[#f7a600]/15 text-[#f7a600] text-[10px] font-bold">
-                                      QUEUED (MARKET OPEN)
-                                    </span>
-                                  </td>
-                                  <td className="py-2.5 px-2 text-right text-[#5e6673] text-[11px]">
-                                    {ord.created_at ? new Date(ord.created_at).toLocaleTimeString() : "-"}
-                                  </td>
-                                  <td className="py-2.5 px-2 text-right">
-                                    <button
-                                      onClick={() => handleCancelOrder(ord.id)}
-                                      className="px-2 py-0.5 rounded bg-[#26282f] hover:bg-[#ef454a]/20 hover:text-[#ef454a] text-[#878996] text-[10px] transition-colors cursor-pointer"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                    <div className="text-center py-12 text-[#878996]">
+                      <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-[#1c1d22] border border-[#26282f] flex items-center justify-center text-[#f7a600]">
+                        <Layers className="w-6 h-6" />
                       </div>
-                    ) : (
-                      <div className="text-center py-10 text-[#878996]">
-                        <p className="font-semibold text-[#f5f5f5]">No Active or Pending Positions</p>
-                        <p className="text-[11px] mt-1">Execute a trade from the panel on the right or trigger Auto-Pilot.</p>
-                      </div>
-                    )
+                      <p className="font-bold text-sm text-[#f5f5f5]">No Active Open Positions</p>
+                      <p className="text-xs mt-1 text-[#878996] max-w-md mx-auto">
+                        Execute a <strong className="text-[#20b26c]">Market Order (Preferred)</strong> for instant placement at current price, or fill a resting Limit order from the Pending Tab.
+                      </p>
+                      {pendingOrders.length > 0 && (
+                        <button
+                          onClick={() => setActiveTab("pending")}
+                          className="mt-4 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#f7a600]/15 hover:bg-[#f7a600]/25 text-[#f7a600] border border-[#f7a600]/30 text-xs font-bold transition-all cursor-pointer"
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>View {pendingOrders.length} Resting Limit Order{pendingOrders.length > 1 ? "s" : ""} in Pending Tab &rarr;</span>
+                        </button>
+                      )}
+                    </div>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs">
@@ -848,19 +882,19 @@ export default function BybitTradingTerminal() {
                           {positions.map((pos) => (
                             <tr key={pos.symbol} className="border-b border-[#26282f]/50 hover:bg-[#1c1d22]/50">
                               <td className="py-2.5 px-2 font-bold text-[#f5f5f5] flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#f7a600]" />
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c] animate-pulse" />
                                 {pos.symbol}
                               </td>
                               <td className="py-2.5 px-2">
-                                <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                                   pos.side === "LONG" ? "bg-[#20b26c]/15 text-[#20b26c]" : "bg-[#ef454a]/15 text-[#ef454a]"
                                 }`}>
                                   {pos.side}
                                 </span>
                               </td>
-                              <td className="py-2.5 px-2 text-right text-[#f5f5f5]">{pos.qty}</td>
+                              <td className="py-2.5 px-2 text-right text-[#f5f5f5] font-semibold">{pos.qty}</td>
                               <td className="py-2.5 px-2 text-right text-[#878996]">${pos.avg_entry_price.toFixed(2)}</td>
-                              <td className="py-2.5 px-2 text-right text-[#f5f5f5]">${pos.current_price.toFixed(2)}</td>
+                              <td className="py-2.5 px-2 text-right text-[#f5f5f5] font-bold">${pos.current_price.toFixed(2)}</td>
                               <td className="py-2.5 px-2 text-right text-[#878996]">${pos.market_value.toFixed(2)}</td>
                               <td className={`py-2.5 px-2 text-right font-bold ${
                                 pos.unrealized_pl >= 0 ? "text-[#20b26c]" : "text-[#ef454a]"
@@ -870,9 +904,10 @@ export default function BybitTradingTerminal() {
                               <td className="py-2.5 px-2 text-right">
                                 <button
                                   onClick={() => handleClosePosition(pos.symbol)}
-                                  className="px-2 py-0.5 rounded bg-[#26282f] hover:bg-[#ef454a]/20 hover:text-[#ef454a] text-[#878996] text-[10px] transition-colors cursor-pointer"
+                                  className="px-2.5 py-1 rounded bg-[#ef454a]/15 hover:bg-[#ef454a]/25 text-[#ef454a] border border-[#ef454a]/30 text-[10px] font-bold transition-all cursor-pointer"
+                                  title="Close position and record to History & Ledger"
                                 >
-                                  Close
+                                  Close Position
                                 </button>
                               </td>
                             </tr>
@@ -970,12 +1005,23 @@ export default function BybitTradingTerminal() {
                                     {ord.created_at ? new Date(ord.created_at).toLocaleTimeString() : "-"}
                                   </td>
                                   <td className="py-2 px-2 text-right">
-                                    <button
-                                      onClick={() => handleCancelOrder(ord.id)}
-                                      className="px-2 py-0.5 rounded bg-[#26282f] hover:bg-[#ef454a]/20 hover:text-[#ef454a] text-[#878996] text-[10px] transition-colors cursor-pointer"
-                                    >
-                                      Cancel
-                                    </button>
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <button
+                                        onClick={() => handleFillPending(ord.id, ord.limit_price || quote.last)}
+                                        disabled={isFillingOrder === ord.id}
+                                        className="px-2 py-0.5 rounded bg-[#20b26c]/20 hover:bg-[#20b26c]/30 text-[#20b26c] border border-[#20b26c]/40 text-[10px] font-bold transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                                        title="Fill pending order at limit price and move to Positions Tab"
+                                      >
+                                        <Zap className={`w-2.5 h-2.5 ${isFillingOrder === ord.id ? "animate-spin" : ""}`} />
+                                        <span>{isFillingOrder === ord.id ? "Filling..." : "Fill Now"}</span>
+                                      </button>
+                                      <button
+                                        onClick={() => handleCancelOrder(ord.id)}
+                                        className="px-2 py-0.5 rounded bg-[#26282f] hover:bg-[#ef454a]/20 hover:text-[#ef454a] text-[#878996] text-[10px] transition-colors cursor-pointer"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               );
@@ -1095,9 +1141,132 @@ export default function BybitTradingTerminal() {
               )}
 
               {activeTab === "history" && (
-                <div className="text-center py-8 text-[#878996]">
-                  <p className="font-semibold text-[#f5f5f5]">5 Executed Options Orders Archived</p>
-                  <p className="text-[11px] mt-1">Visit the Order History page for complete quantitative analytics</p>
+                <div className="space-y-4">
+                  {/* Quantitative Performance Metrics Grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div className="p-2.5 rounded-lg bg-[#1c1d22] border border-[#26282f]">
+                      <div className="text-[10px] text-[#878996] uppercase font-semibold">Realized Net P&L</div>
+                      <div className={`text-base font-black mt-0.5 ${historyMetrics.netPnl >= 0 ? "text-[#20b26c]" : "text-[#ef454a]"}`}>
+                        {historyMetrics.netPnl >= 0 ? "+" : ""}${historyMetrics.netPnl.toFixed(2)}
+                      </div>
+                      <div className="text-[9px] text-[#5e6673] mt-0.5">{historyMetrics.total} Closed Trades</div>
+                    </div>
+
+                    <div className="p-2.5 rounded-lg bg-[#1c1d22] border border-[#26282f]">
+                      <div className="text-[10px] text-[#878996] uppercase font-semibold">Win Rate</div>
+                      <div className="text-base font-black text-[#f7a600] mt-0.5">
+                        {historyMetrics.winRate.toFixed(1)}%
+                      </div>
+                      <div className="text-[9px] text-[#878996] mt-0.5">
+                        {historyMetrics.wins}W / {historyMetrics.losses}L
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 rounded-lg bg-[#1c1d22] border border-[#26282f]">
+                      <div className="text-[10px] text-[#878996] uppercase font-semibold">Profit Factor</div>
+                      <div className="text-base font-black text-[#f5f5f5] mt-0.5">
+                        {historyMetrics.profitFactor.toFixed(2)}x
+                      </div>
+                      <div className="text-[9px] text-[#5e6673] mt-0.5">Gross Win / Gross Loss</div>
+                    </div>
+
+                    <div className="p-2.5 rounded-lg bg-[#1c1d22] border border-[#26282f]">
+                      <div className="text-[10px] text-[#878996] uppercase font-semibold">Avg Win / Avg Loss</div>
+                      <div className="text-xs font-bold mt-1 flex items-center gap-1.5">
+                        <span className="text-[#20b26c]">+${historyMetrics.avgWin.toFixed(2)}</span>
+                        <span className="text-[#5e6673]">/</span>
+                        <span className="text-[#ef454a]">-${historyMetrics.avgLoss.toFixed(2)}</span>
+                      </div>
+                      <div className="text-[9px] text-[#5e6673] mt-0.5">Risk-Reward Ratio</div>
+                    </div>
+                  </div>
+
+                  {/* Complete Trade Ledger */}
+                  {closedTrades.length === 0 ? (
+                    <div className="text-center py-8 text-[#878996]">
+                      <Award className="w-8 h-8 mx-auto mb-2 text-[#5e6673]" />
+                      <p className="font-semibold text-[#f5f5f5]">No Closed Trades in Ledger</p>
+                      <p className="text-[11px] mt-1">
+                        When active positions are closed manually or exit via Take Profit / Stop Loss, their executed details and realized P&L feed directly into this analysis ledger.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <div className="text-[10px] font-bold text-[#878996] uppercase mb-2 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#f7a600]" />
+                          <span>Audited Trade Ledger ({closedTrades.length} Records)</span>
+                        </div>
+                        <span className="text-[9px] text-[#5e6673]">Sorted by Most Recent</span>
+                      </div>
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-[#26282f] text-[#5e6673] uppercase text-[10px]">
+                            <th className="py-2 px-2">Trade ID</th>
+                            <th className="py-2 px-2">Symbol</th>
+                            <th className="py-2 px-2">Strategy</th>
+                            <th className="py-2 px-2">Side</th>
+                            <th className="py-2 px-2 text-right">Qty</th>
+                            <th className="py-2 px-2 text-right">Entry</th>
+                            <th className="py-2 px-2 text-right">Exit</th>
+                            <th className="py-2 px-2 text-right">Realized P&L</th>
+                            <th className="py-2 px-2 text-right">Exit Time</th>
+                            <th className="py-2 px-2 text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {closedTrades.map((t) => {
+                            const pnl = t.realized_pnl ?? 0;
+                            const isWin = pnl >= 0;
+                            const tradeId = t.trade_id || t.id || "TRD-" + Math.random().toString(36).substring(2, 7);
+                            const symbol = t.symbol || t.proposal?.underlying || "SPY";
+                            const strategy = t.strategy || t.proposal?.strategy_type || "MASTER_ORDER_FLOW";
+                            const side = t.side || t.proposal?.side || "BUY";
+                            const qty = t.qty || t.proposal?.qty || 1;
+                            const entryPrice = t.entry_price ?? t.proposal?.net_premium ?? t.proposal?.limit_price ?? 0;
+                            const exitPrice = t.exit_price ?? t.current_price ?? entryPrice;
+                            const timeDisplay = t.exit_time ? new Date(t.exit_time).toLocaleTimeString() : (t.entry_time ? new Date(t.entry_time).toLocaleTimeString() : "-");
+                            return (
+                              <tr key={tradeId} className="border-b border-[#26282f]/50 hover:bg-[#1c1d22]/50">
+                                <td className="py-2 px-2 text-[#878996] text-[11px] truncate max-w-[100px]" title={tradeId}>
+                                  {tradeId.slice(0, 8)}...
+                                </td>
+                                <td className="py-2 px-2 font-bold text-[#f5f5f5]">{symbol}</td>
+                                <td className="py-2 px-2 text-[#878996] text-[11px]">{strategy}</td>
+                                <td className="py-2 px-2">
+                                  <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                    side === "BUY" ? "bg-[#20b26c]/15 text-[#20b26c]" : "bg-[#ef454a]/15 text-[#ef454a]"
+                                  }`}>
+                                    {side}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2 text-right text-[#f5f5f5]">{qty}</td>
+                                <td className="py-2 px-2 text-right text-[#878996]">
+                                  ${entryPrice.toFixed(2)}
+                                </td>
+                                <td className="py-2 px-2 text-right text-[#f5f5f5] font-semibold">
+                                  ${exitPrice.toFixed(2)}
+                                </td>
+                                <td className={`py-2 px-2 text-right font-bold ${isWin ? "text-[#20b26c]" : "text-[#ef454a]"}`}>
+                                  {isWin ? "+" : ""}${pnl.toFixed(2)}
+                                </td>
+                                <td className="py-2 px-2 text-right text-[#5e6673] text-[11px]">
+                                  {timeDisplay}
+                                </td>
+                                <td className="py-2 px-2 text-right">
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                    isWin ? "bg-[#20b26c]/15 text-[#20b26c]" : "bg-[#ef454a]/15 text-[#ef454a]"
+                                  }`}>
+                                    {(t.status || "CLOSED").toUpperCase()}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1159,17 +1328,48 @@ export default function BybitTradingTerminal() {
 
           {/* Real Alpaca Order Execution & Bot Panel */}
           <div className="rounded-lg bg-[#18191f] border border-[#26282f] p-3 font-mono space-y-3 shadow-lg">
-            {/* Margin Pill */}
-            <div className="flex items-center justify-between pb-2 border-b border-[#26282f]">
-              <div className="flex gap-1 text-[11px]">
-                <span className="px-2 py-0.5 rounded bg-[#26282f] text-[#f7a600] font-bold">
-                  Cross Margin
-                </span>
-                <span className="px-2 py-0.5 rounded bg-[#1c1d22] text-[#878996]">
-                  Alpaca Paper
-                </span>
+            {/* Margin Pill & Market Clock Badge */}
+            <div className="space-y-2 pb-2 border-b border-[#26282f]">
+              <div className="flex items-center justify-between">
+                <div className="flex gap-1 text-[11px]">
+                  <span className="px-2 py-0.5 rounded bg-[#26282f] text-[#f7a600] font-bold">
+                    Cross Margin
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-[#1c1d22] text-[#878996]">
+                    Alpaca Paper
+                  </span>
+                </div>
+                <span className="text-[10px] text-[#20b26c] font-semibold">Risk Gate Armed</span>
               </div>
-              <span className="text-[10px] text-[#20b26c] font-semibold">Risk Gate Armed</span>
+
+              {/* Market Hours Gating & Dev Simulation Toggle */}
+              <div className="flex items-center justify-between p-2 rounded bg-[#121214] border border-[#26282f] text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full ${marketClock?.is_open ? "bg-[#20b26c] animate-pulse" : "bg-[#ef454a]"}`} />
+                  <div>
+                    <span className={`font-bold text-[11px] block leading-tight ${marketClock?.is_open ? "text-[#20b26c]" : "text-[#ef454a]"}`}>
+                      {marketClock?.is_open ? "MARKET OPEN (09:30-16:00 ET)" : "MARKET CLOSED"}
+                    </span>
+                    {!marketClock?.is_open && (
+                      <span className="text-[9px] text-[#878996] block">
+                        {marketClock?.simulation_override ? "Sim Override Active (Executable)" : "Execution Gated until 09:30 ET"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleSimulationOverride(!marketClock?.simulation_override)}
+                  className={`px-2 py-1 rounded text-[10px] font-bold border transition-all cursor-pointer ${
+                    marketClock?.simulation_override
+                      ? "bg-[#f7a600]/20 border-[#f7a600] text-[#f7a600] shadow-[0_0_8px_rgba(247,166,0,0.25)]"
+                      : "bg-[#1c1d22] border-[#26282f] text-[#878996] hover:text-[#f5f5f5]"
+                  }`}
+                  title="Toggle Simulation Override to allow paper trading outside regular US market hours"
+                >
+                  ⚡ Dev Sim: {marketClock?.simulation_override ? "ON" : "OFF"}
+                </button>
+              </div>
             </div>
 
             {/* Trade Mode Selector */}
@@ -1199,6 +1399,38 @@ export default function BybitTradingTerminal() {
             {/* Content Based on Trade Mode */}
             {tradeMode === "MANUAL" ? (
               <div className="space-y-3">
+                {/* Order Type: Market (Preferred) vs Limit */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] text-[#878996]">
+                    <span>Execution Order Type</span>
+                    <span className="text-[#20b26c] font-bold">⚡ Market Order Preferred</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1 p-1 bg-[#121214] rounded border border-[#26282f]">
+                    <button
+                      type="button"
+                      onClick={() => setOrderType("market")}
+                      className={`py-1.5 px-2 rounded text-center text-xs font-bold transition-all cursor-pointer ${
+                        orderType === "market"
+                          ? "bg-[#20b26c] text-[#121214] shadow-[0_0_8px_rgba(32,178,108,0.3)]"
+                          : "text-[#878996] hover:text-[#f5f5f5]"
+                      }`}
+                    >
+                      Market (Instant)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrderType("limit")}
+                      className={`py-1.5 px-2 rounded text-center text-xs font-bold transition-all cursor-pointer ${
+                        orderType === "limit"
+                          ? "bg-[#f7a600] text-[#121214] shadow-[0_0_8px_rgba(247,166,0,0.3)]"
+                          : "text-[#878996] hover:text-[#f5f5f5]"
+                      }`}
+                    >
+                      Limit (Pending)
+                    </button>
+                  </div>
+                </div>
+
                 {/* Buy / Sell Side Selector */}
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -1222,6 +1454,75 @@ export default function BybitTradingTerminal() {
                     Sell / Short
                   </button>
                 </div>
+
+                {/* Limit Price Input if Limit Order selected */}
+                {orderType === "limit" ? (
+                  <div className="space-y-1.5 p-2 rounded bg-[#121214] border border-[#26282f]">
+                    <div className="flex justify-between text-[10px] text-[#878996]">
+                      <span>Limit Price ($)</span>
+                      <span className="text-[#f7a600] font-bold">Mark: ${midPrice.toFixed(2)}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setLimitPrice((p) => Math.max(0.01, +(p - tickStep).toFixed(2)))}
+                        className="w-8 h-8 rounded bg-[#1c1d22] border border-[#26282f] text-[#f5f5f5] font-bold text-sm hover:bg-[#26282f] flex items-center justify-center cursor-pointer"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        step={tickStep}
+                        value={limitPrice}
+                        onChange={(e) => setLimitPrice(Number(e.target.value))}
+                        className="flex-1 px-2.5 py-1.5 rounded bg-[#18191f] border border-[#26282f] text-[#f5f5f5] text-xs font-bold text-center outline-none focus:border-[#f7a600]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setLimitPrice((p) => +(p + tickStep).toFixed(2))}
+                        className="w-8 h-8 rounded bg-[#1c1d22] border border-[#26282f] text-[#f5f5f5] font-bold text-sm hover:bg-[#26282f] flex items-center justify-center cursor-pointer"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setLimitPrice(quote.bid || midPrice)}
+                        className="p-1 rounded bg-[#18191f] border border-[#26282f] text-[#20b26c] font-bold hover:border-[#20b26c] cursor-pointer"
+                      >
+                        Bid ${quote.bid?.toFixed(2)}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLimitPrice(midPrice)}
+                        className="p-1 rounded bg-[#18191f] border border-[#26282f] text-[#f7a600] font-bold hover:border-[#f7a600] cursor-pointer"
+                      >
+                        Mid ${midPrice.toFixed(2)}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLimitPrice(quote.ask || midPrice)}
+                        className="p-1 rounded bg-[#18191f] border border-[#26282f] text-[#ef454a] font-bold hover:border-[#ef454a] cursor-pointer"
+                      >
+                        Ask ${quote.ask?.toFixed(2)}
+                      </button>
+                    </div>
+                    <div className="text-[9px] text-[#878996] pt-0.5">
+                      Resting order will queue in <strong className="text-[#f7a600]">Pending Tab</strong> until market reaches price.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-2 rounded bg-[#20b26c]/10 border border-[#20b26c]/30 text-[11px] space-y-1">
+                    <div className="flex justify-between font-bold">
+                      <span className="text-[#878996]">Market Fill Price:</span>
+                      <span className="text-[#20b26c]">${midPrice.toFixed(2)}</span>
+                    </div>
+                    <div className="text-[10px] text-[#878996]">
+                      Immediate execution at current market price &rarr; moves straight into <strong className="text-[#f5f5f5]">Positions Tab</strong>.
+                    </div>
+                  </div>
+                )}
 
                 {/* Quantity Input */}
                 <div className="space-y-1">
@@ -1247,21 +1548,29 @@ export default function BybitTradingTerminal() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#878996]">Estimated Total:</span>
-                    <span className="text-[#f7a600] font-bold">${(orderQty * midPrice).toFixed(2)}</span>
+                    <span className="text-[#f7a600] font-bold">
+                      ${(orderQty * (orderType === "limit" ? limitPrice : midPrice)).toFixed(2)}
+                    </span>
                   </div>
                 </div>
 
-                {/* Submit Manual Order to Alpaca */}
+                {/* Submit Manual Order */}
                 <button
                   onClick={handleManualOrder}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || (!marketClock?.is_open && !marketClock?.simulation_override)}
                   className={`w-full py-2.5 rounded font-bold text-xs cursor-pointer transition-all shadow-lg active:scale-95 ${
                     orderSide === "BUY"
                       ? "bg-[#20b26c] hover:bg-[#28c97b] text-[#121214]"
                       : "bg-[#ef454a] hover:bg-[#f35b5f] text-[#f5f5f5]"
                   } disabled:opacity-50`}
                 >
-                  {isSubmitting ? "Submitting to Alpaca..." : `Submit ${orderSide} on Alpaca Paper`}
+                  {isSubmitting
+                    ? "Submitting..."
+                    : !marketClock?.is_open && !marketClock?.simulation_override
+                    ? "Market Closed (Opens 09:30 ET)"
+                    : orderType === "market"
+                    ? `Execute Market ${orderSide} @ $${midPrice.toFixed(2)} (Instant Position)`
+                    : `Submit Limit ${orderSide} @ $${limitPrice.toFixed(2)} (To Pending Tab)`}
                 </button>
               </div>
             ) : (
@@ -1541,10 +1850,14 @@ export default function BybitTradingTerminal() {
                 {/* Trigger Bot Order to Alpaca */}
                 <button
                   onClick={handleBotTrade}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || (!marketClock?.is_open && !marketClock?.simulation_override)}
                   className="w-full py-2 rounded bg-[#f7a600] hover:bg-[#ffb11a] text-[#121214] font-extrabold text-xs cursor-pointer transition-all shadow-[0_0_10px_rgba(247,166,0,0.3)] disabled:opacity-50 active:scale-95"
                 >
-                  {isSubmitting ? "Executing Swarm..." : "Execute Master Strategy Trade (Alpaca)"}
+                  {isSubmitting
+                    ? "Executing Swarm..."
+                    : !marketClock?.is_open && !marketClock?.simulation_override
+                    ? "Market Closed (Opens 09:30 ET)"
+                    : "Execute Master Strategy Trade (Alpaca)"}
                 </button>
               </div>
             )}

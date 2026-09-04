@@ -1,4 +1,4 @@
-import { PortfolioSnapshot, TradeRecord, MarketSignal } from "./types";
+import { PortfolioSnapshot, TradeRecord, MarketSignal, MarketClockStatus } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -40,6 +40,15 @@ export async function getTrades(): Promise<TradeRecord[]> {
   }
 }
 
+export async function getTradeHistory(): Promise<TradeRecord[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/trades/history`);
+    return await safeJson<TradeRecord[]>(res, []);
+  } catch {
+    return [];
+  }
+}
+
 export async function getSignals(): Promise<MarketSignal[]> {
   try {
     const res = await fetch(`${API_BASE}/api/signals`);
@@ -72,6 +81,8 @@ export interface AlpacaAccount {
 }
 
 export interface AlpacaPosition {
+  id?: string;
+  trade_id?: string;
   symbol: string;
   qty: number;
   side: "LONG" | "SHORT";
@@ -81,6 +92,10 @@ export interface AlpacaPosition {
   cost_basis: number;
   unrealized_pl: number;
   unrealized_plpc: number;
+  take_profit_price?: number;
+  stop_loss_price?: number;
+  strategy?: string;
+  order_type?: string;
 }
 
 export interface AlpacaOrder {
@@ -196,8 +211,12 @@ export interface AlpacaOrderResponse {
   order_id?: string;
   symbol?: string;
   status?: string;
+  order_type?: string;
+  entry_price?: number;
+  limit_price?: number;
   qty?: number;
   side?: string;
+  message?: string;
   error?: string;
 }
 
@@ -232,16 +251,77 @@ export interface BotTradeResponse {
   error?: string;
 }
 
-export async function submitAlpacaOrder(symbol: string, qty: number, side: "buy" | "sell"): Promise<AlpacaOrderResponse> {
+export async function submitAlpacaOrder(
+  symbol: string,
+  qty: number,
+  side: "buy" | "sell",
+  order_type: "market" | "limit" = "market",
+  limit_price?: number
+): Promise<AlpacaOrderResponse> {
   try {
     const res = await fetch(`${API_BASE}/api/alpaca/order`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol, qty, side, order_type: "market" }),
+      body: JSON.stringify({ symbol, qty, side, order_type, limit_price }),
     });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      return { success: false, error: errJson.detail || `Server error: HTTP ${res.status}` };
+    }
     return await safeJson<AlpacaOrderResponse>(res, { success: false });
+  } catch (e: any) {
+    return { success: false, error: e.message || "Failed to submit order" };
+  }
+}
+
+export async function fillPendingTrade(tradeId: string, fillPrice?: number): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/api/trades/${encodeURIComponent(tradeId)}/fill`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fill_price: fillPrice }),
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      return { success: false, error: errJson.detail || `Server error: HTTP ${res.status}` };
+    }
+    return await safeJson(res, { success: false });
+  } catch (e: any) {
+    return { success: false, error: e.message || "Network error" };
+  }
+}
+
+export async function getMarketStatus(): Promise<MarketClockStatus> {
+  try {
+    const res = await fetch(`${API_BASE}/api/market-status`);
+    return await safeJson<MarketClockStatus>(res, {
+      is_open: false,
+      raw_is_open: false,
+      simulation_active: false,
+      current_time_et: "",
+      reason: "Clock offline",
+    });
   } catch {
-    return { success: false };
+    return {
+      is_open: false,
+      raw_is_open: false,
+      simulation_active: false,
+      current_time_et: "",
+      reason: "Clock offline",
+    };
+  }
+}
+
+export async function setMarketSimulationOverride(enabled: boolean): Promise<{ success: boolean; simulation_active: boolean }> {
+  try {
+    const res = await fetch(`${API_BASE}/api/market-status/simulation-override`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    return await safeJson<{ success: boolean; simulation_active: boolean }>(res, { success: true, simulation_active: enabled });
+  } catch {
+    return { success: false, simulation_active: enabled };
   }
 }
 

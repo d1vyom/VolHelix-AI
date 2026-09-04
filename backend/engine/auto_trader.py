@@ -7,7 +7,7 @@ from typing import List, Optional, Dict
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, TakeProfitRequest, StopLossRequest, GetOrdersRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
+from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass, QueryOrderStatus
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestQuoteRequest
 from alpaca.data.enums import DataFeed
@@ -215,6 +215,41 @@ class AutoTrader:
                         logger.info(msg)
                         self._emit_guardian_event(exit_type, sym, exit_price, realized_pnl, msg)
 
+        # Check and fill pending limit orders when market price reaches limit
+        try:
+            pending_trades = asyncio.run(trade_log.get_pending_trades())
+            for ptrade in pending_trades:
+                sym = ptrade.proposal.underlying
+                limit_p = ptrade.proposal.limit_price or (ptrade.proposal.breakevens[0] if ptrade.proposal.breakevens else None)
+                if not limit_p:
+                    continue
+                
+                cur_price = 0.0
+                try:
+                    latest = sc.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=sym, feed=DataFeed.IEX))
+                    if latest and sym in latest:
+                        cur_price = float(latest[sym].ask_price or latest[sym].bid_price or 0.0)
+                except Exception:
+                    pass
+
+                if cur_price <= 0:
+                    continue
+
+                side = (ptrade.proposal.side or "BUY").upper()
+                should_fill = False
+                if side == "BUY" and cur_price <= limit_p:
+                    should_fill = True
+                elif side == "SELL" and cur_price >= limit_p:
+                    should_fill = True
+
+                if should_fill:
+                    asyncio.run(trade_log.fill_pending_trade(ptrade.trade_id, fill_price=cur_price))
+                    msg = f"LIMIT FILLED: {sym} limit order {ptrade.trade_id[:8]} filled at ${cur_price:.2f} (Limit: ${limit_p:.2f}). Moved to Positions Tab."
+                    logger.info(msg)
+                    self._emit_fill_event(ptrade.trade_id, sym, cur_price, msg)
+        except Exception as e:
+            logger.debug(f"Position Guardian pending limit check error: {e}")
+
     def _close_position_and_finalize_trade(
         self,
         client: TradingClient,
@@ -266,6 +301,25 @@ class AutoTrader:
                     "status": "CLOSED",
                     "realized_pnl": pnl,
                     "exit_price": price
+                })
+            threading.Thread(target=lambda: asyncio.run(_emit()), daemon=True).start()
+        except Exception:
+            pass
+
+    def _emit_fill_event(self, trade_id: str, symbol: str, price: float, message: str):
+        try:
+            from backend.api.websocket import sio
+            async def _emit():
+                await sio.emit("reasoning_event", {
+                    "agent": "AutoTrader",
+                    "message": message,
+                    "confidence": 1.0
+                })
+                await sio.emit("trade_filled", {
+                    "trade_id": trade_id,
+                    "symbol": symbol,
+                    "fill_price": price,
+                    "status": "OPEN"
                 })
             threading.Thread(target=lambda: asyncio.run(_emit()), daemon=True).start()
         except Exception:
@@ -353,6 +407,21 @@ class AutoTrader:
         if not requested_symbol and self._stop_event.is_set():
             return {"success": True, "executed": False, "reason": "Stopped", "scanner_diagnostics": self.scanner_diagnostics}
         
+        # 0. STRICT MARKET HOURS ENFORCEMENT: trades are only executable when markets are open
+        from backend.utils.market_hours import is_market_open
+        if not is_market_open():
+            msg = "Market is closed. Regular trading session: 09:30 - 16:00 ET, Mon-Fri. Scanner on standby."
+            self.last_log = msg
+            logger.info(msg)
+            return {
+                "success": True,
+                "executed": False,
+                "market_open": False,
+                "symbol": requested_symbol,
+                "reason": msg,
+                "scanner_diagnostics": self.scanner_diagnostics
+            }
+
         # 1. Check open positions limit
         try:
             client = self._get_trading_client()

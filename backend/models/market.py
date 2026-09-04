@@ -26,10 +26,16 @@ class StrategyType(str, Enum):
     CASH = "CASH"
 
 class TradeStatus(str, Enum):
+    PENDING = "PENDING"
     OPEN = "OPEN"
     CLOSED = "CLOSED"
     STOPPED_OUT = "STOPPED_OUT"
     TAKE_PROFIT = "TAKE_PROFIT"
+    CANCELLED = "CANCELLED"
+
+class OrderType(str, Enum):
+    MARKET = "MARKET"
+    LIMIT = "LIMIT"
 
 class OptionLeg(BaseModel):
     action: str = Field(description="'BUY' or 'SELL'")
