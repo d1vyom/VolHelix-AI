@@ -311,7 +311,7 @@ export const CandlestickChart = memo(function CandlestickChart({
       {/* Top OHLC Indicator Banner */}
       {hoveredBar && (
         <div className="absolute top-1.5 left-3 z-10 flex flex-wrap items-center gap-3 text-[11px] pointer-events-none">
-          <span className="text-[#878996]">Time: <strong className="text-[#f5f5f5]">{hoveredBar.time}</strong></span>
+          <span className="text-[#878996]">Time (IST): <strong className="text-[#f5f5f5]">{hoveredBar.time}</strong></span>
           <span className="text-[#878996]">O: <strong className="text-[#f5f5f5]">${hoveredBar.open.toFixed(2)}</strong></span>
           <span className="text-[#878996]">H: <strong className="text-[#f5f5f5]">${hoveredBar.high.toFixed(2)}</strong></span>
           <span className="text-[#878996]">L: <strong className="text-[#f5f5f5]">${hoveredBar.low.toFixed(2)}</strong></span>
@@ -471,6 +471,19 @@ export const CandlestickChart = memo(function CandlestickChart({
           </g>
         )}
 
+        {/* Timezone Indicator (IST) on Axis */}
+        <text
+          x={chartWidth - 6}
+          y={height - 6}
+          fill="#878996"
+          fontSize={9}
+          fontWeight="bold"
+          textAnchor="end"
+          fontFamily="monospace"
+        >
+          IST
+        </text>
+
         {/* ========================================================================= */}
         {/* 1. PERMANENT LIVE PRICE CROSSHAIR (Matches candle color: Red or Green)    */}
         {/* ========================================================================= */}
@@ -552,9 +565,9 @@ export const CandlestickChart = memo(function CandlestickChart({
             {hoveredBar && (
               <g>
                 <rect
-                  x={Math.max(2, Math.min(chartWidth - 66, mousePos.x - 33))}
+                  x={Math.max(2, Math.min(chartWidth - 74, mousePos.x - 37))}
                   y={height - 21}
-                  width={66}
+                  width={74}
                   height={18}
                   fill="#26282f"
                   stroke="#363a45"
@@ -562,7 +575,7 @@ export const CandlestickChart = memo(function CandlestickChart({
                   rx={2}
                 />
                 <text
-                  x={Math.max(2, Math.min(chartWidth - 66, mousePos.x - 33)) + 33}
+                  x={Math.max(2, Math.min(chartWidth - 74, mousePos.x - 37)) + 37}
                   y={height - 8}
                   fill="#f5f5f5"
                   fontSize={10}

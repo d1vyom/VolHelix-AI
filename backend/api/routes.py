@@ -246,6 +246,12 @@ from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.data.enums import DataFeed
 
 import time
+from datetime import datetime, timezone, timedelta
+try:
+    import zoneinfo
+    IST_TZ = zoneinfo.ZoneInfo("Asia/Kolkata")
+except Exception:
+    IST_TZ = timezone(timedelta(hours=5, minutes=30))
 
 _CACHE = {}
 
@@ -595,14 +601,20 @@ def get_alpaca_bars(symbol: str = "SPY", timeframe: str = "1H", limit: int = 80)
 
         result = []
         for b in bars[-limit:]:
+            ts = b.timestamp
+            if getattr(ts, "tzinfo", None) is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            ts_ist = ts.astimezone(IST_TZ)
+
             if tf_clean in ["1m", "5m", "15m"]:
-                time_str = b.timestamp.strftime("%H:%M")
+                time_str = ts_ist.strftime("%H:%M")
             elif tf_clean in ["1H", "4H"]:
-                time_str = b.timestamp.strftime("%m-%d %H:%M")
+                time_str = ts_ist.strftime("%m-%d %H:%M")
             else:
-                time_str = b.timestamp.strftime("%m-%d")
+                time_str = ts_ist.strftime("%m-%d")
             result.append({
                 "time": time_str,
+                "raw_time": ts_ist.isoformat(),
                 "open": float(b.open),
                 "high": float(b.high),
                 "low": float(b.low),
@@ -614,8 +626,17 @@ def get_alpaca_bars(symbol: str = "SPY", timeframe: str = "1H", limit: int = 80)
         return result
     except Exception:
         base_p = 77100.0 if "BTC" in clean_sym else (574.0 if "SPY" in clean_sym else (718.0 if "QQQ" in clean_sym else (327.0 if "AAPL" in clean_sym else (130.0 if "NVDA" in clean_sym else 225.0))))
+        now_ist = datetime.now(timezone.utc).astimezone(IST_TZ)
         return [
-            {"time": f"09-02 {10+i}:00" if i < 14 else f"09-03 {i-14}:00", "open": round(base_p + i*0.35, 2), "high": round(base_p + i*0.35 + 1.2, 2), "low": round(base_p + i*0.35 - 0.9, 2), "close": round(base_p + i*0.35 + 0.4, 2), "volume": 15000 + (i*1200)%25000}
+            {
+                "time": (now_ist - timedelta(hours=30 - i)).strftime("%m-%d %H:%M"),
+                "raw_time": (now_ist - timedelta(hours=30 - i)).isoformat(),
+                "open": round(base_p + i * 0.35, 2),
+                "high": round(base_p + i * 0.35 + 1.2, 2),
+                "low": round(base_p + i * 0.35 - 0.9, 2),
+                "close": round(base_p + i * 0.35 + 0.4, 2),
+                "volume": 15000 + (i * 1200) % 25000,
+            }
             for i in range(30)
         ]
 

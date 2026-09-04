@@ -23,6 +23,7 @@ export function Header() {
   const [account, setAccount] = useState<AlpacaAccount | null>(null);
 
   const [timeStr, setTimeStr] = useState("");
+  const [istTimeStr, setIstTimeStr] = useState("");
   const [isMarketOpen, setIsMarketOpen] = useState(false);
   const [marketClock, setMarketClock] = useState<MarketClockStatus | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -55,6 +56,15 @@ export function Header() {
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
+      const istTime = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).format(now);
+      setIstTimeStr(`${istTime} IST`);
+
       const etTime = new Intl.DateTimeFormat("en-US", {
         timeZone: "America/New_York",
         hour: "2-digit",
@@ -259,10 +269,12 @@ export function Header() {
           </span>
         </div>
 
-        {/* NYSE Market Clock */}
-        <div className="hidden xl:flex items-center gap-1.5 text-[11px] font-mono text-[#878996] border-l border-[#26282f] pl-3">
+        {/* Session Clocks: IST + NYSE ET */}
+        <div className="hidden xl:flex items-center gap-2 text-[11px] font-mono text-[#878996] border-l border-[#26282f] pl-3">
           <Clock className="w-3 h-3 text-[#f7a600]" />
-          <span className="text-[#f5f5f5]">{timeStr || "14:30:00 ET"}</span>
+          <span className="text-[#f5f5f5] font-bold">{istTimeStr || "00:00:00 IST"}</span>
+          <span className="text-[#5e6673]">|</span>
+          <span className="text-[#878996]">{timeStr || "14:30:00 ET"}</span>
           <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
             (marketClock?.is_open || isMarketOpen) ? "bg-[#20b26c]/15 text-[#20b26c]" : "bg-[#26282f] text-[#878996]"
           }`}>
