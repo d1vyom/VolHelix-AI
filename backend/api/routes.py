@@ -15,6 +15,9 @@ from backend.engine.order_flow import (
 from backend.engine.gamma_profile import calculate_gamma_profile
 from backend.engine.auto_trader import auto_trader
 from backend.mcp.client import AlpacaClient
+from backend.utils.logger import get_logger
+
+logger = get_logger("routes")
 
 router = APIRouter()
 
