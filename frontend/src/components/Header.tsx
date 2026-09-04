@@ -117,9 +117,27 @@ export function Header() {
     fetchMarketInfo();
     const timer = setInterval(fetchMarketInfo, 2500);
 
+    const handleSimOverrideEvent = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && typeof detail.enabled === "boolean") {
+        setMarketClock((prev) =>
+          prev
+            ? {
+                ...prev,
+                simulation_active: detail.enabled,
+                simulation_override: detail.enabled,
+                is_open: detail.enabled ? true : prev.raw_is_open,
+              }
+            : null
+        );
+      }
+    };
+    window.addEventListener("volhelix:simulation-override", handleSimOverrideEvent);
+
     return () => {
       isMounted = false;
       clearInterval(timer);
+      window.removeEventListener("volhelix:simulation-override", handleSimOverrideEvent);
     };
   }, [selectedTicker]);
 
@@ -275,11 +293,23 @@ export function Header() {
           <span className="text-[#f5f5f5] font-bold">{istTimeStr || "00:00:00 IST"}</span>
           <span className="text-[#5e6673]">|</span>
           <span className="text-[#878996]">{timeStr || "14:30:00 ET"}</span>
-          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-            (marketClock?.is_open || isMarketOpen) ? "bg-[#20b26c]/15 text-[#20b26c]" : "bg-[#26282f] text-[#878996]"
-          }`}>
-            {(marketClock?.is_open || isMarketOpen) ? (marketClock?.simulation_override ? "SIM OPEN" : "OPEN") : "CLOSED"}
-          </span>
+          {(() => {
+            const isSim = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
+            const isOpen = Boolean(marketClock?.is_open || isMarketOpen);
+            return (
+              <span
+                className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                  isOpen
+                    ? isSim && !marketClock?.raw_is_open
+                      ? "bg-[#f7a600]/20 text-[#f7a600] border border-[#f7a600]/40"
+                      : "bg-[#20b26c]/15 text-[#20b26c]"
+                    : "bg-[#26282f] text-[#878996]"
+                }`}
+              >
+                {isOpen ? (isSim && !marketClock?.raw_is_open ? "SIM OPEN" : "OPEN") : "CLOSED"}
+              </span>
+            );
+          })()}
         </div>
       </div>
 

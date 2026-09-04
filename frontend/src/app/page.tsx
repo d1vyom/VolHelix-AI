@@ -515,7 +515,8 @@ export default function BybitTradingTerminal() {
 
   const handleManualOrder = async () => {
     // Market hours gating check
-    if (!marketClock?.is_open && !marketClock?.simulation_override) {
+    const isSimActive = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
+    if (!marketClock?.is_open && !isSimActive) {
       showToast("Market Closed! Trades only executable when US markets are open (09:30-16:00 ET). Enable Dev Sim to test.");
       return;
     }
@@ -571,14 +572,34 @@ export default function BybitTradingTerminal() {
   };
 
   const handleToggleSimulationOverride = async (enable: boolean) => {
+    // 1. Optimistic state update: immediate 0ms visual feedback
+    setMarketClock((prev) =>
+      prev
+        ? {
+            ...prev,
+            simulation_active: enable,
+            simulation_override: enable,
+            is_open: enable ? true : prev.raw_is_open,
+          }
+        : null
+    );
+
+    // 2. Broadcast custom event to Header and listeners
+    window.dispatchEvent(new CustomEvent("volhelix:simulation-override", { detail: { enabled: enable } }));
+
     try {
       const res = await setMarketSimulationOverride(enable);
       if (res && res.success) {
-        showToast(enable ? "Market Simulation Override Enabled (Trading Allowed)" : "Market Simulation Override Disabled (Strict Hours)");
-        await refreshAccountAndPositions();
+        showToast(
+          enable
+            ? "⚡ Dev Sim Override Enabled: Paper trading unlocked outside market hours"
+            : "Dev Sim Disabled: Strict US market hours enforced"
+        );
       }
+      await refreshAccountAndPositions();
     } catch {
       showToast("Failed to toggle simulation mode");
+      await refreshAccountAndPositions();
     }
   };
 
@@ -608,7 +629,8 @@ export default function BybitTradingTerminal() {
   }, [selectedStrategy, midPrice]);
 
   const handleBotTrade = async () => {
-    if (!marketClock?.is_open && !marketClock?.simulation_override) {
+    const isSimActive = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
+    if (!marketClock?.is_open && !isSimActive) {
       showToast("Market Closed! Trades only executable when US markets are open (09:30-16:00 ET). Enable Dev Sim to test.");
       return;
     }
@@ -1383,33 +1405,68 @@ export default function BybitTradingTerminal() {
               </div>
 
               {/* Market Hours Gating & Dev Simulation Toggle */}
-              <div className="flex items-center justify-between p-2 rounded bg-[#121214] border border-[#26282f] text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${marketClock?.is_open ? "bg-[#20b26c] animate-pulse" : "bg-[#ef454a]"}`} />
-                  <div>
-                    <span className={`font-bold text-[11px] block leading-tight ${marketClock?.is_open ? "text-[#20b26c]" : "text-[#ef454a]"}`}>
-                      {marketClock?.is_open ? "MARKET OPEN (09:30-16:00 ET)" : "MARKET CLOSED"}
-                    </span>
-                    {!marketClock?.is_open && (
-                      <span className="text-[9px] text-[#878996] block">
-                        {marketClock?.simulation_override ? "Sim Override Active (Executable)" : "Execution Gated until 09:30 ET"}
-                      </span>
-                    )}
+              {(() => {
+                const isSimActive = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
+                const isRawOpen = Boolean(marketClock?.raw_is_open);
+                return (
+                  <div className="flex items-center justify-between p-2.5 rounded bg-[#121214] border border-[#26282f] text-xs">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`w-2.5 h-2.5 rounded-full ${
+                          isRawOpen
+                            ? "bg-[#20b26c] animate-pulse"
+                            : isSimActive
+                            ? "bg-[#f7a600] animate-pulse shadow-[0_0_8px_rgba(247,166,0,0.6)]"
+                            : "bg-[#ef454a]"
+                        }`}
+                      />
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`font-bold text-[11px] block leading-tight ${
+                              isRawOpen
+                                ? "text-[#20b26c]"
+                                : isSimActive
+                                ? "text-[#f7a600]"
+                                : "text-[#ef454a]"
+                            }`}
+                          >
+                            {isRawOpen
+                              ? "MARKET OPEN (09:30-16:00 ET)"
+                              : isSimActive
+                              ? "DEV SIM ACTIVE (HOURS BYPASSED)"
+                              : "MARKET CLOSED"}
+                          </span>
+                          {isSimActive && !isRawOpen && (
+                            <span className="px-1 py-0.2 rounded text-[8px] font-extrabold bg-[#f7a600]/20 text-[#f7a600] border border-[#f7a600]/50 uppercase">
+                              SIM
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[9px] text-[#878996] block mt-0.5">
+                          {isSimActive
+                            ? "Sim Override Active • Paper Execution Unlocked"
+                            : isRawOpen
+                            ? "Regular US Trading Session Active"
+                            : "Execution Gated until 09:30 ET • Enable Dev Sim to test"}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSimulationOverride(!isSimActive)}
+                      className={`px-3 py-1.5 rounded text-[11px] font-bold border transition-all cursor-pointer select-none active:scale-95 ${
+                        isSimActive
+                          ? "bg-[#f7a600] border-[#f7a600] text-[#121214] font-black shadow-[0_0_12px_rgba(247,166,0,0.35)]"
+                          : "bg-[#1c1d22] border-[#26282f] text-[#878996] hover:text-[#f5f5f5] hover:border-[#383a42]"
+                      }`}
+                      title="Toggle Simulation Override to allow paper trading outside regular US market hours"
+                    >
+                      ⚡ Dev Sim: {isSimActive ? "ON" : "OFF"}
+                    </button>
                   </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleToggleSimulationOverride(!marketClock?.simulation_override)}
-                  className={`px-2 py-1 rounded text-[10px] font-bold border transition-all cursor-pointer ${
-                    marketClock?.simulation_override
-                      ? "bg-[#f7a600]/20 border-[#f7a600] text-[#f7a600] shadow-[0_0_8px_rgba(247,166,0,0.25)]"
-                      : "bg-[#1c1d22] border-[#26282f] text-[#878996] hover:text-[#f5f5f5]"
-                  }`}
-                  title="Toggle Simulation Override to allow paper trading outside regular US market hours"
-                >
-                  ⚡ Dev Sim: {marketClock?.simulation_override ? "ON" : "OFF"}
-                </button>
-              </div>
+                );
+              })()}
             </div>
 
             {/* Trade Mode Selector */}
@@ -1595,23 +1652,29 @@ export default function BybitTradingTerminal() {
                 </div>
 
                 {/* Submit Manual Order */}
-                <button
-                  onClick={handleManualOrder}
-                  disabled={isSubmitting || (!marketClock?.is_open && !marketClock?.simulation_override)}
-                  className={`w-full py-2.5 rounded font-bold text-xs cursor-pointer transition-all shadow-lg active:scale-95 ${
-                    orderSide === "BUY"
-                      ? "bg-[#20b26c] hover:bg-[#28c97b] text-[#121214]"
-                      : "bg-[#ef454a] hover:bg-[#f35b5f] text-[#f5f5f5]"
-                  } disabled:opacity-50`}
-                >
-                  {isSubmitting
-                    ? "Submitting..."
-                    : !marketClock?.is_open && !marketClock?.simulation_override
-                    ? "Market Closed (Opens 09:30 ET)"
-                    : orderType === "market"
-                    ? `Execute Market ${orderSide} @ $${midPrice.toFixed(2)} (Instant Position)`
-                    : `Submit Limit ${orderSide} @ $${limitPrice.toFixed(2)} (To Pending Tab)`}
-                </button>
+                {(() => {
+                  const isSimActive = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
+                  const isBlocked = !marketClock?.is_open && !isSimActive;
+                  return (
+                    <button
+                      onClick={handleManualOrder}
+                      disabled={isSubmitting || isBlocked}
+                      className={`w-full py-2.5 rounded font-bold text-xs cursor-pointer transition-all shadow-lg active:scale-95 ${
+                        orderSide === "BUY"
+                          ? "bg-[#20b26c] hover:bg-[#28c97b] text-[#121214]"
+                          : "bg-[#ef454a] hover:bg-[#f35b5f] text-[#f5f5f5]"
+                      } disabled:opacity-50`}
+                    >
+                      {isSubmitting
+                        ? "Submitting..."
+                        : isBlocked
+                        ? "Market Closed (Enable Dev Sim to test)"
+                        : orderType === "market"
+                        ? `Execute Market ${orderSide} @ $${midPrice.toFixed(2)} (Instant Position)`
+                        : `Submit Limit ${orderSide} @ $${limitPrice.toFixed(2)} (To Pending Tab)`}
+                    </button>
+                  );
+                })()}
               </div>
             ) : (
               <div className="space-y-2">
@@ -1888,17 +1951,23 @@ export default function BybitTradingTerminal() {
                 </div>
 
                 {/* Trigger Bot Order to Alpaca */}
-                <button
-                  onClick={handleBotTrade}
-                  disabled={isSubmitting || (!marketClock?.is_open && !marketClock?.simulation_override)}
-                  className="w-full py-2 rounded bg-[#f7a600] hover:bg-[#ffb11a] text-[#121214] font-extrabold text-xs cursor-pointer transition-all shadow-[0_0_10px_rgba(247,166,0,0.3)] disabled:opacity-50 active:scale-95"
-                >
-                  {isSubmitting
-                    ? "Executing Swarm..."
-                    : !marketClock?.is_open && !marketClock?.simulation_override
-                    ? "Market Closed (Opens 09:30 ET)"
-                    : "Execute Master Strategy Trade (Alpaca)"}
-                </button>
+                {(() => {
+                  const isSimActive = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
+                  const isBlocked = !marketClock?.is_open && !isSimActive;
+                  return (
+                    <button
+                      onClick={handleBotTrade}
+                      disabled={isSubmitting || isBlocked}
+                      className="w-full py-2 rounded bg-[#f7a600] hover:bg-[#ffb11a] text-[#121214] font-extrabold text-xs cursor-pointer transition-all shadow-[0_0_10px_rgba(247,166,0,0.3)] disabled:opacity-50 active:scale-95"
+                    >
+                      {isSubmitting
+                        ? "Executing Swarm..."
+                        : isBlocked
+                        ? "Market Closed (Enable Dev Sim to test)"
+                        : "Execute Master Strategy Trade (Alpaca)"}
+                    </button>
+                  );
+                })()}
               </div>
             )}
           </div>

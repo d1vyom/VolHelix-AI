@@ -306,22 +306,23 @@ export async function getMarketStatus(): Promise<MarketClockStatus> {
       is_open: false,
       raw_is_open: false,
       simulation_active: false,
+      simulation_override: false,
       current_time_et: "",
       reason: "Clock offline",
     };
   }
 }
 
-export async function setMarketSimulationOverride(enabled: boolean): Promise<{ success: boolean; simulation_active: boolean }> {
+export async function setMarketSimulationOverride(enabled: boolean): Promise<{ success: boolean; simulation_active: boolean; simulation_override: boolean; market_status?: MarketClockStatus }> {
   try {
     const res = await fetch(`${API_BASE}/api/market-status/simulation-override`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled }),
     });
-    return await safeJson<{ success: boolean; simulation_active: boolean }>(res, { success: true, simulation_active: enabled });
+    return await safeJson<{ success: boolean; simulation_active: boolean; simulation_override: boolean; market_status?: MarketClockStatus }>(res, { success: true, simulation_active: enabled, simulation_override: enabled });
   } catch {
-    return { success: false, simulation_active: enabled };
+    return { success: false, simulation_active: enabled, simulation_override: enabled };
   }
 }
 

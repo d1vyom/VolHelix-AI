@@ -91,6 +91,7 @@ def get_market_clock() -> Dict:
         "is_open": effective_is_open,
         "raw_is_open": raw_is_open,
         "simulation_active": _simulation_override,
+        "simulation_override": _simulation_override,
         "current_time_et": et_time_str,
         "next_open": next_open,
         "next_close": next_close,

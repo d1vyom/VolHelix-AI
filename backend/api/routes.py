@@ -119,10 +119,12 @@ class SimulationOverrideRequest(BaseModel):
 def toggle_market_simulation_override(req: SimulationOverrideRequest):
     from backend.utils.market_hours import set_simulation_override, get_market_clock
     set_simulation_override(req.enabled)
+    status = get_market_clock()
     return {
         "success": True,
         "simulation_active": req.enabled,
-        "market_status": get_market_clock()
+        "simulation_override": req.enabled,
+        "market_status": status
     }
 
 @router.get("/api/audit")
