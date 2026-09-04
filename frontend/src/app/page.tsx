@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
 import io from "socket.io-client";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -65,6 +65,156 @@ interface AgentLog {
 }
 
 type DockTab = "positions" | "pending" | "orders" | "debate" | "riskgate" | "history";
+
+interface OrderBookWidgetProps {
+  quote: AlpacaQuote;
+  midPrice: number;
+  tickStep: number;
+  selectedTicker: string;
+}
+
+const OrderBookWidget = memo(function OrderBookWidget({
+  quote,
+  midPrice,
+  tickStep,
+  selectedTicker,
+}: OrderBookWidgetProps) {
+  const [bookTick, setBookTick] = useState<number>(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setBookTick((t) => (t + 1) % 10000);
+    }, 600);
+    return () => clearInterval(timer);
+  }, []);
+
+  const { orderBookAsks, orderBookBids, spreadVal } = useMemo(() => {
+    const baseAsk = quote.ask || (midPrice + tickStep);
+    const baseBid = quote.bid || (midPrice - tickStep);
+    const spread = Math.max(0.01, quote.spread || (baseAsk - baseBid));
+
+    // High-frequency micro-variations synced with bookTick and real quote sizes
+    const seed = Math.sin(bookTick + midPrice) * 1000;
+    const askSizes = [
+      Math.max(20, Math.round((quote.ask_size || 76) + Math.sin(seed + 1) * 35)),
+      Math.max(40, Math.round(210 + Math.cos(seed + 2) * 55)),
+      Math.max(30, Math.round(95 + Math.sin(seed + 3) * 40)),
+      Math.max(50, Math.round(142 + Math.cos(seed + 4) * 60)),
+    ];
+    const bidSizes = [
+      Math.max(25, Math.round((quote.bid_size || 88) + Math.cos(seed + 5) * 35)),
+      Math.max(35, Math.round(164 + Math.sin(seed + 6) * 50)),
+      Math.max(60, Math.round(245 + Math.cos(seed + 7) * 70)),
+      Math.max(40, Math.round(110 + Math.sin(seed + 8) * 45)),
+    ];
+
+    const maxVol = Math.max(...askSizes, ...bidSizes, 1);
+
+    const asks = [
+      { price: baseAsk + tickStep * 3, size: askSizes[3], depth: Math.round((askSizes[3] / maxVol) * 100) },
+      { price: baseAsk + tickStep * 2, size: askSizes[2], depth: Math.round((askSizes[2] / maxVol) * 100) },
+      { price: baseAsk + tickStep * 1, size: askSizes[1], depth: Math.round((askSizes[1] / maxVol) * 100) },
+      { price: baseAsk, size: askSizes[0], depth: Math.round((askSizes[0] / maxVol) * 100) },
+    ];
+
+    const bids = [
+      { price: baseBid, size: bidSizes[0], depth: Math.round((bidSizes[0] / maxVol) * 100) },
+      { price: baseBid - tickStep * 1, size: bidSizes[1], depth: Math.round((bidSizes[1] / maxVol) * 100) },
+      { price: baseBid - tickStep * 2, size: bidSizes[2], depth: Math.round((bidSizes[2] / maxVol) * 100) },
+      { price: baseBid - tickStep * 3, size: bidSizes[3], depth: Math.round((bidSizes[3] / maxVol) * 100) },
+    ];
+
+    return { orderBookAsks: asks, orderBookBids: bids, spreadVal: spread };
+  }, [quote, midPrice, tickStep, bookTick]);
+
+  return (
+    <div className="rounded-lg bg-[#18191f] border border-[#26282f] p-3 font-mono shadow-lg">
+      <div className="flex items-center justify-between pb-2 border-b border-[#26282f] mb-2 text-[#878996]">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-[#f5f5f5]">Order Book ({selectedTicker})</span>
+          <span className="flex items-center gap-1 text-[9px] text-[#20b26c] font-bold px-1.5 py-0.2 rounded bg-[#20b26c]/10 border border-[#20b26c]/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c] animate-pulse" />
+            REALTIME
+          </span>
+        </div>
+        <span className="text-[10px] text-[#5e6673]">Spread ${spreadVal.toFixed(2)}</span>
+      </div>
+
+      {/* Asks (Red) */}
+      <div className="space-y-1">
+        {orderBookAsks.map((ask, i) => (
+          <div key={i} className="relative flex justify-between text-[11px] py-0.5 px-1 overflow-hidden">
+            <div
+              className="absolute right-0 top-0 bottom-0 bg-[#ef454a]/15 rounded transition-all duration-300 ease-out"
+              style={{ width: `${ask.depth}%` }}
+            />
+            <span className="relative text-[#ef454a] font-bold">${ask.price.toFixed(2)}</span>
+            <span className="relative text-[#878996] font-semibold">{ask.size}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Real Mark Price from Alpaca */}
+      <div className="py-2 my-1 border-y border-[#26282f] flex items-center justify-between text-xs">
+        <span className="font-extrabold text-sm text-[#20b26c]">${midPrice.toFixed(2)}</span>
+        <span className="text-[10px] text-[#878996] flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c]" />
+          Alpaca Real Last
+        </span>
+      </div>
+
+      {/* Bids (Green) */}
+      <div className="space-y-1">
+        {orderBookBids.map((bid, i) => (
+          <div key={i} className="relative flex justify-between text-[11px] py-0.5 px-1 overflow-hidden">
+            <div
+              className="absolute right-0 top-0 bottom-0 bg-[#20b26c]/15 rounded transition-all duration-300 ease-out"
+              style={{ width: `${bid.depth}%` }}
+            />
+            <span className="relative text-[#20b26c] font-bold">${bid.price.toFixed(2)}</span>
+            <span className="relative text-[#878996] font-semibold">{bid.size}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
+
+const VolumeBarChart = memo(function VolumeBarChart({ bars }: { bars: AlpacaBar[] }) {
+  return (
+    <>
+      <div className="px-3 py-1 bg-[#16171b] border-t border-[#1f2128] flex items-center justify-between text-[10px] font-mono text-[#878996]">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-[#f5f5f5]">Trading Volume (Vol)</span>
+          <span className="text-[#5e6673]">|</span>
+          <span>Green Bars = Shares Traded Per Interval</span>
+        </div>
+        <span className="text-[#20b26c] font-semibold">
+          Latest: {bars.length > 0 ? `${(bars[bars.length - 1].volume / 1000).toFixed(1)}K shares` : "--"}
+        </span>
+      </div>
+
+      <div className="h-16 w-full px-2 pb-2 bg-[#121214]">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={bars} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "#18191f",
+                border: "1px solid #26282f",
+                borderRadius: "6px",
+                fontFamily: "monospace",
+                fontSize: "11px",
+              }}
+              formatter={(val) => [`${Number(val).toLocaleString()} shares`, "Traded Volume"]}
+              labelStyle={{ color: "#20b26c", fontWeight: "bold" }}
+            />
+            <Bar dataKey="volume" name="Volume" fill="#20b26c" opacity={0.65} radius={[2, 2, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </>
+  );
+});
 
 export default function BybitTradingTerminal() {
   const [activeTab, setActiveTab] = useState<DockTab>("positions");
@@ -169,15 +319,7 @@ export default function BybitTradingTerminal() {
   const barsCache = useRef<Record<string, AlpacaBar[]>>({});
   const lastSymbolRef = useRef<string>("SPY");
   const currentFetchId = useRef<number>(0);
-  const [bookTick, setBookTick] = useState<number>(0);
-
-  // High-frequency 400ms tick interval for live Order Book updates
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setBookTick((t) => (t + 1) % 10000);
-    }, 400);
-    return () => clearInterval(timer);
-  }, []);
+  const orderFlowLoadedRef = useRef<Record<string, boolean>>({});
 
   const showToast = (text: string) => {
     setToastMsg(text);
@@ -230,12 +372,24 @@ export default function BybitTradingTerminal() {
     getAlpacaQuote(sym).then((q) => {
       if (fetchId !== currentFetchId.current) return;
       if (q && q.symbol === sym) {
-        setQuote(q);
+        setQuote((prev) => {
+          if (
+            prev.symbol === q.symbol &&
+            prev.last === q.last &&
+            prev.bid === q.bid &&
+            prev.ask === q.ask &&
+            prev.spread === q.spread
+          ) {
+            return prev;
+          }
+          return q;
+        });
       }
     }).catch(() => {});
 
-    // 4. Heavy Order Flow Analytics: Only fetch when symbol changes or missing
-    if (symbolChanged || !orderFlow) {
+    // 4. Heavy Order Flow Analytics: Only fetch once per symbol or if missing
+    if (symbolChanged || !orderFlowLoadedRef.current[sym]) {
+      orderFlowLoadedRef.current[sym] = true;
       getOrderFlowAnalytics(sym).then((ofData) => {
         if (fetchId !== currentFetchId.current) return;
         if (ofData && ofData.success) {
@@ -243,23 +397,7 @@ export default function BybitTradingTerminal() {
         }
       }).catch(() => {});
     }
-
-    // 5. Background Warm-Up: Pre-fetch adjacent timeframes so subsequent switches are 0ms instant
-    const otherTfs = ["1m", "5m", "15m", "1H", "4H", "1D"].filter((t) => t !== tf);
-    setTimeout(() => {
-      if (fetchId !== currentFetchId.current) return;
-      otherTfs.forEach((otherTf) => {
-        const otherKey = `${sym}_${otherTf}`;
-        if (!barsCache.current[otherKey]) {
-          getAlpacaBars(sym, otherTf).then((cachedB) => {
-            if (cachedB && cachedB.length > 0) {
-              barsCache.current[otherKey] = cachedB;
-            }
-          }).catch(() => {});
-        }
-      });
-    }, 200);
-  }, [orderFlow]);
+  }, []);
 
   // 1. Initial mount: Connect persistent socket and poll account every 10s
   useEffect(() => {
@@ -320,12 +458,23 @@ export default function BybitTradingTerminal() {
       try {
         const q = await getAlpacaQuote(selectedTicker);
         if (isMounted && q && q.symbol === selectedTicker) {
-          setQuote(q);
+          setQuote((prev) => {
+            if (
+              prev.symbol === q.symbol &&
+              prev.last === q.last &&
+              prev.bid === q.bid &&
+              prev.ask === q.ask &&
+              prev.spread === q.spread
+            ) {
+              return prev;
+            }
+            return q;
+          });
         }
       } catch {
         // ignore
       }
-    }, 800);
+    }, 1500);
 
     return () => {
       isMounted = false;
@@ -577,44 +726,7 @@ export default function BybitTradingTerminal() {
     }
   };
 
-  const { orderBookAsks, orderBookBids, spreadVal } = useMemo(() => {
-    const baseAsk = quote.ask || (midPrice + tickStep);
-    const baseBid = quote.bid || (midPrice - tickStep);
-    const spread = Math.max(0.01, quote.spread || (baseAsk - baseBid));
 
-    // High-frequency micro-variations synced with bookTick and real quote sizes
-    const seed = Math.sin(bookTick + midPrice) * 1000;
-    const askSizes = [
-      Math.max(20, Math.round((quote.ask_size || 76) + Math.sin(seed + 1) * 35)),
-      Math.max(40, Math.round(210 + Math.cos(seed + 2) * 55)),
-      Math.max(30, Math.round(95 + Math.sin(seed + 3) * 40)),
-      Math.max(50, Math.round(142 + Math.cos(seed + 4) * 60)),
-    ];
-    const bidSizes = [
-      Math.max(25, Math.round((quote.bid_size || 88) + Math.cos(seed + 5) * 35)),
-      Math.max(35, Math.round(164 + Math.sin(seed + 6) * 50)),
-      Math.max(60, Math.round(245 + Math.cos(seed + 7) * 70)),
-      Math.max(40, Math.round(110 + Math.sin(seed + 8) * 45)),
-    ];
-
-    const maxVol = Math.max(...askSizes, ...bidSizes, 1);
-
-    const asks = [
-      { price: baseAsk + tickStep * 3, size: askSizes[3], depth: Math.round((askSizes[3] / maxVol) * 100) },
-      { price: baseAsk + tickStep * 2, size: askSizes[2], depth: Math.round((askSizes[2] / maxVol) * 100) },
-      { price: baseAsk + tickStep * 1, size: askSizes[1], depth: Math.round((askSizes[1] / maxVol) * 100) },
-      { price: baseAsk, size: askSizes[0], depth: Math.round((askSizes[0] / maxVol) * 100) },
-    ];
-
-    const bids = [
-      { price: baseBid, size: bidSizes[0], depth: Math.round((bidSizes[0] / maxVol) * 100) },
-      { price: baseBid - tickStep * 1, size: bidSizes[1], depth: Math.round((bidSizes[1] / maxVol) * 100) },
-      { price: baseBid - tickStep * 2, size: bidSizes[2], depth: Math.round((bidSizes[2] / maxVol) * 100) },
-      { price: baseBid - tickStep * 3, size: bidSizes[3], depth: Math.round((bidSizes[3] / maxVol) * 100) },
-    ];
-
-    return { orderBookAsks: asks, orderBookBids: bids, spreadVal: spread };
-  }, [quote, midPrice, tickStep, bookTick]);
 
   return (
     <div className="space-y-3 select-none text-xs">
@@ -763,37 +875,8 @@ export default function BybitTradingTerminal() {
               currentPrice={quote.symbol === selectedTicker ? quote.last : undefined}
             />
 
-            {/* Trading Volume Sub-Chart Description Header */}
-            <div className="px-3 py-1 bg-[#16171b] border-t border-[#1f2128] flex items-center justify-between text-[10px] font-mono text-[#878996]">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-[#f5f5f5]">Trading Volume (Vol)</span>
-                <span className="text-[#5e6673]">|</span>
-                <span>Green Bars = Shares Traded Per Interval</span>
-              </div>
-              <span className="text-[#20b26c] font-semibold">
-                Latest: {bars.length > 0 ? `${(bars[bars.length - 1].volume / 1000).toFixed(1)}K shares` : "--"}
-              </span>
-            </div>
-
             {/* Volume Sub-Chart */}
-            <div className="h-16 w-full px-2 pb-2 bg-[#121214]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={bars} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#18191f",
-                      border: "1px solid #26282f",
-                      borderRadius: "6px",
-                      fontFamily: "monospace",
-                      fontSize: "11px",
-                    }}
-                    formatter={(val) => [`${Number(val).toLocaleString()} shares`, "Traded Volume"]}
-                    labelStyle={{ color: "#20b26c", fontWeight: "bold" }}
-                  />
-                  <Bar dataKey="volume" name="Volume" fill="#20b26c" opacity={0.65} radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            <VolumeBarChart bars={bars} />
           </div>
 
           {/* Bottom Trading Dock (Bybit Style) */}
@@ -1276,55 +1359,12 @@ export default function BybitTradingTerminal() {
         {/* Right Column (4 cols): Order Book + Order Execution Panel */}
         <div className="lg:col-span-4 space-y-3">
           {/* Bybit Order Book */}
-          <div className="rounded-lg bg-[#18191f] border border-[#26282f] p-3 font-mono shadow-lg">
-            <div className="flex items-center justify-between pb-2 border-b border-[#26282f] mb-2 text-[#878996]">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-[#f5f5f5]">Order Book ({selectedTicker})</span>
-                <span className="flex items-center gap-1 text-[9px] text-[#20b26c] font-bold px-1.5 py-0.2 rounded bg-[#20b26c]/10 border border-[#20b26c]/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c] animate-pulse" />
-                  REALTIME
-                </span>
-              </div>
-              <span className="text-[10px] text-[#5e6673]">Spread ${spreadVal.toFixed(2)}</span>
-            </div>
-
-            {/* Asks (Red) */}
-            <div className="space-y-1">
-              {orderBookAsks.map((ask, i) => (
-                <div key={i} className="relative flex justify-between text-[11px] py-0.5 px-1 overflow-hidden">
-                  <div
-                    className="absolute right-0 top-0 bottom-0 bg-[#ef454a]/15 rounded transition-all duration-300 ease-out"
-                    style={{ width: `${ask.depth}%` }}
-                  />
-                  <span className="relative text-[#ef454a] font-bold">${ask.price.toFixed(2)}</span>
-                  <span className="relative text-[#878996] font-semibold">{ask.size}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Real Mark Price from Alpaca */}
-            <div className="py-2 my-1 border-y border-[#26282f] flex items-center justify-between text-xs">
-              <span className="font-extrabold text-sm text-[#20b26c]">${midPrice.toFixed(2)}</span>
-              <span className="text-[10px] text-[#878996] flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c]" />
-                Alpaca Real Last
-              </span>
-            </div>
-
-            {/* Bids (Green) */}
-            <div className="space-y-1">
-              {orderBookBids.map((bid, i) => (
-                <div key={i} className="relative flex justify-between text-[11px] py-0.5 px-1 overflow-hidden">
-                  <div
-                    className="absolute right-0 top-0 bottom-0 bg-[#20b26c]/15 rounded transition-all duration-300 ease-out"
-                    style={{ width: `${bid.depth}%` }}
-                  />
-                  <span className="relative text-[#20b26c] font-bold">${bid.price.toFixed(2)}</span>
-                  <span className="relative text-[#878996] font-semibold">{bid.size}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <OrderBookWidget
+            quote={quote}
+            midPrice={midPrice}
+            tickStep={tickStep}
+            selectedTicker={selectedTicker}
+          />
 
           {/* Real Alpaca Order Execution & Bot Panel */}
           <div className="rounded-lg bg-[#18191f] border border-[#26282f] p-3 font-mono space-y-3 shadow-lg">

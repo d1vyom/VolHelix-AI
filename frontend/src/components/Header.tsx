@@ -90,9 +90,15 @@ export function Header() {
           getMarketStatus(),
         ]);
         if (!isMounted) return;
-        setQuote(q);
-        setAccount(acc);
-        setMarketClock(mkt);
+        if (q) {
+          setQuote((prev) => (prev?.last === q.last && prev?.bid === q.bid && prev?.ask === q.ask ? prev : q));
+        }
+        if (acc) {
+          setAccount((prev) => (prev?.portfolio_value === acc.portfolio_value && prev?.buying_power === acc.buying_power ? prev : acc));
+        }
+        if (mkt) {
+          setMarketClock((prev) => (prev?.is_open === mkt.is_open && prev?.current_time_et === mkt.current_time_et && prev?.simulation_active === mkt.simulation_active ? prev : mkt));
+        }
       } catch {
         // ignore
       }

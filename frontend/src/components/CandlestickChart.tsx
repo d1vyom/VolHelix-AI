@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo, useCallback, useEffect } from "react";
+import { useState, useRef, useMemo, useCallback, useEffect, memo } from "react";
 import { AlpacaBar } from "../lib/api";
 import { ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 
@@ -11,7 +11,7 @@ interface CandlestickChartProps {
   currentPrice?: number;
 }
 
-export function CandlestickChart({
+export const CandlestickChart = memo(function CandlestickChart({
   data,
   chartType = "CANDLE",
   chartInterval = "1H",
@@ -632,4 +632,4 @@ export function CandlestickChart({
       </svg>
     </div>
   );
-}
+});

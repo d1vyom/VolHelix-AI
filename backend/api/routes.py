@@ -258,17 +258,40 @@ def _get_cached(key: str, ttl: float = 3.0):
 def _set_cached(key: str, data):
     _CACHE[key] = {"time": time.time(), "data": data}
 
-def _invalidate_cache():
-    _CACHE.clear()
+def _invalidate_cache(prefixes: list = None):
+    global _CACHE
+    if prefixes:
+        for k in list(_CACHE.keys()):
+            if any(k.startswith(p) for p in prefixes):
+                _CACHE.pop(k, None)
+    else:
+        # Default: clear only volatile trade/order/account caches, preserving bars and heavy analytics
+        volatile = ["positions", "orders", "account", "history"]
+        for k in list(_CACHE.keys()):
+            if any(k.startswith(p) for p in volatile):
+                _CACHE.pop(k, None)
+
+_trading_client = None
+_stock_client = None
+_crypto_client = None
 
 def _get_alpaca_trading_client():
-    return TradingClient(settings.ALPACA_API_KEY, settings.ALPACA_API_SECRET, paper=True)
+    global _trading_client
+    if _trading_client is None:
+        _trading_client = TradingClient(settings.ALPACA_API_KEY, settings.ALPACA_API_SECRET, paper=True)
+    return _trading_client
 
 def _get_stock_client():
-    return StockHistoricalDataClient(settings.ALPACA_API_KEY, settings.ALPACA_API_SECRET)
+    global _stock_client
+    if _stock_client is None:
+        _stock_client = StockHistoricalDataClient(settings.ALPACA_API_KEY, settings.ALPACA_API_SECRET)
+    return _stock_client
 
 def _get_crypto_client():
-    return CryptoHistoricalDataClient(settings.ALPACA_API_KEY, settings.ALPACA_API_SECRET)
+    global _crypto_client
+    if _crypto_client is None:
+        _crypto_client = CryptoHistoricalDataClient(settings.ALPACA_API_KEY, settings.ALPACA_API_SECRET)
+    return _crypto_client
 
 @router.get("/api/alpaca/account")
 def get_alpaca_account():
@@ -487,7 +510,7 @@ async def cancel_all_alpaca_orders():
 @router.get("/api/alpaca/quote")
 def get_alpaca_quote(symbol: str = "SPY"):
     cache_key = f"quote_{symbol}"
-    cached = _get_cached(cache_key, ttl=0.8)
+    cached = _get_cached(cache_key, ttl=1.8)
     if cached is not None:
         return cached
     try:
@@ -1122,6 +1145,11 @@ async def execute_bot_trade(req: BotExecutionRequest):
 def get_order_flow_analytics(symbol: str = "SPY"):
     """Return live Order Blocks, Fair Value Gaps, Liquidity Heatmap, and Gamma Profile."""
     clean_sym = symbol.replace("/USDT", "").replace("-USDT", "").replace("/USD", "")
+    cache_key = f"order_flow_{clean_sym}"
+    cached = _get_cached(cache_key, ttl=30.0)
+    if cached is not None:
+        return cached
+
     try:
         mcp = AlpacaClient()
         bars_data = mcp.get_stock_bars(clean_sym, days=20)
@@ -1129,11 +1157,13 @@ def get_order_flow_analytics(symbol: str = "SPY"):
         order_flow = analyze_order_flow(clean_sym, bars)
         chain = mcp.get_option_chain(clean_sym)
         gamma = calculate_gamma_profile(chain.get("legs", []), order_flow.current_price)
-        return {
+        res = {
             "success": True,
             "order_flow": order_flow.model_dump(),
             "gamma_profile": gamma.model_dump()
         }
+        _set_cached(cache_key, res)
+        return res
     except Exception as e:
         return {
             "success": False,
