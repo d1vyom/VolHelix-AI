@@ -53,3 +53,38 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - [x] Branch exists (`feat/order-flow-terminal`); baseline test/lint/build results logged.
 - [x] `tickSize` for all 5 symbols recorded.
 - [x] No source file modified yet (only pre-flight docs/config).
+
+---
+
+## Phase 1 — Data Contracts
+
+**Date:** 2026-09-18  
+**Status:** COMPLETE  
+
+### 1. Changes
+- Extended `backend/config.py` with the complete `Order Flow Engine` settings block (`FLOW_*`) and derived properties `FLOW_SYMBOLS` and `FLOW_FOOTPRINT_INTERVALS`.
+- Mirrored all `FLOW_*` configuration settings into `.env.example`.
+- Created `backend/marketdata/__init__.py`.
+- Created `backend/marketdata/models.py` with Pydantic v2 models: `Trade`, `BookDelta`, `BookSnapshot`, `LadderLevel`, `StreamHealth`.
+- Created `backend/engine/flow_models.py` with Pydantic v2 models: `FootprintCell`, `FootprintBar`, `VolumeProfileLevel`, `VolumeProfileSnapshot`, `CVDPoint`, `TapeEntry`, `HeatmapFrame`, `HeatmapSnapshot`, `DomAnalytics`, `FlowMetrics`.
+- Created `backend/marketdata/normalizer.py` implementing `normalize_agg_trade`, `normalize_depth_update`, and `normalize_depth_snapshot` with explicit Binance aggressor logic (`m=True` -> `SELL`, `m=False` -> `BUY`).
+- Created `backend/tests/test_normalizer.py` verifying aggressor side derivation, combined stream unwrap, and depth diff parsing.
+- Created `frontend/src/lib/flow/flowTypes.ts` with 1:1 snake_case TypeScript interfaces mirroring all backend models.
+- Created `frontend/src/lib/flow/index.ts` exporting flow type definitions.
+
+### 2. Verification
+- `python -c "import backend.engine.flow_models"` -> clean import success.
+- `python -m pytest backend/tests/test_normalizer.py -v` -> 3 passed in 0.04s:
+  - `test_aggressor_side_derivation` PASSED (`m=True` -> `side=="SELL"`, `m=False` -> `side=="BUY"`)
+  - `test_combined_stream_wrapper_handling` PASSED
+  - `test_depth_update_normalization` PASSED
+- `npm run lint` -> 0 errors.
+- `npm run build` -> Next.js 16.3.4 (Turbopack) production build passed cleanly.
+- `python -m pytest backend/tests -q` -> 62 passed in 28.94s (all 59 baseline tests + 3 new tests).
+
+### 3. Acceptance Criteria Verification
+- [x] `backend/marketdata/models.py` and `backend/engine/flow_models.py` import cleanly.
+- [x] `backend/tests/test_normalizer.py` contains mandatory aggressor-side test.
+- [x] TS interfaces compile under `npm run build`.
+- [x] Existing 59 tests still pass (62 passed total).
+
