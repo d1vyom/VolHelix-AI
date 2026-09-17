@@ -272,6 +272,8 @@ class BinanceClient:
         self._log_call("get_24hr_ticker", {"symbol": symbol}, res, start)
         return res
 
+    get_ticker_24hr = get_24hr_ticker
+
     def get_all_tickers(self) -> List[dict]:
         """Get prices for all active symbols (Production)."""
         cache_key = "all_tickers"
