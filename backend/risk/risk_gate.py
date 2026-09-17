@@ -141,7 +141,7 @@ class CryptoRiskGate:
             existing_asset_val = portfolio.balances.get(base_asset, None)
             existing_asset_val = existing_asset_val.value_usdt if existing_asset_val else 0.0
         elif hasattr(portfolio, "exposures"):
-            existing_asset_val = portfolio.exposures.get(symbol, 0.0)
+            existing_asset_val = portfolio.exposures.get(symbol, portfolio.exposures.get(base_asset, 0.0))
 
         new_concentration_pct = (existing_asset_val + position_value) / nav if nav > 0 else 0.0
         conc_passed = new_concentration_pct <= self.MAX_SINGLE_ASSET_PCT
