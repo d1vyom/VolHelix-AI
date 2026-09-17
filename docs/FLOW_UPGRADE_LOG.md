@@ -183,3 +183,9 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - Constructed `frontend/src/lib/flow/useFlowSocket.ts` to manage `socket.io-client` symbol subscriptions.
 - Created `frontend/src/lib/flow/flowFormat.ts` for compact numbers, price ticks, and IST formatting.
 - Resolved all TypeScript and Lint issues. `npm run lint` and `npm run build` are clean.
+
+### Phase 7: Central App & Layout
+- **Date:** 2026-09-17
+- **Status:** Completed
+- **Details:** Created full-bleed terminal layout, panel frames, stream health badge, FlowMetricsStrip, FootprintChart, DOMLadder, TimeAndSales, LiquidityHeatmap, VolumeProfile, and CVDPanel. Migrated to React 19 / useSyncExternalStore via useFlowStore hook. All panels wired up to singleton flowStore. Build succeeds.
+

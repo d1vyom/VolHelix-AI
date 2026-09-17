@@ -2,7 +2,7 @@ import { safeJson } from "../api";
 import { 
   StreamHealth, FootprintBar, TapeEntry, DomAnalytics, 
   HeatmapSnapshot, VolumeProfileSnapshot, FlowMetrics, CVDPoint
-} from "./types";
+} from "./flowTypes";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 

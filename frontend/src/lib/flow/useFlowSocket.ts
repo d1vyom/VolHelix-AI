@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { io, Socket } from "socket.io-client";
-import { flowStore } from "./useFlowStore";
+import { flowStore } from "@/lib/flow/useFlowStore";
+
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 

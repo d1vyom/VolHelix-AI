@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from "react";
+
 import {
   FootprintBar, TapeEntry, DomAnalytics, HeatmapFrame,
   VolumeProfileSnapshot, FlowMetrics, StreamHealth
-} from "./types";
+} from "./flowTypes";
 import { getTape, getFootprint, getDom, getMetrics } from "./flowApi";
 
 export interface FlowState {
