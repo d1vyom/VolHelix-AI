@@ -350,7 +350,7 @@ export default function VolatilityLab() {
                 return (
                   <div
                     key={idx}
-                    className="flex-1 min-w-[85px] p-2.5 rounded-xl border text-center font-mono space-y-1"
+                    className="flex-1 min-w-21.25 p-2.5 rounded-xl border text-center font-mono space-y-1"
                     style={{
                       backgroundColor: `${color}15`,
                       borderColor: `${color}35`,
