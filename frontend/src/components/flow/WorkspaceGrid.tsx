@@ -1,14 +1,16 @@
 "use client";
 
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { FlowMetricsStrip } from "./FlowMetricsStrip";
-import { FootprintChart } from "./FootprintChart";
-import { DOMLadder } from "./DOMLadder";
-import { TimeAndSales } from "./TimeAndSales";
-import { LiquidityHeatmap } from "./LiquidityHeatmap";
-import { CVDPanel } from "./CVDPanel";
-import { VolumeProfile } from "./VolumeProfile";
+
+const FootprintChart = dynamic(() => import("./FootprintChart").then(mod => mod.FootprintChart), { ssr: false });
+const DOMLadder = dynamic(() => import("./DOMLadder").then(mod => mod.DOMLadder), { ssr: false });
+const TimeAndSales = dynamic(() => import("./TimeAndSales").then(mod => mod.TimeAndSales), { ssr: false });
+const LiquidityHeatmap = dynamic(() => import("./LiquidityHeatmap").then(mod => mod.LiquidityHeatmap), { ssr: false });
+const CVDPanel = dynamic(() => import("./CVDPanel").then(mod => mod.CVDPanel), { ssr: false });
+const VolumeProfile = dynamic(() => import("./VolumeProfile").then(mod => mod.VolumeProfile), { ssr: false });
 
 const getLayout = (id: string) => {
   if (typeof window === "undefined") return undefined;

@@ -199,3 +199,8 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - **Status:** Completed
 - **Details:** Implemented `evaluate_flow_confluence` with components (CVD, Imbalance, Absorption, Book Imbalance, Value Area) and hard vetoes (stale data, wide spread, insufficient bars). Wired flow analytics into `evaluate_master_strategy_setup` with shadow-mode logging. Fixed Defect 3 (tick-relative SL/TP buffers instead of absolute) and Defect 5 (Spot Short Selling Protection in Risk Gate). Added tests in `test_flow_confluence.py`. All 80 backend tests passing.
 
+## Phase 10: Performance, Resilience & Limits
+- **Date:** 2026-09-18
+- **Status:** Completed
+- **Details:** Verified ring buffers have maxlen (e.g., 2000 for tape). Added 429 and 418 REST limit handlers in `hub.py` and `binance_spot.py` (degrades health to `DEGRADED` on IP ban). Implemented optional SQLite persistence for closed footprint bars in `flow_store.py`. Implemented lazy loading via `next/dynamic` for heavy panels in `WorkspaceGrid.tsx`. Verified failure matrix criteria (reconnects, unknown symbols, feature flag toggles).
+

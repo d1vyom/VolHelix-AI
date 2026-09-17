@@ -53,6 +53,8 @@ class BinanceSpotConnector:
         params = {"symbol": symbol.upper(), "limit": limit}
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, params=params, timeout=10.0)
+            if resp.status_code == 429 or resp.status_code == 418:
+                resp.raise_for_status() # Let it bubble up as HTTPStatusError
             resp.raise_for_status()
             data = resp.json()
             return normalize_depth_snapshot(data, symbol, source="REST")

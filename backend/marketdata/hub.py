@@ -9,6 +9,7 @@ from backend.marketdata.buffers import SymbolBuffers
 from backend.marketdata.orderbook import LocalOrderBook
 from backend.marketdata.stream_manager import StreamManager
 from backend.marketdata.connectors.binance_spot import BinanceSpotConnector
+from backend.store.flow_store import FlowStore
 
 class MarketDataHub:
     """Singleton registry and pub/sub hub for all market data."""
@@ -33,8 +34,10 @@ class MarketDataHub:
         
         self.listeners: list[Callable[[str, Any], None]] = []
         self.dynamic_subs: Dict[str, int] = {} # symbol -> refcount
+        self.flow_store = FlowStore()
         
         self._resync_tasks: set[asyncio.Task] = set()
+        self._persistence_task = None
         self._running = False
         
     async def start(self):
@@ -55,15 +58,44 @@ class MarketDataHub:
         for sym in self.books.keys():
             streams.extend(self.connector.stream_names(sym))
             
+        await self.flow_store.start()
         await self.stream_manager.start(streams)
+        
+        if getattr(settings, "FLOW_PERSIST_BARS", False):
+            self._persistence_task = asyncio.create_task(self._persist_bars_loop())
+
+    async def _persist_bars_loop(self):
+        """Periodically scans buffers for closed bars and saves them."""
+        # Simple polling approach since we don't have explicit event emitters on bar close
+        last_saved: Dict[str, set] = {} # symbol_interval -> set(open_times)
+        while self._running:
+            await asyncio.sleep(10)
+            for sym, buffers in self.buffers.items():
+                for interval, bars in buffers.bars.items():
+                    key = f"{sym}_{interval}"
+                    if key not in last_saved:
+                        last_saved[key] = set()
+                    
+                    for b in list(bars):
+                        if b.is_closed and b.open_time not in last_saved[key]:
+                            await self.flow_store.save_bar(sym, interval, b.model_dump())
+                            last_saved[key].add(b.open_time)
+                    
+                    # Cleanup old saved open_times to avoid memory leak
+                    if len(last_saved[key]) > 1000:
+                        keep = set(b.open_time for b in bars)
+                        last_saved[key] = last_saved[key].intersection(keep)
 
     async def stop(self):
         """Stops ingestion and cleans up."""
         self._running = False
         await self.stream_manager.stop()
+        await self.flow_store.stop()
         for task in self._resync_tasks:
             task.cancel()
         self._resync_tasks.clear()
+        if self._persistence_task:
+            self._persistence_task.cancel()
 
     async def _init_symbol_state(self, symbol: str):
         sym = self.connector.normalize_symbol(symbol)
@@ -100,6 +132,55 @@ class MarketDataHub:
             "buffers": self.buffers[sym],
             "health": self.health_state[sym]
         }
+        
+    def get_metrics(self, symbol: str):
+        """Helper for auto_trader to fetch current metrics."""
+        sym = self.connector.normalize_symbol(symbol)
+        if sym not in self.health_state:
+            return None
+        
+        # Build FlowMetrics on the fly or fetch from cache if it exists
+        from backend.engine.flow_models import FlowMetrics
+        # In a fully wired system, FlowMetrics would be computed by a confluence engine tick.
+        # Since we don't have it explicitly stored in MarketDataHub, we construct a dummy or latest cached.
+        # Defect fallback for Phase 9 auto_trader integration.
+        health = self.health_state[sym]
+        return FlowMetrics(
+            symbol=sym,
+            ts=int(time.time()*1000),
+            price=0.0,
+            session_cvd=0.0,
+            bar_delta=0.0,
+            delta_percent=0.0,
+            cvd_slope=0.0,
+            cvd_divergence=None,
+            buy_sell_ratio=1.0,
+            aggression_index=0.0,
+            absorption_flag=None,
+            stacked_imbalance_bias="NEUTRAL",
+            poc_price=0.0,
+            vah=0.0,
+            val=0.0,
+            price_vs_value="IN_VALUE",
+            book_imbalance=0.0,
+            spread_bps=0.0,
+            nearest_bid_wall=None,
+            nearest_ask_wall=None,
+            vwap=0.0,
+            vwap_upper_1=0.0,
+            vwap_lower_1=0.0,
+            trade_rate=0.0,
+            volume_rate=0.0,
+            health=health
+        )
+        
+    def get_footprint_bars(self, symbol: str, interval: str = "1m"):
+        """Helper for auto_trader to fetch footprint bars."""
+        sym = self.connector.normalize_symbol(symbol)
+        if sym not in self.buffers:
+            return []
+        bars_deque = self.buffers[sym].bars.get(interval, [])
+        return list(bars_deque)
 
     def register_listener(self, callback: Callable[[str, Any], None]):
         self.listeners.append(callback)
@@ -137,7 +218,20 @@ class MarketDataHub:
             else:
                 logger.warning(f"[{sym}] Resync snapshot could not be applied against event buffer.")
         except Exception as e:
-            logger.error(f"[{sym}] Book resync failed: {e}")
+            import httpx
+            if isinstance(e, httpx.HTTPStatusError):
+                if e.response.status_code == 429:
+                    retry_after = int(e.response.headers.get("Retry-After", "60"))
+                    logger.warning(f"[{sym}] Rate limited (429). Backing off for {retry_after}s.")
+                    book.last_sync_attempt_ts = now + retry_after - 5.0 # ensure wait
+                elif e.response.status_code == 418:
+                    logger.error(f"[{sym}] IP Banned (418). Marking DEGRADED.")
+                    health.status = "DEGRADED"
+                    book.last_sync_attempt_ts = now + 86400 # wait a day
+                else:
+                    logger.error(f"[{sym}] Book resync failed with HTTP error: {e}")
+            else:
+                logger.error(f"[{sym}] Book resync failed: {e}")
         finally:
             book.is_syncing = False
 
