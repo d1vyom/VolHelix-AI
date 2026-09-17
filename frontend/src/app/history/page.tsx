@@ -433,7 +433,7 @@ function TradeHistoryContent() {
                       {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
                     </td>
                     <td className="py-3.5 px-3 text-right text-[#848e9c]">
-                      {new Date(t.entry_time).toLocaleDateString()} {new Date(t.entry_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {t.entry_time ? `${new Date(t.entry_time).toLocaleDateString()} ${new Date(t.entry_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : "—"}
                     </td>
                     <td className="py-3.5 px-3 text-right">
                       <span
