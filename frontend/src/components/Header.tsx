@@ -3,28 +3,27 @@
 import { useEffect, useState, useRef } from "react";
 import { Clock, Download, Play, Zap, ChevronDown, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getAlpacaAccount, getAlpacaQuote, getMarketStatus, AlpacaQuote, AlpacaAccount } from "../lib/api";
+import { getExchangeAccount, getExchangeQuote, getMarketStatus, ExchangeQuote, ExchangeAccount } from "../lib/api";
 import { MarketClockStatus } from "../lib/types";
 
 const TICKERS = [
-  { symbol: "SPY", name: "S&P 500 ETF", market: "USDT-OPT" },
-  { symbol: "QQQ", name: "Invesco QQQ Trust", market: "USDT-OPT" },
-  { symbol: "AAPL", name: "Apple Inc.", market: "USDT-OPT" },
-  { symbol: "NVDA", name: "NVIDIA Corp.", market: "USDT-OPT" },
-  { symbol: "TSLA", name: "Tesla Inc.", market: "USDT-OPT" },
+  { symbol: "BTCUSDT", name: "Bitcoin / USDT", market: "SPOT" },
+  { symbol: "ETHUSDT", name: "Ethereum / USDT", market: "SPOT" },
+  { symbol: "SOLUSDT", name: "Solana / USDT", market: "SPOT" },
+  { symbol: "BNBUSDT", name: "BNB / USDT", market: "SPOT" },
+  { symbol: "XRPUSDT", name: "XRP / USDT", market: "SPOT" },
 ];
 
 export function Header() {
-  const [selectedTicker, setSelectedTicker] = useState<string>("SPY");
+  const [selectedTicker, setSelectedTicker] = useState<string>("BTCUSDT");
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
-  const [quote, setQuote] = useState<AlpacaQuote | null>(null);
-  const [account, setAccount] = useState<AlpacaAccount | null>(null);
+  const [quote, setQuote] = useState<ExchangeQuote | null>(null);
+  const [account, setAccount] = useState<ExchangeAccount | null>(null);
 
-  const [timeStr, setTimeStr] = useState("");
+  const [utcTimeStr, setUtcTimeStr] = useState("");
   const [istTimeStr, setIstTimeStr] = useState("");
-  const [isMarketOpen, setIsMarketOpen] = useState(false);
   const [marketClock, setMarketClock] = useState<MarketClockStatus | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -52,7 +51,7 @@ export function Header() {
     return () => window.removeEventListener("volhelix:ticker-change", handleTickerChange);
   }, []);
 
-  // Real-time market clock & market open checker
+  // Real-time 24/7 crypto market clock
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -65,22 +64,14 @@ export function Header() {
       }).format(now);
       setIstTimeStr(`${istTime} IST`);
 
-      const etTime = new Intl.DateTimeFormat("en-US", {
-        timeZone: "America/New_York",
+      const utcTime = new Intl.DateTimeFormat("en-US", {
+        timeZone: "UTC",
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
         hour12: false,
       }).format(now);
-      setTimeStr(`${etTime} ET`);
-
-      const day = now.getDay();
-      const parts = etTime.split(":");
-      const hour = parseInt(parts[0], 10);
-      const min = parseInt(parts[1], 10);
-      const totalMinutes = hour * 60 + min;
-      const isOpen = day >= 1 && day <= 5 && totalMinutes >= 570 && totalMinutes <= 960;
-      setIsMarketOpen(isOpen);
+      setUtcTimeStr(`${utcTime} UTC`);
     };
 
     updateTime();
@@ -95,8 +86,8 @@ export function Header() {
     const fetchMarketInfo = async () => {
       try {
         const [q, acc, mkt] = await Promise.all([
-          getAlpacaQuote(selectedTicker),
-          getAlpacaAccount(),
+          getExchangeQuote(selectedTicker),
+          getExchangeAccount(),
           getMarketStatus(),
         ]);
         if (!isMounted) return;
@@ -107,7 +98,7 @@ export function Header() {
           setAccount((prev) => (prev?.portfolio_value === acc.portfolio_value && prev?.buying_power === acc.buying_power ? prev : acc));
         }
         if (mkt) {
-          setMarketClock((prev) => (prev?.is_open === mkt.is_open && prev?.current_time_et === mkt.current_time_et && prev?.simulation_active === mkt.simulation_active ? prev : mkt));
+          setMarketClock((prev) => (prev?.is_open === mkt.is_open && prev?.current_time_et === mkt.current_time_et ? prev : mkt));
         }
       } catch {
         // ignore
@@ -117,27 +108,9 @@ export function Header() {
     fetchMarketInfo();
     const timer = setInterval(fetchMarketInfo, 2500);
 
-    const handleSimOverrideEvent = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail && typeof detail.enabled === "boolean") {
-        setMarketClock((prev) =>
-          prev
-            ? {
-                ...prev,
-                simulation_active: detail.enabled,
-                simulation_override: detail.enabled,
-                is_open: detail.enabled ? true : prev.raw_is_open,
-              }
-            : null
-        );
-      }
-    };
-    window.addEventListener("volhelix:simulation-override", handleSimOverrideEvent);
-
     return () => {
       isMounted = false;
       clearInterval(timer);
-      window.removeEventListener("volhelix:simulation-override", handleSimOverrideEvent);
     };
   }, [selectedTicker]);
 
@@ -149,17 +122,17 @@ export function Header() {
 
   const handleRunCycle = async () => {
     setIsRunning(true);
-    setActionNotice("Scanning Options Chains...");
+    setActionNotice("Scanning Binance Order Flow...");
     try {
       const res = await fetch("/api/signals");
       if (res.ok) {
         setActionNotice("Autonomous Scan & Risk Checks Passed");
         window.dispatchEvent(new CustomEvent("volhelix:scan-complete"));
       } else {
-        setActionNotice("Order Engine Synced (Paper)");
+        setActionNotice("Binance Testnet Engine Synced");
       }
     } catch {
-      setActionNotice("Order Engine Synced");
+      setActionNotice("Binance Engine Synced");
     } finally {
       setTimeout(() => {
         setIsRunning(false);
@@ -178,7 +151,7 @@ export function Header() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `volhelix-audit-telemetry-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `volhelix-binance-telemetry-${new Date().toISOString().slice(0, 10)}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -192,27 +165,29 @@ export function Header() {
     }
   };
 
-  const lastPrice = quote?.last || (selectedTicker === "SPY" ? 764.86 : selectedTicker === "QQQ" ? 530.12 : 230.45);
-  const spread = quote?.spread || 0.05;
-  const changePct = ((spread / lastPrice) * 100).toFixed(2);
-  const high24 = (lastPrice * 1.008).toFixed(2);
-  const low24 = (lastPrice * 0.992).toFixed(2);
-  const marginBalance = account?.buying_power || 400000;
+  const lastPrice = quote?.last || (selectedTicker === "BTCUSDT" ? 76650.0 : selectedTicker === "ETHUSDT" ? 2465.0 : 101.5);
+  const changePct = quote?.price_change_percent_24h !== undefined ? quote.price_change_percent_24h.toFixed(2) : "+1.25";
+  const isPositive = !changePct.startsWith("-");
+  const high24 = quote?.high_24h ? quote.high_24h.toFixed(2) : (lastPrice * 1.015).toFixed(2);
+  const low24 = quote?.low_24h ? quote.low_24h.toFixed(2) : (lastPrice * 0.985).toFixed(2);
+  const volume24 = quote?.volume_24h ? `${quote.volume_24h.toLocaleString("en-US", { maximumFractionDigits: 1 })}` : "1.8K";
+  const marginBalance = account?.cash || account?.buying_power || 10000;
 
   return (
     <header className="h-14 px-4 border-b border-[#26282f] bg-[#121214] flex items-center justify-between sticky top-0 z-30 select-none">
-      {/* Left: Bybit Market Ticker Tape */}
+      {/* Left: Binance Market Ticker Tape */}
       <div className="flex items-center gap-4 overflow-x-auto py-1">
         {/* Active Market Interactive Dropdown */}
         <div ref={dropdownRef} className="relative">
           <button
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
             className="flex items-center gap-2 px-2.5 py-1 rounded bg-[#18191f] border border-[#26282f] hover:border-[#f7a600]/50 transition-colors cursor-pointer"
-            title="Click to Switch Underlying Share"
+            title="Click to Switch Crypto Asset"
           >
             <span className="font-extrabold text-xs text-[#f5f5f5] font-mono tracking-tight flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#f7a600]" />
-              {selectedTicker}-USDT-OPT
+              {selectedTicker}
+              <span className="text-[10px] px-1 py-0.2 rounded bg-[#f7a600]/15 text-[#f7a600] font-bold">SPOT</span>
             </span>
             <ChevronDown className={`w-3 h-3 text-[#878996] transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
           </button>
@@ -227,7 +202,7 @@ export function Header() {
                 className="absolute top-full left-0 mt-1.5 w-56 bg-[#18191f] border border-[#26282f] rounded-lg shadow-2xl p-1.5 z-50 font-mono text-xs"
               >
                 <div className="px-2 py-1 text-[10px] uppercase text-[#5e6673] font-bold border-b border-[#26282f] mb-1">
-                  Select Options Asset
+                  Select Binance Spot Asset
                 </div>
                 {TICKERS.map((t) => {
                   const isCurrent = t.symbol === selectedTicker;
@@ -243,8 +218,9 @@ export function Header() {
                     >
                       <div className="flex items-center gap-1.5">
                         <span className={`w-1.5 h-1.5 rounded-full ${isCurrent ? "bg-[#f7a600]" : "bg-[#5e6673]"}`} />
-                        <span>{t.symbol}-{t.market}</span>
+                        <span>{t.symbol}</span>
                       </div>
+                      <span className="text-[10px] text-[#5e6673]">{t.market}</span>
                       {isCurrent && <Check className="w-3.5 h-3.5 text-[#f7a600]" />}
                     </button>
                   );
@@ -256,9 +232,11 @@ export function Header() {
 
         {/* 24h Real Price & Change */}
         <div className="flex items-center gap-2 text-xs font-mono">
-          <span className="text-sm font-bold text-[#20b26c]">${lastPrice.toFixed(2)}</span>
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#20b26c]/15 text-[#20b26c]">
-            +{changePct}%
+          <span className="text-sm font-bold text-[#f5f5f5]">${lastPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+            isPositive ? "bg-[#20b26c]/15 text-[#20b26c]" : "bg-[#ef4444]/15 text-[#ef4444]"
+          }`}>
+            {isPositive ? `+${changePct}%` : `${changePct}%`}
           </span>
         </div>
 
@@ -274,7 +252,7 @@ export function Header() {
           </div>
           <div>
             <span className="text-[#5e6673] block text-[9px] uppercase">24h Vol</span>
-            <span className="text-[#f5f5f5] font-medium">42.5K</span>
+            <span className="text-[#f5f5f5] font-medium">{volume24}</span>
           </div>
         </div>
 
@@ -287,29 +265,16 @@ export function Header() {
           </span>
         </div>
 
-        {/* Session Clocks: IST + NYSE ET */}
+        {/* Session Clocks: IST + UTC (24/7 Continuous Crypto) */}
         <div className="hidden xl:flex items-center gap-2 text-[11px] font-mono text-[#878996] border-l border-[#26282f] pl-3">
           <Clock className="w-3 h-3 text-[#f7a600]" />
           <span className="text-[#f5f5f5] font-bold">{istTimeStr || "00:00:00 IST"}</span>
           <span className="text-[#5e6673]">|</span>
-          <span className="text-[#878996]">{timeStr || "14:30:00 ET"}</span>
-          {(() => {
-            const isSim = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
-            const isOpen = Boolean(marketClock?.is_open || isMarketOpen);
-            return (
-              <span
-                className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                  isOpen
-                    ? isSim && !marketClock?.raw_is_open
-                      ? "bg-[#f7a600]/20 text-[#f7a600] border border-[#f7a600]/40"
-                      : "bg-[#20b26c]/15 text-[#20b26c]"
-                    : "bg-[#26282f] text-[#878996]"
-                }`}
-              >
-                {isOpen ? (isSim && !marketClock?.raw_is_open ? "SIM OPEN" : "OPEN") : "CLOSED"}
-              </span>
-            );
-          })()}
+          <span className="text-[#878996]">{utcTimeStr || "00:00:00 UTC"}</span>
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#20b26c]/15 text-[#20b26c] border border-[#20b26c]/30 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c] animate-pulse" />
+            24/7 LIVE
+          </span>
         </div>
       </div>
 
@@ -331,21 +296,21 @@ export function Header() {
 
         {/* Account Assets Summary */}
         <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded bg-[#18191f] border border-[#26282f] text-xs font-mono">
-          <span className="text-[#878996]">UTA Margin:</span>
+          <span className="text-[#878996]">Testnet Cash:</span>
           <span className="text-[#f7a600] font-bold">
-            ${marginBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ${marginBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
           </span>
         </div>
 
-        {/* Bybit Signature Gold Action Button */}
+        {/* Binance Signature Gold Action Button */}
         <button
           onClick={handleRunCycle}
           disabled={isRunning}
           className="flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-[#f7a600] hover:bg-[#ffb11a] text-[#121214] font-bold text-xs font-mono transition-all shadow-[0_0_12px_rgba(247,166,0,0.25)] disabled:opacity-50 cursor-pointer active:scale-95"
-          title="Run Autonomous Agent Options Scan"
+          title="Run Autonomous Agent Crypto Scan"
         >
           <Play className={`w-3 h-3 fill-[#121214] ${isRunning ? "animate-spin" : ""}`} />
-          <span>{isRunning ? "Scanning..." : "Order Scan"}</span>
+          <span>{isRunning ? "Scanning..." : "Crypto Scan"}</span>
         </button>
 
         {/* Audit Link & Direct Download Button */}
