@@ -27,7 +27,9 @@ class StrategyType(str, Enum):
     MOMENTUM = "MOMENTUM"             # Follow trend
     CASH = "CASH"                      # Hold USDT, no trade
     
-    # Backward compatibility aliases for legacy tests
+    # Backward compatibility and strategy aliases
+    VOL_BREAKOUT = "BREAKOUT_LONG"
+    MOMENTUM_EXPANSION = "MOMENTUM"
     BULL_PUT_SPREAD = "SPOT_LONG"
     BEAR_CALL_SPREAD = "SPOT_SHORT"
     IRON_CONDOR = "MEAN_REVERSION"
