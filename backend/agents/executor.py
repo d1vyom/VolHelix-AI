@@ -1,101 +1,102 @@
 from datetime import datetime
+from typing import Optional
 from backend.models.trade import TradeProposal, TradeRecord, TradeStatus
 from backend.models.risk import RiskGateResult
-from backend.mcp.client import AlpacaClient
+from backend.mcp.client import BinanceClient
 from backend.utils.logger import get_logger
 
 logger = get_logger("executor")
 
-from typing import Optional
 
 class ExecutionAgent:
-    """Translates approved TradeProposals into Alpaca MCP orders."""
+    """Translates approved TradeProposals into Binance Spot Testnet orders."""
     
-    def __init__(self, mcp_client: Optional[AlpacaClient] = None):
-        self.client = mcp_client or AlpacaClient()
+    def __init__(self, mcp_client: Optional[BinanceClient] = None):
+        self.client = mcp_client or BinanceClient()
         
     def execute(self, proposal: TradeProposal, risk_result: RiskGateResult) -> TradeRecord:
-        """Execute the trade on Alpaca."""
-        logger.info(f"Executing approved proposal {proposal.id} for {proposal.underlying}")
+        """Execute the spot trade on Binance Spot Testnet."""
+        symbol = (proposal.symbol or proposal.underlying or "BTCUSDT").upper()
+        side = (proposal.side or "BUY").upper()
+        order_type = (proposal.order_type or "MARKET").upper()
         
-        # 1. Final pre-flight account check
+        logger.info(f"Executing approved {side} proposal {proposal.id} for {symbol} ({order_type})")
+        
+        # 1. Pre-flight account check
         account = self.client.get_account()
-        if account['buying_power'] < (proposal.max_loss * 100):
-            logger.error("Insufficient buying power for execution.")
+        buying_power = account.get("buying_power", 0.0)
+        
+        # Determine order sizing
+        qty = proposal.qty if proposal.qty > 0 else None
+        quote_qty = proposal.quote_qty
+        
+        if not qty and not quote_qty:
+            quote_qty = 100.0  # Default safe position size in USDT
+            
+        if side == "BUY" and quote_qty and buying_power < quote_qty:
+            logger.error(f"Insufficient buying power (${buying_power:.2f} < ${quote_qty:.2f})")
             return TradeRecord(
                 trade_id=proposal.id,
                 proposal=proposal,
-                status=TradeStatus.CLOSED,
+                status=TradeStatus.CANCELLED,
                 entry_time=datetime.now().isoformat(),
                 realized_pnl=0.0
             )
             
-        # 2. Prepare legs for Alpaca multi-leg order
-        alpaca_legs = []
-        for leg in proposal.legs:
-            alpaca_legs.append({
-                "symbol": leg.symbol,
-                "action": leg.action.upper(),
-                "ratio_quantity": 1
-            })
-        
-        # Calculate limit price (midpoint of bid/ask spread for the spread)
-        # For credit spreads, we want to receive at least some credit
-        if proposal.is_credit:
-            # Use net premium as limit price (credit we want to receive)
-            limit_price = round(proposal.net_premium, 2)
-        else:
-            # For debit spreads, use net debit
-            limit_price = round(abs(proposal.net_premium), 2)
-        
-        # Ensure minimum price
-        limit_price = max(limit_price, 0.05)
-        
-        logger.info(f"Placing mleg order: {proposal.strategy_type.value}, limit={limit_price}, legs={len(alpaca_legs)}")
-        
-        # 3. Place order via Alpaca MCP
+        # 2. Place spot order via BinanceClient
         try:
-            order_result = self.client.place_multi_leg_order(
-                legs=alpaca_legs,
-                limit_price=limit_price,
-                quantity=1
+            order_result = self.client.place_order(
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                quantity=qty if not quote_qty else None,
+                quote_quantity=quote_qty,
+                price=proposal.limit_price if order_type == "LIMIT" else None
             )
             
             if order_result.get("status") in ["REJECTED", "ERROR"] or "error" in order_result:
-                logger.error(f"Order rejected: {order_result}")
+                logger.error(f"Order rejected on testnet: {order_result}")
                 return TradeRecord(
                     trade_id=proposal.id,
                     proposal=proposal,
-                    status=TradeStatus.CLOSED,
+                    status=TradeStatus.CANCELLED,
                     entry_time=datetime.now().isoformat(),
                     realized_pnl=0.0,
-                    mcp_logs=self.client.mcp_logs
+                    mcp_logs=list(self.client.call_logs)
                 )
                 
-            logger.info(f"Order placed successfully: {order_result.get('id')}")
+            binance_order_id = str(order_result.get("order_id", ""))
+            fill_price = float(order_result.get("price") or proposal.entry_price or 0.0)
+            if fill_price <= 0 and order_result.get("fills"):
+                fill_price = float(order_result["fills"][0].get("price", 0.0))
+            if fill_price <= 0:
+                fill_price = self.client.get_price(symbol).get("price", 0.0)
+                
+            logger.info(f"Order placed successfully on Binance Testnet: order_id={binance_order_id}, price={fill_price}")
             
         except Exception as e:
-            logger.error(f"Order placement failed: {e}")
+            logger.error(f"Binance order placement failed: {e}")
             return TradeRecord(
                 trade_id=proposal.id,
                 proposal=proposal,
-                status=TradeStatus.CLOSED,
+                status=TradeStatus.CANCELLED,
                 entry_time=datetime.now().isoformat(),
                 realized_pnl=0.0,
-                mcp_logs=self.client.mcp_logs
+                mcp_logs=list(self.client.call_logs)
             )
         
-        # 4. Create TradeRecord
+        # 3. Create and return TradeRecord
         record = TradeRecord(
             trade_id=proposal.id,
             proposal=proposal,
             status=TradeStatus.OPEN,
             entry_time=datetime.now().isoformat(),
+            entry_price=fill_price,
+            take_profit_price=proposal.take_profit,
+            stop_loss_price=proposal.stop_loss,
+            binance_order_id=binance_order_id,
             realized_pnl=0.0,
-            mcp_logs=self.client.mcp_logs
+            mcp_logs=list(self.client.call_logs)
         )
-        
-        # Clear logs from client for the next cycle
-        self.client.mcp_logs = []
         
         return record
