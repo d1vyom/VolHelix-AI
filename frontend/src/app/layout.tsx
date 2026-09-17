@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "VolHelix AI — Autonomous Multi-Agent Options Orchestrator",
-  description: "Autonomous multi-agent options trading and dynamic volatility regime orchestrator on Alpaca MCP.",
+  title: "VolHelix AI — Autonomous Multi-Agent Crypto Volatility Orchestrator",
+  description: "Autonomous multi-agent crypto spot trading and dynamic volatility regime orchestrator on Binance Testnet.",
   icons: {
     icon: "/volhelix-logo.svg",
   },
