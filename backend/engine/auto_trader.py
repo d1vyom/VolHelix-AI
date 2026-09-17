@@ -40,7 +40,7 @@ class AutoTrader:
         self._initialized = True
         self.is_running: bool = False
         self.interval_seconds: int = 30
-        self.max_open_positions: int = 3
+        self.max_open_positions: int = 5
         self.watched_symbols: List[str] = list(settings.WATCHED_SYMBOLS)
         self.total_automated_trades: int = 0
         self.last_run_timestamp: Optional[str] = None
@@ -375,18 +375,18 @@ class AutoTrader:
 
         client = self._get_binance_client()
 
-        # 1. Check open positions limit
+        # 1. Check open positions limit (active trades tracked in trade_log)
         try:
-            positions = client.get_positions()
-            active_symbols = {p["symbol"] for p in positions}
-            if len(positions) >= self.max_open_positions:
-                msg = f"Max positions reached ({len(positions)}/{self.max_open_positions}). Scanner on standby."
+            open_trades = asyncio.run(trade_log.get_open_trades())
+            active_symbols = {t.proposal.symbol or t.proposal.underlying for t in open_trades if t.status == TradeStatus.OPEN}
+            if len(open_trades) >= self.max_open_positions:
+                msg = f"Max active positions reached ({len(open_trades)}/{self.max_open_positions}). Scanner on standby."
                 self.last_log = msg
                 logger.info(msg)
                 return {"success": True, "executed": False, "reason": msg, "scanner_diagnostics": self.scanner_diagnostics}
         except Exception as e:
             active_symbols = set()
-            logger.warning(f"Failed to check positions: {e}")
+            logger.warning(f"Failed to check open trades: {e}")
 
         # 2. Evaluate target symbol or all watched symbols concurrently
         valid_candidates = []
