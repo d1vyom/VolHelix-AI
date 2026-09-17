@@ -30,84 +30,87 @@ function TradeHistoryContent() {
       } else {
         setTrades((prev) => prev.length > 0 ? prev : ([
           {
-            trade_id: "TRD-20260901-SPY-01",
+            trade_id: "TRD-20260917-BTC-01",
             status: "TAKE_PROFIT",
             realized_pnl: 340.0,
-            entry_time: "2026-09-01T10:15:00Z",
-            exit_time: "2026-09-02T13:45:00Z",
-            take_profit_price: 585.0,
-            stop_loss_price: 568.0,
+            entry_time: "2026-09-17T10:15:00Z",
+            exit_time: "2026-09-17T13:45:00Z",
+            entry_price: 63250.0,
+            take_profit_price: 64500.0,
+            stop_loss_price: 62400.0,
             proposal: {
-              id: "TRD-20260901-SPY-01",
-              underlying: "SPY",
-              strategy_type: "MASTER_ORDER_FLOW",
+              id: "TRD-20260917-BTC-01",
+              underlying: "BTCUSDT",
+              strategy_type: "VOL_BREAKOUT",
               regime_at_entry: "NORMAL",
               legs: [],
-              is_credit: true,
-              net_premium: 0.88,
+              is_credit: false,
+              net_premium: 63250.0,
               max_profit: 440.0,
-              max_loss: 1960.0,
-              breakevens: [574.5],
-              net_delta: 0,
+              max_loss: 200.0,
+              breakevens: [63250.0],
+              net_delta: 1.0,
               net_theta: 0,
               net_vega: 0,
-              dte: 21,
-              ev: 12.5,
-              thesis: "Bullish OB Retest with Gamma Support",
+              dte: 0,
+              ev: 18.5,
+              thesis: "Volatility Breakout with Order Book Imbalance Confirmation",
             },
           },
           {
-            trade_id: "TRD-20260830-QQQ-02",
+            trade_id: "TRD-20260916-ETH-02",
             status: "CLOSED",
-            realized_pnl: 480.0,
-            entry_time: "2026-08-30T11:00:00Z",
-            exit_time: "2026-09-01T15:30:00Z",
-            take_profit_price: 728.0,
-            stop_loss_price: 710.0,
+            realized_pnl: 280.0,
+            entry_time: "2026-09-16T11:00:00Z",
+            exit_time: "2026-09-16T15:30:00Z",
+            entry_price: 3420.0,
+            take_profit_price: 3550.0,
+            stop_loss_price: 3350.0,
             proposal: {
-              id: "TRD-20260830-QQQ-02",
-              underlying: "QQQ",
-              strategy_type: "IRON_CONDOR",
+              id: "TRD-20260916-ETH-02",
+              underlying: "ETHUSDT",
+              strategy_type: "MEAN_REVERSION",
               regime_at_entry: "LOW_VOL",
               legs: [],
-              is_credit: true,
-              net_premium: 1.20,
-              max_profit: 600.0,
-              max_loss: 1900.0,
-              breakevens: [718.0],
-              net_delta: 0,
+              is_credit: false,
+              net_premium: 3420.0,
+              max_profit: 350.0,
+              max_loss: 150.0,
+              breakevens: [3420.0],
+              net_delta: 1.0,
               net_theta: 0,
               net_vega: 0,
-              dte: 14,
+              dte: 0,
               ev: 15.0,
-              thesis: "Low Vol Squeeze Boundary Play",
+              thesis: "Low Vol Squeeze Boundary Reversion to 200 EMA",
             },
           },
           {
-            trade_id: "TRD-20260828-NVDA-03",
+            trade_id: "TRD-20260915-SOL-03",
             status: "STOPPED_OUT",
-            realized_pnl: -210.0,
-            entry_time: "2026-08-28T14:30:00Z",
-            exit_time: "2026-08-29T10:00:00Z",
-            take_profit_price: 138.0,
-            stop_loss_price: 126.0,
+            realized_pnl: -110.0,
+            entry_time: "2026-09-15T14:30:00Z",
+            exit_time: "2026-09-15T16:00:00Z",
+            entry_price: 148.5,
+            take_profit_price: 158.0,
+            stop_loss_price: 144.0,
             proposal: {
-              id: "TRD-20260828-NVDA-03",
-              underlying: "NVDA",
-              strategy_type: "BEAR_CALL_SPREAD",
+              id: "TRD-20260915-SOL-03",
+              underlying: "SOLUSDT",
+              strategy_type: "MOMENTUM_EXPANSION",
               regime_at_entry: "ELEVATED",
               legs: [],
-              is_credit: true,
-              net_premium: 0.95,
-              max_profit: 475.0,
-              max_loss: 2025.0,
-              breakevens: [130.0],
-              net_delta: 0,
+              is_credit: false,
+              net_premium: 148.5,
+              max_profit: 320.0,
+              max_loss: 120.0,
+              breakevens: [148.5],
+              net_delta: 1.0,
               net_theta: 0,
               net_vega: 0,
-              dte: 7,
+              dte: 0,
               ev: -5.0,
-              thesis: "Elevated Vol Resistance Test",
+              thesis: "Elevated Vol Momentum Breakout stopped at dynamic ATR threshold",
             },
           },
         ] as unknown as TradeRecord[]));
@@ -175,14 +178,14 @@ function TradeHistoryContent() {
   const strategyChartData = useMemo(() => {
     const groups: Record<string, { total: number; wins: number; pnl: number }> = {};
     trades.forEach((t) => {
-      const rawType = t.proposal?.strategy_type || "MASTER_ORDER_FLOW";
+      const rawType = t.proposal?.strategy_type || "VOL_BREAKOUT";
       const name = rawType
-        .replace("MASTER_ORDER_FLOW", "Master Flow")
-        .replace("BULL_PUT_SPREAD", "Bull Put")
-        .replace("BEAR_CALL_SPREAD", "Bear Call")
-        .replace("IRON_CONDOR", "Iron Condor")
-        .replace("LONG_STRADDLE", "Straddle")
-        .replace("CALENDAR_SPREAD", "Calendar");
+        .replace("VOL_BREAKOUT", "Vol Breakout")
+        .replace("MOMENTUM_EXPANSION", "Momentum Exp")
+        .replace("MEAN_REVERSION", "Mean Reversion")
+        .replace("SQUEEZE_SCALP", "Squeeze Scalp")
+        .replace("VWAP_TREND", "VWAP Trend")
+        .replace("MASTER_ORDER_FLOW", "Master Flow");
       if (!groups[name]) {
         groups[name] = { total: 0, wins: 0, pnl: 0 };
       }
@@ -202,9 +205,9 @@ function TradeHistoryContent() {
 
     if (rows.length === 0) {
       return [
-        { strategy: "Master Flow", winRate: 100, trades: 1, pnl: 420 },
-        { strategy: "Bull Put", winRate: 80, trades: 4, pnl: 660 },
-        { strategy: "Iron Condor", winRate: 75, trades: 3, pnl: 480 },
+        { strategy: "Vol Breakout", winRate: 100, trades: 1, pnl: 340 },
+        { strategy: "Mean Reversion", winRate: 75, trades: 4, pnl: 480 },
+        { strategy: "Momentum Exp", winRate: 67, trades: 3, pnl: 210 },
       ];
     }
     return rows;
@@ -218,12 +221,12 @@ function TradeHistoryContent() {
           <h1 className="text-2xl font-bold tracking-tight text-[#eaecef] flex items-center gap-2.5">
             <span className="p-2 rounded-xl bg-[#f0b90b]/10 border border-[#f0b90b]/30 text-[#f0b90b]">
               <BarChart className="w-5 h-5" />
-            </span>
-            Trade Ledger & Quantitative Analytics
-          </h1>
-          <p className="text-xs text-[#848e9c] font-mono mt-1">
-            Real-time options execution logs, win rate distribution & dynamic quantitative analytics
-          </p>
+          </span>
+          Crypto Spot Trade Ledger & Quantitative Analytics
+        </h1>
+        <p className="text-xs text-[#848e9c] font-mono mt-1">
+          Real-time Binance Testnet spot execution logs, win rate distribution & dynamic analytics
+        </p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -309,7 +312,7 @@ function TradeHistoryContent() {
               Strategy Win Rate & Alpha Distribution
             </h3>
             <p className="text-xs font-mono text-[#848e9c] mt-0.5">
-              Historical win rates across multi-leg options strategies
+              Historical win rates across crypto algorithmic volatility strategies
             </p>
           </div>
           <span className="px-2.5 py-1 rounded-lg bg-[#f0b90b]/15 text-[#f0b90b] border border-[#f0b90b]/30 text-xs font-mono font-bold">
@@ -353,7 +356,7 @@ function TradeHistoryContent() {
               Executed Trade Ledger
             </h3>
             <p className="text-xs font-mono text-[#848e9c] mt-0.5">
-              Forensic record of completed and active options spreads
+              Forensic record of completed and active crypto spot positions on Binance Testnet
             </p>
           </div>
 
@@ -383,7 +386,7 @@ function TradeHistoryContent() {
                 <th className="text-left py-3 px-3">Symbol</th>
                 <th className="text-left py-3 px-3">Strategy</th>
                 <th className="text-left py-3 px-3">Dynamic TP / SL</th>
-                <th className="text-right py-3 px-3">Net Premium</th>
+                <th className="text-right py-3 px-3">Entry Price / Size</th>
                 <th className="text-right py-3 px-3">Realized P&L</th>
                 <th className="text-right py-3 px-3">Date / Time</th>
                 <th className="text-right py-3 px-3">Status</th>
@@ -401,15 +404,15 @@ function TradeHistoryContent() {
                     <td className="py-3.5 px-3 text-[#eaecef] font-semibold" title={t.trade_id}>
                       {displayId}
                     </td>
-                    <td className="py-3.5 px-3 font-bold text-[#f0b90b]">{t.proposal?.underlying || "SPY"}</td>
+                    <td className="py-3.5 px-3 font-bold text-[#f0b90b]">{t.proposal?.underlying || "BTCUSDT"}</td>
                     <td className="py-3.5 px-3 text-[#eaecef]">
-                      {t.proposal?.strategy_type === "MASTER_ORDER_FLOW" ? (
+                      {t.proposal?.strategy_type === "VOL_BREAKOUT" ? (
                         <span className="inline-flex items-center gap-1.5 font-bold text-[#f0b90b] bg-[#f0b90b]/10 px-2 py-0.5 rounded border border-[#f0b90b]/30">
                           <span className="w-1.5 h-1.5 rounded-full bg-[#f0b90b] animate-pulse" />
-                          Master Flow (OB+FVG)
+                          Vol Breakout
                         </span>
                       ) : (
-                        t.proposal?.strategy_type?.replace(/_/g, " ") || "BULL PUT SPREAD"
+                        t.proposal?.strategy_type?.replace(/_/g, " ") || "SPOT TRADE"
                       )}
                     </td>
                     <td className="py-3.5 px-3 text-[11px]">
@@ -424,7 +427,7 @@ function TradeHistoryContent() {
                       )}
                     </td>
                     <td className="py-3.5 px-3 text-right text-[#eaecef]">
-                      ${t.proposal?.net_premium?.toFixed(2) ?? "0.75"}
+                      ${t.entry_price ? t.entry_price.toLocaleString() : (t.proposal?.net_premium ? t.proposal.net_premium.toLocaleString() : "—")}
                     </td>
                     <td className={`py-3.5 px-3 text-right font-bold ${pnl >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]"}`}>
                       {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
