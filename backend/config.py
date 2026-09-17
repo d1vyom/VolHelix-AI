@@ -3,10 +3,11 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    # Alpaca Configuration
-    ALPACA_API_KEY: str = ""
-    ALPACA_API_SECRET: str = ""
-    ALPACA_BASE_URL: str = "https://paper-api.alpaca.markets"
+    # Binance Configuration
+    BINANCE_API_KEY: str = ""
+    BINANCE_API_SECRET: str = ""
+    BINANCE_BASE_URL: str = "https://testnet.binance.vision"
+    BINANCE_USE_TESTNET: bool = True
 
     # LLM Configuration
     GOOGLE_API_KEY: str = ""
@@ -14,12 +15,20 @@ class Settings(BaseSettings):
 
     # Trading Configuration
     TRADING_INTERVAL_MINUTES: int = 5
-    INITIAL_CAPITAL: float = 100000.0
-    WATCHED_UNDERLYINGS_STR: str = Field(default="SPY,QQQ,AAPL,NVDA,TSLA", alias="WATCHED_UNDERLYINGS")
-    
+    INITIAL_CAPITAL: float = 10000.0
+    WATCHED_SYMBOLS_STR: str = Field(
+        default="BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT",
+        alias="WATCHED_SYMBOLS"
+    )
+
+    @property
+    def WATCHED_SYMBOLS(self) -> list[str]:
+        return [s.strip() for s in self.WATCHED_SYMBOLS_STR.split(",")]
+
+    # Backward compatibility alias during progressive migration
     @property
     def WATCHED_UNDERLYINGS(self) -> list[str]:
-        return [s.strip() for s in self.WATCHED_UNDERLYINGS_STR.split(",")]
+        return self.WATCHED_SYMBOLS
 
     MAX_POSITION_PCT: float = 0.025
     MAX_DAILY_DRAWDOWN: float = 0.03
@@ -29,10 +38,8 @@ class Settings(BaseSettings):
     DASHBOARD_PORT: int = 3000
     LOG_LEVEL: str = "INFO"
 
-    # Market Constants (Static)
-    MARKET_OPEN: str = "09:30"
-    MARKET_CLOSE: str = "16:00"
-    MARKET_TIMEZONE: str = "US/Eastern"
+    # Crypto Market Constants (24/7 — no market hours restriction)
+    MARKET_IS_ALWAYS_OPEN: bool = True
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
