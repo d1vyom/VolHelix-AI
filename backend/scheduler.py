@@ -32,20 +32,18 @@ class VolHelixScheduler:
             return
             
         # 1. Manage existing positions (Exits)
-        # In a real app, we'd fetch open positions from store/Alpaca
         open_positions = [] 
         current_prices = {} 
         exits = self.exit_manager.check_exits(open_positions, current_prices)
         for trade_id, reason in exits:
             logger.info(f"Executing exit for {trade_id} due to {reason.value}")
-            # orchestrator.executor.close_position(...)
             
-        # 2. Run Autonomous Agents for new opportunities
-        for underlying in settings.WATCHED_UNDERLYINGS:
+        # 2. Run Autonomous Agents for new opportunities across watched crypto pairs
+        for symbol in settings.WATCHED_SYMBOLS:
             try:
-                self.orchestrator.run_cycle(underlying)
+                self.orchestrator.run_cycle(symbol)
             except Exception as e:
-                logger.error(f"Error in cycle for {underlying}: {e}")
+                logger.error(f"Error in cycle for {symbol}: {e}")
                 
     def start(self):
         interval = settings.TRADING_INTERVAL_MINUTES
