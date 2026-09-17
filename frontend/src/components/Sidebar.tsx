@@ -10,6 +10,7 @@ import { getExchangeAccount } from "../lib/api";
 
 const navItems = [
   { href: "/", label: "Trading Terminal", icon: LayoutDashboard, key: "dashboard" },
+  { href: "/terminal", label: "Pro Terminal", icon: Activity, key: "terminal" },
   { href: "/volatility", label: "Derivatives / Vol Lab", icon: BarChart3, key: "volatility" },
   { href: "/history", label: "Order History", icon: FileText, key: "history" },
   { href: "/audit", label: "Risk & Margin Audit", icon: Shield, key: "audit" },
@@ -39,6 +40,15 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (pathname?.startsWith("/terminal") && !internalCollapsed) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setInternalCollapsed(true);
+      onToggle?.(true);
+      window.dispatchEvent(new CustomEvent("volhelix:sidebar-toggle", { detail: true }));
+    }
+  }, [pathname, internalCollapsed, onToggle]);
 
   const handleToggle = () => {
     const next = !isCollapsed;

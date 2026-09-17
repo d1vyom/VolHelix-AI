@@ -189,3 +189,8 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - **Status:** Completed
 - **Details:** Created full-bleed terminal layout, panel frames, stream health badge, FlowMetricsStrip, FootprintChart, DOMLadder, TimeAndSales, LiquidityHeatmap, VolumeProfile, and CVDPanel. Migrated to React 19 / useSyncExternalStore via useFlowStore hook. All panels wired up to singleton flowStore. Build succeeds.
 
+## Phase 8: Component Layout Grid & Layout Persistence
+- **Date:** 2026-09-18
+- **Status:** Completed
+- **Details:** Integrated `react-resizable-panels`. Implemented `WorkspaceGrid` handling complex dockable layouts for "ORDER_FLOW", "LIQUIDITY", and "ANALYSIS" presets. Bound sidebar toggle and fixed layout persistence using `localStorage`. Fixed strict-mode React lint and hydration bugs. All panels render via `<PanelGroup>`. Build succeeds.
+

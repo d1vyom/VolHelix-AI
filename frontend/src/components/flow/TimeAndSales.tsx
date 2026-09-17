@@ -3,7 +3,6 @@ import { useFlowStore } from "@/lib/flow/useFlowStore";
 import { PanelFrame } from "./PanelFrame";
 import { TapeEntry } from "@/lib/flow/flowTypes";
 import { formatTimestampIST, formatCompactNumber } from "@/lib/flow/flowFormat";
-import { Filter } from "lucide-react";
 
 const ROW_HEIGHT = 24;
 
@@ -40,8 +39,8 @@ export function TimeAndSales({ symbol }: { symbol: string }) {
   // We want newest at the top. The tape array has newest items at the END, so we reverse it for rendering.
   // We'll reverse it in useMemo.
   const reversedTape = useMemo(() => {
-    return [...tape].reverse();
-  }, [tape]);
+    return [...state.tape].reverse();
+  }, [state.tape]);
 
   // Handle scroll to implement virtualized rendering and "pause on scroll"
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -58,8 +57,20 @@ export function TimeAndSales({ symbol }: { symbol: string }) {
     }
   };
 
+  const [containerHeight, setContainerHeight] = useState(400);
+
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerHeight(entry.contentRect.height);
+      }
+    });
+    observer.observe(scrollRef.current);
+    return () => observer.disconnect();
+  }, []);
+
   // Virtualization calculations
-  const containerHeight = scrollRef.current?.clientHeight || 400;
   const totalHeight = reversedTape.length * ROW_HEIGHT;
   
   // Find visible indices with a small overscan buffer (e.g., 5 items)

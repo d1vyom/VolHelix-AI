@@ -110,7 +110,7 @@ export function LiquidityHeatmap({ symbol }: { symbol: string }) {
       ctx.stroke();
     }
     
-  }, [heatmapFrames, dimensions, state.metrics?.price]);
+  }, [state.heatmapFrames, dimensions, state.metrics?.price]);
 
   return (
     <PanelFrame title="Liquidity Heatmap" symbol={symbol} health={state.health}>

@@ -87,7 +87,7 @@ export function DOMLadder({ symbol }: { symbol: string }) {
   const sortedLevels = useMemo(() => {
     if (!dom?.levels) return [];
     return [...dom.levels].sort((a, b) => b.price - a.price);
-  }, [dom?.levels]);
+  }, [dom]);
 
   // Handle centering
   useEffect(() => {
@@ -100,16 +100,7 @@ export function DOMLadder({ symbol }: { symbol: string }) {
       const targetScroll = (midIndex * ROW_HEIGHT) - (containerHeight / 2) + (ROW_HEIGHT / 2);
       scrollRef.current.scrollTop = targetScroll;
     }
-  }, [dom?.mid, sortedLevels, autoCenter]);
-
-  // Disable auto center on manual scroll
-  const handleScroll = () => {
-    if (autoCenter) {
-      // If user initiates scroll, disable auto center
-      // Simple heuristic: if we get a scroll event, turn it off. 
-      // (In production, distinguish between programmatic vs user scroll)
-    }
-  };
+  }, [dom, dom?.mid, sortedLevels, autoCenter]);
 
   return (
     <PanelFrame title="DOM Ladder" symbol={symbol} health={state.health}>

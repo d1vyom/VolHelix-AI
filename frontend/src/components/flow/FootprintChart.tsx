@@ -199,7 +199,7 @@ export function FootprintChart({ symbol }: { symbol: string }) {
         <div className="flex items-center px-2 py-1 text-[10px] font-mono text-neutral-400 bg-[#2C2C2E] border-b border-[#3A3A3C] shrink-0 gap-4">
           <select 
             value={clusterMode}
-            onChange={(e) => setClusterMode(e.target.value as any)}
+            onChange={(e) => setClusterMode(e.target.value as "BID_ASK" | "DELTA" | "VOLUME")}
             className="bg-transparent text-white outline-none cursor-pointer"
           >
             <option value="BID_ASK">BID/ASK</option>

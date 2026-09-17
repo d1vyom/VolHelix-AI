@@ -1,7 +1,7 @@
 import { useFlowStore } from "@/lib/flow/useFlowStore";
 import { StreamHealthBadge } from "./StreamHealthBadge";
 import { formatCompactNumber } from "@/lib/flow/flowFormat";
-import { FlowMetrics } from "@/lib/flow/flowTypes";
+
 
 function MetricTile({ label, value, tooltip, colorClass = "text-neutral-200" }: { label: string; value: React.ReactNode; tooltip: string; colorClass?: string }) {
   return (

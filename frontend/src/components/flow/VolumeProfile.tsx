@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useFlowStore } from "@/lib/flow/useFlowStore";
 import { PanelFrame } from "./PanelFrame";
 import { VolumeProfileSnapshot } from "@/lib/flow/flowTypes";
@@ -94,7 +94,7 @@ function ProfileSVG({ profile, width, height }: { profile: VolumeProfileSnapshot
       )}
 
       {/* Levels */}
-      {sortedLevels.map((lvl, i) => {
+      {sortedLevels.map((lvl) => {
         const y = getY(lvl.price);
         const buyW = lvl.buy_volume * wScaling;
         const sellW = lvl.sell_volume * wScaling;
