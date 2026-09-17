@@ -65,8 +65,8 @@ def test_calculate_master_strategy_dynamic_tp_sl_bullish():
 def test_auto_trader_singleton_and_status():
     trader = AutoTrader()
     assert trader is not None
-    assert "SPY" in trader.watched_symbols
-    assert trader.max_open_positions == 3
+    assert "BTCUSDT" in trader.watched_symbols
+    assert trader.max_open_positions == 5
     
     status = trader.status()
     assert "is_running" in status
@@ -173,21 +173,20 @@ def test_trigger_cycle_scans_only_target_symbol():
     trader = AutoTrader()
     trader.stop()
 
-    with patch.object(trader, "_get_trading_client") as mock_tc, \
-         patch("backend.engine.auto_trader.AlpacaClient") as mock_mcp, \
-         patch.object(trader, "_get_stock_client") as mock_sc, \
+    mock_client = MagicMock()
+    mock_client.get_klines.return_value = []
+    mock_client.get_order_book.return_value = {"bids": [], "asks": []}
+    mock_client.get_price.return_value = {"price": 3500.0}
+
+    with patch.object(trader, "_get_binance_client", return_value=mock_client), \
          patch("backend.utils.market_hours.is_market_open", return_value=True), \
          patch.object(trader, "ensure_guardian_running"):
         
-        mock_tc.return_value.get_all_positions.return_value = []
-        mock_mcp.return_value.get_stock_bars.return_value = {"bars": []}
-        mock_mcp.return_value.get_option_chain.return_value = {"legs": []}
-        
-        # When user triggers scan for AAPL only
-        res = trader.trigger_cycle(symbol="AAPL")
+        # When user triggers scan for ETHUSDT only
+        res = trader.trigger_cycle(symbol="ETHUSDT")
         
         assert res["success"] is True
-        assert res.get("symbol") == "AAPL"
-        # Verify get_stock_bars was called ONLY for AAPL, NOT SPY/QQQ/NVDA/TSLA
-        calls = [c.args[0] for c in mock_mcp.return_value.get_stock_bars.call_args_list]
-        assert calls == ["AAPL"]
+        assert res.get("symbol") == "ETHUSDT"
+        # Verify get_klines was called ONLY for ETHUSDT
+        calls = [c.args[0] for c in mock_client.get_klines.call_args_list if len(c.args) > 0]
+        assert calls == ["ETHUSDT"]
