@@ -165,12 +165,21 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - [x] `GET /api/flow/status` toggles properly when `FLOW_ENABLED` is switched.
 - [x] Fast, no blocking operations in the routes.
 
+## Phase 5: Real-Time Broadcast Layer
+- Created `backend/api/websocket.py` handling Socket.IO flow namespaces.
+- Broadcaster loop throttles per-symbol emissions to 4Hz and 10Hz respectively.
+- Suppressed empty frame emissions based on `last_emit_state`.
+- Bound to `MarketDataHub` streams properly.
 
+## Phase 6: Frontend Data Layer
+- **Status:** Completed
+- **Date:** 2026-09-17
+- **Commit:** pending...
 
-## Phase 5 - Real-Time Broadcast Layer
-- Created background task in websocket.py to push frames to clients via socketio rooms.
-- Emitting tape, dom, footprint, heatmap, and health updates with appropriate rate limiting (FLOW_BROADCAST_HZ, FLOW_TAPE_BROADCAST_HZ).
-- Implemented low:subscribe, low:unsubscribe and low:settings to manage client states.
-- Kept compatibility with existing portfolio_update and 
-easoning_event broadcasts.
-- Acceptance criteria met.
+### Changes
+- Created `frontend/src/lib/flow/types.ts` mirroring backend Flow models.
+- Built `frontend/src/lib/flow/flowApi.ts` for typed REST snapshot fetching.
+- Added `frontend/src/lib/flow/useFlowStore.ts` providing `useSyncExternalStore` hydration + patching logic.
+- Constructed `frontend/src/lib/flow/useFlowSocket.ts` to manage `socket.io-client` symbol subscriptions.
+- Created `frontend/src/lib/flow/flowFormat.ts` for compact numbers, price ticks, and IST formatting.
+- Resolved all TypeScript and Lint issues. `npm run lint` and `npm run build` are clean.

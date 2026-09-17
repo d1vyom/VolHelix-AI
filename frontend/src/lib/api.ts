@@ -2,7 +2,7 @@ import { PortfolioSnapshot, TradeRecord, MarketSignal, MarketClockStatus } from 
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
-async function safeJson<T>(res: Response, fallback: T): Promise<T> {
+export async function safeJson<T>(res: Response, fallback: T): Promise<T> {
   if (!res.ok) return fallback;
   const ct = res.headers.get("content-type");
   if (!ct || !ct.includes("application/json")) return fallback;
