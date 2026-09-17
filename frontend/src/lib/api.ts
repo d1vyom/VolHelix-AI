@@ -390,6 +390,12 @@ export const cancelAllAlpacaOrders = cancelAllExchangeOrders;
 
 export interface OrderFlowData {
   success: boolean;
+  gamma_profile?: {
+    regime?: string;
+    call_wall?: number;
+    put_wall?: number;
+    abs_gamma?: number;
+  };
   order_flow?: {
     symbol: string;
     current_price: number;
