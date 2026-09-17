@@ -1945,7 +1945,7 @@ export default function BybitTradingTerminal() {
                   </div>
                 </div>
 
-                {/* Trigger Bot Order to Alpaca */}
+                {/* Trigger Bot Order to Binance */}
                 {(() => {
                   const isSimActive = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
                   const isBlocked = !marketClock?.is_open && !isSimActive;
@@ -1959,7 +1959,7 @@ export default function BybitTradingTerminal() {
                         ? "Executing Swarm..."
                         : isBlocked
                         ? "Market Closed (Enable Dev Sim to test)"
-                        : "Execute Master Strategy Trade (Alpaca)"}
+                        : "Execute Master Strategy Trade (Binance)"}
                     </button>
                   );
                 })()}
