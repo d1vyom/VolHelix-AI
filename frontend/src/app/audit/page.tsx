@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState, Suspense, useMemo } from "react";
 import { ShieldCheck, Search, ChevronDown, ChevronUp, Copy, Check, Terminal, BrainCircuit } from "lucide-react";
@@ -32,69 +32,71 @@ function AuditTrailContent() {
         
         if (Array.isArray(data) && data.length > 0) {
           setAuditRecords(data);
+        } else if (data && Array.isArray(data.records) && data.records.length > 0) {
+          setAuditRecords(data.records);
         } else {
           setAuditRecords([
             {
-              trade_id: "AUDIT-20260902-001",
-              timestamp: "2026-09-02T14:28:22Z",
-              underlying: "SPY",
+              trade_id: "AUDIT-20260917-001",
+              timestamp: "2026-09-17T14:28:22Z",
+              underlying: "BTCUSDT",
               regime: "NORMAL",
-              strategy: "BULL_PUT_SPREAD",
+              strategy: "VOL_BREAKOUT",
               confidence: 0.94,
               consensus_score: 1.0,
               votes: [
-                { agent_name: "MarketIntel", vote: "APPROVE", reasoning: "IV Rank 42.1 confirms normal regime. Neutral/bullish drift with low event risk." },
-                { agent_name: "StrategySynthesizer", vote: "APPROVE", reasoning: "SPY 575/570P provides 21 DTE optimal theta decay with $0.48/share EV." },
-                { agent_name: "DevilsAdvocate", vote: "APPROVE", reasoning: "Tested FOMC minutes in 6 days. Position delta (0.12) is well within tolerance." },
-                { agent_name: "RiskGate", vote: "APPROVE", reasoning: "Deterministic 10/10 rules verified. Max capital allocated: 2.1% (Limit: 2.5%)." },
+                { agent_name: "MarketIntel", vote: "APPROVE", reasoning: "Parkinson Realized Vol (38.4%) confirms expansion regime. Bullish order book imbalance with high 24h taker volume." },
+                { agent_name: "StrategySynthesizer", vote: "APPROVE", reasoning: "BTCUSDT volatility breakout with trailing ATR stop provides optimal risk/reward ($1.85 EV)." },
+                { agent_name: "DevilsAdvocate", vote: "APPROVE", reasoning: "Assessed funding rates and 1-hour depth. Slippage expected < 0.05% on Binance Testnet." },
+                { agent_name: "RiskGate", vote: "APPROVE", reasoning: "Deterministic 10/10 crypto rules verified. Max allocation: 2.0% (Limit: 5.0% NAV)." },
               ],
               checks: {
-                "Capital Limit <= 2.5% NAV": { passed: true, detail: "Allocated 2.1% ($2,100 of $100,000 NAV)" },
-                "Daily Drawdown <= 3.0%": { passed: true, detail: "Current session drawdown 0.00%" },
-                "DTE >= 3 Days": { passed: true, detail: "Selected expiration is 21 DTE" },
-                "Spread Width <= $25.00": { passed: true, detail: "Strike width is $5.00 ($575 - $570)" },
-                "Open Positions <= 5": { passed: true, detail: "Current open positions: 2 (Limit: 5)" },
-                "Option Open Interest >= 100": { passed: true, detail: "Short put OI is 1,420 contracts" },
-                "Bid-Ask Spread <= 20%": { passed: true, detail: "Spread width is 4.2% of mid-price" },
-                "Portfolio Delta within [-0.50, +0.50]": { passed: true, detail: "Post-trade net delta: +0.14" },
-                "Single-stock concentration <= 10%": { passed: true, detail: "SPY total allocation: 4.2%" },
+                "Capital Limit <= 5.0% NAV": { passed: true, detail: "Allocated 2.0% ($200.00 of $10,000 USDT NAV)" },
+                "Daily Drawdown <= 5.0%": { passed: true, detail: "Current session drawdown 0.00%" },
+                "Min Order Notional >= $10.00": { passed: true, detail: "Order notional is $200.00 USDT" },
+                "Max Slippage <= 0.50%": { passed: true, detail: "Top of book bid-ask spread is 0.012%" },
+                "Open Positions <= 5": { passed: true, detail: "Current open positions: 1 (Limit: 5)" },
+                "Max Asset Concentration <= 30%": { passed: true, detail: "BTCUSDT total allocation: 2.0%" },
+                "Realized Volatility Spike Guard": { passed: true, detail: "30-day realized volatility 42.1% is below 85% circuit breaker" },
+                "24/7 Market Liquidity Depth": { passed: true, detail: "Bid depth within 2% exceeds $5,000,000" },
+                "Execution Mode Verification": { passed: true, detail: "Targeting Binance Testnet paper trading spot engine" },
                 "Deterministic Consensus Met": { passed: true, detail: "Unanimous approval (4/4)" },
               },
               mcp_calls: [
-                { tool: "alpaca_mcp.get_option_chain", duration_ms: 128, status: "SUCCESS" },
-                { tool: "alpaca_mcp.get_market_clock", duration_ms: 32, status: "SUCCESS" },
-                { tool: "alpaca_mcp.get_account", duration_ms: 45, status: "SUCCESS" },
+                { tool: "binance_mcp.get_klines", duration_ms: 64, status: "SUCCESS" },
+                { tool: "binance_mcp.get_order_book", duration_ms: 32, status: "SUCCESS" },
+                { tool: "binance_mcp.get_account", duration_ms: 45, status: "SUCCESS" },
               ],
             },
             {
-              trade_id: "AUDIT-20260901-002",
-              timestamp: "2026-09-01T10:14:50Z",
-              underlying: "QQQ",
+              trade_id: "AUDIT-20260917-002",
+              timestamp: "2026-09-17T10:14:50Z",
+              underlying: "ETHUSDT",
               regime: "LOW_VOL",
-              strategy: "IRON_CONDOR",
+              strategy: "MEAN_REVERSION",
               confidence: 0.88,
               consensus_score: 0.75,
               votes: [
-                { agent_name: "MarketIntel", vote: "APPROVE", reasoning: "Low volatility regime favors range-bound neutral delta strategies." },
-                { agent_name: "StrategySynthesizer", vote: "APPROVE", reasoning: "Symmetric 15 delta iron condor captures premium on both wings." },
-                { agent_name: "DevilsAdvocate", vote: "DISSENT", reasoning: "Earnings report for NVDA tomorrow could trigger tech index spillover." },
-                { agent_name: "RiskGate", vote: "APPROVE", reasoning: "Rule checks pass; allocation sized down to 1.5% NAV to hedge tech volatility." },
+                { agent_name: "MarketIntel", vote: "APPROVE", reasoning: "Low volatility consolidation near 200 EMA favors range-bound mean reversion." },
+                { agent_name: "StrategySynthesizer", vote: "APPROVE", reasoning: "ETHUSDT mean reversion entry targeting VWAP reversion with tight 1.5% stop." },
+                { agent_name: "DevilsAdvocate", vote: "DISSENT", reasoning: "Upcoming Ethereum network hardfork schedule could induce sudden gas volatility." },
+                { agent_name: "RiskGate", vote: "APPROVE", reasoning: "Rule checks pass; allocation sized down to 1.5% NAV to hedge network upgrade risk." },
               ],
               checks: {
-                "Capital Limit <= 2.5% NAV": { passed: true, detail: "Allocated 1.5% ($1,500 of $100,000 NAV)" },
-                "Daily Drawdown <= 3.0%": { passed: true, detail: "Current session drawdown 0.21%" },
-                "DTE >= 3 Days": { passed: true, detail: "Selected expiration is 28 DTE" },
-                "Spread Width <= $25.00": { passed: true, detail: "Strike width is $10.00" },
-                "Open Positions <= 5": { passed: true, detail: "Current open positions: 1 (Limit: 5)" },
-                "Option Open Interest >= 100": { passed: true, detail: "Wing options OI exceeds 2,500" },
-                "Bid-Ask Spread <= 20%": { passed: true, detail: "Spread width is 6.5% of mid" },
-                "Portfolio Delta within [-0.50, +0.50]": { passed: true, detail: "Net delta: -0.05" },
-                "Single-stock concentration <= 10%": { passed: true, detail: "QQQ total allocation: 1.5%" },
+                "Capital Limit <= 5.0% NAV": { passed: true, detail: "Allocated 1.5% ($150.00 of $10,000 USDT NAV)" },
+                "Daily Drawdown <= 5.0%": { passed: true, detail: "Current session drawdown 0.18%" },
+                "Min Order Notional >= $10.00": { passed: true, detail: "Order notional is $150.00 USDT" },
+                "Max Slippage <= 0.50%": { passed: true, detail: "Spread width is 0.024% of mid" },
+                "Open Positions <= 5": { passed: true, detail: "Current open positions: 2 (Limit: 5)" },
+                "Max Asset Concentration <= 30%": { passed: true, detail: "ETHUSDT total allocation: 1.5%" },
+                "Realized Volatility Spike Guard": { passed: true, detail: "Realized vol 35.2% normal" },
+                "24/7 Market Liquidity Depth": { passed: true, detail: "Top book depth exceeds $2,500,000" },
+                "Execution Mode Verification": { passed: true, detail: "Verified Binance Testnet spot mode" },
                 "Deterministic Consensus Met": { passed: true, detail: "Consensus threshold 75% met" },
               },
               mcp_calls: [
-                { tool: "alpaca_mcp.get_option_chain", duration_ms: 142, status: "SUCCESS" },
-                { tool: "alpaca_mcp.get_positions", duration_ms: 38, status: "SUCCESS" },
+                { tool: "binance_mcp.get_klines", duration_ms: 78, status: "SUCCESS" },
+                { tool: "binance_mcp.get_positions", duration_ms: 38, status: "SUCCESS" },
               ],
             },
           ]);
@@ -188,7 +190,7 @@ function AuditTrailContent() {
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-sm text-[#eaecef] font-mono">{rec.trade_id}</span>
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#f0b90b]/15 text-[#f0b90b] border border-[#f0b90b]/30">
-                        {rec.underlying || "SPY"}
+                        {rec.underlying || "BTCUSDT"}
                       </span>
                       <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#1e2329] text-[#848e9c] border border-[#2b313a]">
                         {rec.regime}
@@ -308,7 +310,7 @@ function AuditTrailContent() {
                       <div>
                         <h4 className="text-xs font-bold font-mono uppercase tracking-wider text-[#848e9c] mb-2 flex items-center gap-2">
                           <Terminal className="w-4 h-4 text-[#848e9c]" />
-                          Alpaca MCP Telemetry
+                          Binance MCP Telemetry
                         </h4>
                         <div className="flex flex-wrap gap-2">
                           {rec.mcp_calls.map((c, i) => (
