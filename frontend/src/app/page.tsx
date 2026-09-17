@@ -26,15 +26,15 @@ import {
   Zap
 } from "lucide-react";
 import {
-  getAlpacaAccount,
-  getAlpacaPositions,
-  getAlpacaOrders,
-  getAlpacaQuote,
-  getAlpacaBars,
-  submitAlpacaOrder,
-  closeAlpacaPosition,
-  cancelAlpacaOrder,
-  cancelAllAlpacaOrders,
+  getExchangeAccount,
+  getExchangePositions,
+  getExchangeOrders,
+  getExchangeQuote,
+  getExchangeBars,
+  submitExchangeOrder,
+  closeExchangePosition,
+  cancelExchangeOrder,
+  cancelAllExchangeOrders,
   fillPendingTrade,
   getMarketStatus,
   setMarketSimulationOverride,
@@ -47,11 +47,11 @@ import {
   stopAutoTrading,
   triggerAutoTradingCycle,
   AutoTradingStatus,
-  AlpacaAccount,
-  AlpacaPosition,
-  AlpacaOrder,
-  AlpacaQuote,
-  AlpacaBar
+  ExchangeAccount,
+  ExchangePosition,
+  ExchangeOrder,
+  ExchangeQuote,
+  ExchangeBar
 } from "../lib/api";
 import { MarketClockStatus, TradeRecord } from "../lib/types";
 
@@ -66,8 +66,8 @@ interface AgentLog {
 
 type DockTab = "positions" | "pending" | "orders" | "debate" | "riskgate" | "history";
 
-interface OrderBookWidgetProps {
-  quote: AlpacaQuote;
+interface OrderBookProps {
+  quote: ExchangeQuote;
   midPrice: number;
   tickStep: number;
   selectedTicker: string;
@@ -78,7 +78,7 @@ const OrderBookWidget = memo(function OrderBookWidget({
   midPrice,
   tickStep,
   selectedTicker,
-}: OrderBookWidgetProps) {
+}: OrderBookProps) {
   const [bookTick, setBookTick] = useState<number>(0);
 
   useEffect(() => {
@@ -154,12 +154,12 @@ const OrderBookWidget = memo(function OrderBookWidget({
         ))}
       </div>
 
-      {/* Real Mark Price from Alpaca */}
+      {/* Real Mark Price from Binance */}
       <div className="py-2 my-1 border-y border-[#26282f] flex items-center justify-between text-xs">
         <span className="font-extrabold text-sm text-[#20b26c]">${midPrice.toFixed(2)}</span>
         <span className="text-[10px] text-[#878996] flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c]" />
-          Alpaca Real Last
+          Binance Real Last
         </span>
       </div>
 
@@ -180,7 +180,7 @@ const OrderBookWidget = memo(function OrderBookWidget({
   );
 });
 
-const VolumeBarChart = memo(function VolumeBarChart({ bars }: { bars: AlpacaBar[] }) {
+const VolumeBarChart = memo(function VolumeBarChart({ bars }: { bars: ExchangeBar[] }) {
   return (
     <>
       <div className="px-3 py-1 bg-[#16171b] border-t border-[#1f2128] flex items-center justify-between text-[10px] font-mono text-[#878996]">
@@ -218,14 +218,14 @@ const VolumeBarChart = memo(function VolumeBarChart({ bars }: { bars: AlpacaBar[
 
 export default function BybitTradingTerminal() {
   const [activeTab, setActiveTab] = useState<DockTab>("positions");
-  const [selectedTicker, setSelectedTicker] = useState("SPY");
+  const [selectedTicker, setSelectedTicker] = useState("BTCUSDT");
   const [chartInterval, setChartInterval] = useState("1H");
   const [chartType, setChartType] = useState<"CANDLE" | "LINE">("CANDLE");
   const [tradeMode, setTradeMode] = useState<"BOT" | "MANUAL">("BOT");
   const [orderSide, setOrderSide] = useState<"BUY" | "SELL">("BUY");
   const [orderType, setOrderType] = useState<"market" | "limit">("market");
-  const [limitPrice, setLimitPrice] = useState<number>(575.0);
-  const [orderQty, setOrderQty] = useState(1);
+  const [limitPrice, setLimitPrice] = useState<number>(76500.0);
+  const [orderQty, setOrderQty] = useState(0.002);
   const [selectedStrategy, setSelectedStrategy] = useState("MASTER_ORDER_FLOW");
   const [orderFlow, setOrderFlow] = useState<OrderFlowData | null>(null);
   const [autoTrading, setAutoTrading] = useState<AutoTradingStatus | null>(null);
@@ -237,16 +237,16 @@ export default function BybitTradingTerminal() {
   const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>([]);
   const [isFillingOrder, setIsFillingOrder] = useState<string | null>(null);
 
-  const [account, setAccount] = useState<AlpacaAccount>({
-    equity: 100000.0,
-    buying_power: 400000.0,
-    cash: 100000.0,
-    portfolio_value: 100000.0,
+  const [account, setAccount] = useState<ExchangeAccount>({
+    equity: 10000.0,
+    buying_power: 10000.0,
+    cash: 10000.0,
+    portfolio_value: 10000.0,
     status: "ACTIVE",
-    currency: "USD",
+    currency: "USDT",
   });
-  const [positions, setPositions] = useState<AlpacaPosition[]>([]);
-  const [orders, setOrders] = useState<AlpacaOrder[]>([]);
+  const [positions, setPositions] = useState<ExchangePosition[]>([]);
+  const [orders, setOrders] = useState<ExchangeOrder[]>([]);
 
   // Computed pending orders (queued for market open / awaiting fill)
   const pendingOrders = useMemo(() => {
@@ -299,25 +299,25 @@ export default function BybitTradingTerminal() {
 
     return { total, netPnl, winRate, profitFactor, wins, losses, avgWin, avgLoss };
   }, [closedTrades]);
-  const [quote, setQuote] = useState<AlpacaQuote>({
-    symbol: "SPY",
-    bid: 574.80,
-    ask: 574.85,
-    last: 574.82,
-    spread: 0.05,
+  const [quote, setQuote] = useState<ExchangeQuote>({
+    symbol: "BTCUSDT",
+    bid: 76500.0,
+    ask: 76501.0,
+    last: 76500.5,
+    spread: 0.5,
     timestamp: "",
   });
-  const [bars, setBars] = useState<AlpacaBar[]>([]);
+  const [bars, setBars] = useState<ExchangeBar[]>([]);
 
   const [logs, setLogs] = useState<AgentLog[]>([
-    { id: "1", time: "14:28:12", agent: "MarketIntel", msg: "Scanning equity orderbooks on SPY, QQQ, AAPL, NVDA, TSLA. Real IV Rank at 42.1 (NORMAL regime).", isRisk: false, confidence: 0.92 },
-    { id: "2", time: "14:28:15", agent: "StrategySynthesizer", msg: "Optimal strategy selected: Bull Put Spread. Estimated alpha: +$0.48/share edge.", isRisk: false, confidence: 0.85 },
-    { id: "3", time: "14:28:19", agent: "DevilsAdvocate", msg: "Tested tail risk with FOMC scheduled in 6 days. Position delta within tolerance (0.12).", isRisk: true, confidence: 0.78 },
-    { id: "4", time: "14:28:22", agent: "RiskGate", msg: "10/10 Deterministic rules passed. Capital allocation: 2.1% NAV. Execution authorized on Alpaca.", isRisk: true, confidence: 1.0 },
+    { id: "1", time: "14:28:12", agent: "MarketIntel", msg: "Scanning crypto order flow on BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, XRPUSDT. Realized Volatility: 42.1% (NORMAL regime).", isRisk: false, confidence: 0.92 },
+    { id: "2", time: "14:28:15", agent: "StrategySynthesizer", msg: "Bullish Order Block retest confirmed on BTCUSDT at $75,980. Estimated alpha: +$420/BTC.", isRisk: false, confidence: 0.85 },
+    { id: "3", time: "14:28:19", agent: "DevilsAdvocate", msg: "Stress-tested tail risk against upcoming protocol settlement. Drawdown risk well within limits.", isRisk: true, confidence: 0.78 },
+    { id: "4", time: "14:28:22", agent: "RiskGate", msg: "10/10 Deterministic rules passed. Sized at 2.0% NAV ($200 USDT). Execution authorized on Binance Spot Testnet.", isRisk: true, confidence: 1.0 },
   ]);
 
-  const barsCache = useRef<Record<string, AlpacaBar[]>>({});
-  const lastSymbolRef = useRef<string>("SPY");
+  const barsCache = useRef<Record<string, ExchangeBar[]>>({});
+  const lastSymbolRef = useRef<string>("BTCUSDT");
   const currentFetchId = useRef<number>(0);
   const orderFlowLoadedRef = useRef<Record<string, boolean>>({});
 
@@ -329,9 +329,9 @@ export default function BybitTradingTerminal() {
   const refreshAccountAndPositions = useCallback(async () => {
     try {
       const [acc, pos, ord, hist, mkt] = await Promise.all([
-        getAlpacaAccount(),
-        getAlpacaPositions(),
-        getAlpacaOrders(),
+        getExchangeAccount(),
+        getExchangePositions(),
+        getExchangeOrders(),
         getTradeHistory(),
         getMarketStatus(),
       ]);
@@ -360,7 +360,7 @@ export default function BybitTradingTerminal() {
     }
 
     // 2. Fast Standalone Bars Fetch (NOT blocked by order flow or options chain)
-    getAlpacaBars(sym, tf).then((b) => {
+    getExchangeBars(sym, tf).then((b) => {
       if (fetchId !== currentFetchId.current) return;
       if (b && b.length > 0) {
         barsCache.current[cacheKey] = b;
@@ -369,7 +369,7 @@ export default function BybitTradingTerminal() {
     }).catch(() => {});
 
     // 3. Fast Quote Fetch for the active symbol
-    getAlpacaQuote(sym).then((q) => {
+    getExchangeQuote(sym).then((q) => {
       if (fetchId !== currentFetchId.current) return;
       if (q && q.symbol === sym) {
         setQuote((prev) => {
@@ -456,7 +456,7 @@ export default function BybitTradingTerminal() {
     const quoteInterval = setInterval(async () => {
       if (!isMounted) return;
       try {
-        const q = await getAlpacaQuote(selectedTicker);
+        const q = await getExchangeQuote(selectedTicker);
         if (isMounted && q && q.symbol === selectedTicker) {
           setQuote((prev) => {
             if (
@@ -504,28 +504,22 @@ export default function BybitTradingTerminal() {
     };
   }, [selectedTicker, refreshAccountAndPositions]);
 
-  const handleSyncAlpaca = async () => {
+  const handleSyncExchange = async () => {
     setIsSyncing(true);
     await refreshAccountAndPositions();
     setTimeout(() => {
       setIsSyncing(false);
-      showToast("Alpaca account, positions & orders synchronized!");
+      showToast("Binance account, positions & orders synchronized!");
     }, 400);
   };
 
   const handleManualOrder = async () => {
-    // Market hours gating check
-    const isSimActive = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
-    if (!marketClock?.is_open && !isSimActive) {
-      showToast("Market Closed! Trades only executable when US markets are open (09:30-16:00 ET). Enable Dev Sim to test.");
-      return;
-    }
-
+    // 24/7 crypto markets are always open
     setIsSubmitting(true);
     try {
       const cleanSym = selectedTicker;
       const targetLimitPrice = orderType === "limit" ? limitPrice : undefined;
-      const res = await submitAlpacaOrder(
+      const res = await submitExchangeOrder(
         cleanSym,
         orderQty,
         orderSide.toLowerCase() as "buy" | "sell",
@@ -647,9 +641,9 @@ export default function BybitTradingTerminal() {
       );
       if (res && res.success) {
         if (res.take_profit_price && res.stop_loss_price) {
-          showToast(`Bot Placed ${res.order_type || "BRACKET"}! TP: $${res.take_profit_price.toFixed(2)} | SL: $${res.stop_loss_price.toFixed(2)}`);
+          showToast(`Bot Placed ${res.order_type || "SPOT"}! TP: $${res.take_profit_price.toFixed(2)} | SL: $${res.stop_loss_price.toFixed(2)}`);
         } else {
-          showToast(`Bot Executed on Alpaca! Order: ${res.alpaca_order_id || "FILLED"}`);
+          showToast(`Bot Executed on Binance! Order: ${res.binance_order_id || res.alpaca_order_id || "FILLED"}`);
         }
         await refreshAccountAndPositions();
       } else {
@@ -665,9 +659,9 @@ export default function BybitTradingTerminal() {
 
   const handleClosePosition = async (sym: string) => {
     try {
-      const res = await closeAlpacaPosition(sym);
+      const res = await closeExchangePosition(sym);
       if (res && res.success) {
-        showToast(`Closed ${sym} on Alpaca (${res.status})`);
+        showToast(`Closed ${sym} on Binance (${res.status})`);
         await refreshAccountAndPositions();
       } else {
         showToast(`Close request sent for ${sym}`);
@@ -680,7 +674,7 @@ export default function BybitTradingTerminal() {
 
   const handleCancelOrder = async (orderId: string) => {
     try {
-      const res = await cancelAlpacaOrder(orderId);
+      const res = await cancelExchangeOrder(orderId);
       if (res && res.success) {
         showToast("Order cancelled successfully");
         await refreshAccountAndPositions();
@@ -694,7 +688,7 @@ export default function BybitTradingTerminal() {
 
   const handleCancelAllOrders = async () => {
     try {
-      const res = await cancelAllAlpacaOrders();
+      const res = await cancelAllExchangeOrders();
       if (res && res.success) {
         showToast(`Cancelled ${res.cancelled ?? 0} pending order(s)`);
         await refreshAccountAndPositions();
@@ -770,7 +764,7 @@ export default function BybitTradingTerminal() {
       {/* Top Ticker Selector Bar */}
       <div className="p-2.5 rounded-lg bg-[#18191f] border border-[#26282f] flex flex-wrap items-center justify-between gap-3 font-mono">
         <div className="flex items-center gap-1.5 overflow-x-auto">
-          {["SPY", "QQQ", "AAPL", "NVDA", "TSLA"].map((sym) => (
+          {["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"].map((sym) => (
             <button
               key={sym}
               onClick={() => {
@@ -790,9 +784,9 @@ export default function BybitTradingTerminal() {
 
         <div className="flex items-center gap-4 text-[#878996]">
           <div>
-            <span className="text-[#5e6673] mr-1">Alpaca Equity:</span>
+            <span className="text-[#5e6673] mr-1">Binance Equity:</span>
             <span className="text-[#f5f5f5] font-bold">
-              ${account.equity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${account.equity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
             </span>
           </div>
           <div>
@@ -811,7 +805,7 @@ export default function BybitTradingTerminal() {
           </div>
           <div className="hidden sm:block">
             <span className="text-[#5e6673] mr-1">Paper Feed:</span>
-            <span className="text-[#20b26c] font-bold flex items-center gap-1 inline-flex">
+            <span className="text-[#20b26c] font-bold inline-flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c] animate-pulse" />
               LIVE
             </span>
@@ -881,7 +875,7 @@ export default function BybitTradingTerminal() {
 
               <div className="flex items-center gap-3 text-[11px] text-[#878996]">
                 <span className="px-1.5 py-0.5 rounded bg-[#26282f] text-[#f7a600] font-semibold">
-                  Alpaca Live Market
+                  Binance Live Market
                 </span>
                 <span>Bid: <strong className="text-[#20b26c]">${quote.bid.toFixed(2)}</strong></span>
                 <span>Ask: <strong className="text-[#ef454a]">${quote.ask.toFixed(2)}</strong></span>
@@ -935,13 +929,13 @@ export default function BybitTradingTerminal() {
               </div>
 
               <button
-                onClick={handleSyncAlpaca}
+                onClick={handleSyncExchange}
                 disabled={isSyncing}
                 className="flex items-center gap-1.5 text-[11px] text-[#f7a600] hover:underline cursor-pointer font-mono disabled:opacity-50"
                 title="Synchronize Live Paper Account"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
-                <span>{isSyncing ? "Syncing..." : "Sync Alpaca"}</span>
+                <span>{isSyncing ? "Syncing..." : "Sync Binance"}</span>
               </button>
             </div>
 
@@ -1038,7 +1032,7 @@ export default function BybitTradingTerminal() {
                         <div className="flex items-center gap-2 text-xs text-[#878996]">
                           <span className="w-2 h-2 rounded-full bg-[#f7a600] animate-pulse" />
                           <span>
-                            {pendingOrders.length} Order{pendingOrders.length > 1 ? "s" : ""} Resting / Queued on Alpaca Paper Broker
+                            {pendingOrders.length} Order{pendingOrders.length > 1 ? "s" : ""} Resting / Queued on Binance Spot Testnet
                           </span>
                         </div>
                         <button
@@ -1083,7 +1077,7 @@ export default function BybitTradingTerminal() {
 
                               return (
                                 <tr key={ord.id} className="border-b border-[#26282f]/50 hover:bg-[#1c1d22]/50">
-                                  <td className="py-2 px-2 text-[#878996] text-[11px] truncate max-w-[120px]" title={ord.id}>
+                                  <td className="py-2 px-2 text-[#878996] text-[11px] truncate max-w-30" title={ord.id}>
                                     {ord.id.slice(0, 8)}...
                                   </td>
                                   <td className="py-2 px-2 font-bold text-[#f5f5f5]">{ord.symbol}</td>
@@ -1143,7 +1137,7 @@ export default function BybitTradingTerminal() {
               {activeTab === "orders" && (
                 <div>
                   {orders.length === 0 ? (
-                    <div className="text-center py-10 text-[#878996]">No Orders Found on Alpaca</div>
+                    <div className="text-center py-10 text-[#878996]">No Orders Found on Binance</div>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs">
@@ -1161,7 +1155,7 @@ export default function BybitTradingTerminal() {
                         <tbody>
                           {orders.map((ord) => (
                             <tr key={ord.id} className="border-b border-[#26282f]/50 hover:bg-[#1c1d22]/50">
-                              <td className="py-2 px-2 text-[#878996] text-[11px] truncate max-w-[120px]">{ord.id}</td>
+                              <td className="py-2 px-2 text-[#878996] text-[11px] truncate max-w-30">{ord.id}</td>
                               <td className="py-2 px-2 font-bold text-[#f5f5f5]">{ord.symbol}</td>
                               <td className="py-2 px-2">
                                 <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
@@ -1333,7 +1327,7 @@ export default function BybitTradingTerminal() {
                             const timeDisplay = t.exit_time ? new Date(t.exit_time).toLocaleTimeString() : (t.entry_time ? new Date(t.entry_time).toLocaleTimeString() : "-");
                             return (
                               <tr key={tradeId} className="border-b border-[#26282f]/50 hover:bg-[#1c1d22]/50">
-                                <td className="py-2 px-2 text-[#878996] text-[11px] truncate max-w-[100px]" title={tradeId}>
+                                <td className="py-2 px-2 text-[#878996] text-[11px] truncate max-w-25" title={tradeId}>
                                   {tradeId.slice(0, 8)}...
                                 </td>
                                 <td className="py-2 px-2 font-bold text-[#f5f5f5]">{symbol}</td>
@@ -1388,20 +1382,20 @@ export default function BybitTradingTerminal() {
             selectedTicker={selectedTicker}
           />
 
-          {/* Real Alpaca Order Execution & Bot Panel */}
+          {/* Real Binance Order Execution & Bot Panel */}
           <div className="rounded-lg bg-[#18191f] border border-[#26282f] p-3 font-mono space-y-3 shadow-lg">
             {/* Margin Pill & Market Clock Badge */}
             <div className="space-y-2 pb-2 border-b border-[#26282f]">
               <div className="flex items-center justify-between">
                 <div className="flex gap-1 text-[11px]">
                   <span className="px-2 py-0.5 rounded bg-[#26282f] text-[#f7a600] font-bold">
-                    Cross Margin
+                    Spot Wallet
                   </span>
                   <span className="px-2 py-0.5 rounded bg-[#1c1d22] text-[#878996]">
-                    Alpaca Paper
+                    Binance Testnet
                   </span>
                 </div>
-                <span className="text-[10px] text-[#20b26c] font-semibold">Risk Gate Armed</span>
+                <span className="text-[10px] text-[#20b26c] font-semibold">24/7 Risk Gate Armed</span>
               </div>
 
               {/* Market Hours Gating & Dev Simulation Toggle */}
@@ -1624,15 +1618,16 @@ export default function BybitTradingTerminal() {
                 {/* Quantity Input */}
                 <div className="space-y-1">
                   <div className="flex justify-between text-[10px] text-[#878996]">
-                    <span>Order Quantity</span>
-                    <span>Max: 10 Qty</span>
+                    <span>Order Quantity ({selectedTicker.replace("USDT", "")})</span>
+                    <span>Min: {selectedTicker.startsWith("BTC") ? "0.0001" : (selectedTicker.startsWith("ETH") ? "0.001" : "0.01")}</span>
                   </div>
                   <input
                     type="number"
-                    min="1"
-                    max="100"
+                    step={selectedTicker.startsWith("BTC") ? "0.0001" : (selectedTicker.startsWith("ETH") ? "0.001" : "0.01")}
+                    min="0.0001"
+                    max="10000"
                     value={orderQty}
-                    onChange={(e) => setOrderQty(Math.max(1, Number(e.target.value)))}
+                    onChange={(e) => setOrderQty(Math.max(0.0001, Number(e.target.value)))}
                     className="w-full px-2.5 py-1.5 rounded bg-[#121214] border border-[#26282f] text-[#f5f5f5] text-xs font-bold outline-none focus:border-[#f7a600]"
                   />
                 </div>
@@ -1827,7 +1822,7 @@ export default function BybitTradingTerminal() {
                       aria-checked={autoTrading?.is_running || false}
                       onClick={handleToggleAutoTrading}
                       disabled={isTogglingAuto}
-                      className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                         autoTrading?.is_running ? "bg-[#0ecb81]" : "bg-[#2b313a]"
                       }`}
                       title={autoTrading?.is_running ? "Click to Pause Auto-Pilot" : "Click to Enable Auto-Pilot"}
@@ -1884,7 +1879,7 @@ export default function BybitTradingTerminal() {
                       </span>
                     </div>
                     <div className="grid grid-cols-5 gap-1">
-                      {["SPY", "QQQ", "NVDA", "AAPL", "TSLA"].map((ticker) => {
+                      {["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"].map((ticker) => {
                         const diag = autoTrading?.scanner_diagnostics?.[ticker];
                         const score = diag ? Math.round(diag.score * 100) : null;
                         const isValid = diag?.is_valid || false;
