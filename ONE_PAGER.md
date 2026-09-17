@@ -1,8 +1,8 @@
-# VolHelix AI — Hackathon Submission One-Page Write-Up
+# VolHelix AI — Technical One-Page Summary
 
-> **Hackathon:** Alpaca AI Trading Agents Hackathon 2026 (Lablab.ai × Alpaca)  
-> **Submission Track:** Options Alpha Agents  
-> **Starting Capital:** $100,000.00 USD (Fresh Alpaca Paper Account)  
+> **Platform:** VolHelix AI Autonomous Crypto Volatility Platform  
+> **Exchange:** Binance (Dual-Mode: Production Market Data + Spot Testnet Execution)  
+> **Starting Capital:** $10,000.00 USDT (Binance Spot Testnet)  
 > **Repository:** https://github.com/d1vyom/VolHelix-AI  
 
 ---
@@ -11,63 +11,63 @@
 
 VolHelix AI implements a **Neurosymbolic Multi-Agent Trading Swarm** that separates generative market thesis discovery from deterministic risk execution:
 
-- **Adversarial Multi-Agent Swarm (LangGraph + Gemini Flash/Pro)**:
-  1. **Market Intel Agent**: Computes IV Rank, IV Percentile, and runs a 5-state Hidden Markov Model (`LOW_VOL`, `NORMAL`, `ELEVATED`, `SQUEEZE`, `CRISIS`).
-  2. **Strategy Synthesizer**: Generates Greeks-optimized options spreads (Bull Put, Bear Call, Iron Condors) tuned to the active volatility regime.
-  3. **Devil's Advocate Agent**: Explicitly challenges trade proposals by searching for liquidity traps, negative macro catalysts (FOMC, CPI, Earnings), and technical divergence.
-  4. **Event Scanner**: Continuously monitors economic calendars and earnings releases in parallel.
-  5. **Deterministic Consensus Engine**: Replaces generative consensus with a weighted 2/3 quorum mathematical formula ($\text{Score} \ge 0.33$), eliminating LLM hallucination in agreement.
+- **Adversarial Multi-Agent Swarm (LangGraph + Gemini 2.5 Flash/Pro)**:
+  1. **Market Intel Agent**: Computes 365-day Parkinson Realized Volatility, Bollinger Band compression squeeze status, and 24h taker volume imbalance.
+  2. **Strategy Synthesizer**: Generates algorithmic spot setups (Vol Breakout, Momentum Expansion, Mean Reversion, Squeeze Scalp, DCA Buy) tuned to the active volatility regime.
+  3. **Devil's Advocate Agent**: Explicitly challenges trade proposals by searching for liquidity traps, negative macro catalysts (network upgrades, token unlocks), and order book exhaustion.
+  4. **Event Scanner**: Continuously monitors crypto hardforks, tokenomics events, and network upgrade schedules.
+  5. **Deterministic Consensus Engine**: Replaces generative consensus with a weighted quorum mathematical formula, eliminating LLM hallucination in agreement.
 - **Institutional Confluence Gate (Pre-LLM Filter)**:
-  - Fuses **Smart Money Concepts (SMC)** (Order Blocks, Fair Value Gaps) with **Options Gamma Exposure (GEX)** (Call & Put Walls).
+  - Fuses **Smart Money Concepts (SMC)** (Order Blocks, Fair Value Gaps) with **20-Level Order Book Depth & Imbalance**.
   - Enforces a strict $\ge 70\%$ confluence threshold before invoking agents, eliminating 90% of noise trades.
 
 ---
 
-## 2. Deterministic Risk Gates & 24/7 Position Guardian
+## 2. Deterministic Crypto Risk Gate & 24/7 Position Guardian
 
 VolHelix AI enforces **Zero-Hallucination Risk Management** with zero LLM involvement in risk decisions:
 
 - **10 Inviolable Mathematical Invariants**:
-  1. **Max Capital Risk**: $\le 2.5\%$ NAV per position ($2,500 max loss on $100k starting capital).
-  2. **Daily Drawdown Circuit Breaker**: Halts trading if session drawdown hits $3.0\%$ ($3,000).
-  3. **Portfolio Delta Limits**: $|\Delta_{\text{net}}| \le 150$ for directional delta neutrality.
-  4. **Portfolio Vega Limits**: $\le \$500$ exposure per $1\%$ IV shock.
-  5. **Minimum DTE**: $\ge 3$ days (strictly avoids 0-DTE gamma pins).
-  6. **Spread Width**: Maximum $\$25.00$ strike width for capital efficiency.
-  7. **Max Open Positions**: Capped at 8 concurrent positions.
-  8. **Contract Liquidity Filter**: Minimum Open Interest $\ge 100$ contracts on every leg.
-  9. **Bid-Ask Spread Filter**: Max slippage threshold ($\frac{\text{Ask} - \text{Bid}}{\text{Bid}} \le 0.20$).
-  10. **Single Stock Concentration**: Exposure strictly $\le 30\%$ of NAV.
+  1. **Max Capital Risk**: $\le 2.5\%$ NAV per position ($250.00 max allocation on $10,000 USDT capital).
+  2. **Stop-Loss Requirement**: Strictly positive stop-loss required on all trades.
+  3. **Take-Profit Requirement**: Strictly positive take-profit required on all trades.
+  4. **Daily Drawdown Circuit Breaker**: Halts trading if session drawdown hits $3.0\%$ ($300.00).
+  5. **Portfolio Exposure Limit**: Aggregate non-USDT exposure $\le 60.0\%$ NAV.
+  6. **Single Asset Concentration**: Single coin exposure strictly $\le 30.0\%$ of NAV.
+  7. **Max Open Positions**: Capped at 5 concurrent spot positions.
+  8. **Minimum Order Size**: Order notional strictly $\ge \$10.00$ USDT (Binance spot minimum).
+  9. **Volatility Sizing Multiplier**: Dynamic scaling by market regime ($1.00\times$ in Normal, $0.75\times$ in Elevated, $0.50\times$ in Squeeze, $0.25\times$ in Crisis).
+  10. **Correlation Group Limits**: Sector risk gating across correlated clusters (high-cap, alt-L1, payments).
 - **24/7 Decoupled Position Guardian**:
   - Scanning is decoupled from risk monitoring into independent execution threads.
   - Pausing Auto-Pilot stops *new* scans, but the **Position Guardian runs 24/7 every 5 seconds**.
-  - Dynamically exits trades at structural Take-Profit (nearest FVG / Call Wall) or Stop-Loss (Order Block floor), ensuring an asymmetric **Risk-to-Reward ratio $\ge 2.0:1$**.
+  - Dynamically exits trades at structural Take-Profit (nearest FVG / resistance) or Stop-Loss (Order Block floor), ensuring an asymmetric **Risk-to-Reward ratio $\ge 2.0:1$**.
 
 ---
 
-## 3. Alpaca Infrastructure Implementation
+## 3. Binance Infrastructure Implementation
 
-The system interacts natively with Alpaca through three dedicated layers:
+The system interacts natively with Binance through three dedicated layers:
 
-1. **Alpaca Trading API**:
-   - Full REST & WebSocket integration via official Alpaca Python SDK (`alpaca-py`).
-   - Handles paper account state, order submission (market & resting limit orders), position queries, dynamic order cancellation, and US market session clock verification (09:30–16:00 ET).
-2. **Model Context Protocol (MCP) Server**:
-   - Integrates with the official **Alpaca FastMCP Server** (`backend/mcp/client.py`), exposing 61+ institutional tools for account audits, options chain retrieval, bar streaming, and multi-leg executions directly to autonomous agents.
-3. **Alpaca CLI Runner**:
-   - Automated CLI command execution (`backend/mcp/cli_runner.py`) for automated environment validation, credential testing, and fresh account setup.
-4. **Zero-Lag Terminal with IST Timezone**:
-   - Next.js 16.3 glassmorphism dashboard featuring real-time Bybit-style order book, dual session clocks (**IST UTC+5:30** and **NYSE ET**), WebGL 3D Black-Scholes Volatility Surface, and an Audited ACID SQLite Trade Ledger.
+1. **Dual-Mode Binance Client (`python-binance`)**:
+   - **Production Public API**: Real-time prices, 24hr tickers, 20-level order book depth, and OHLCV klines from `api.binance.com` with zero API key requirement.
+   - **Spot Testnet API**: Account balance, spot order placement (market & resting limit orders), cancellations, and position tracking on `testnet.binance.vision`.
+   - **Automatic Clock Drift Sync**: Eliminates code `-1021 INVALID_TIMESTAMP` errors via synchronized server time offset compensation.
+2. **REST API & Telemetry Routes**:
+   - `/api/exchange/account`, `/api/exchange/positions`, `/api/exchange/orders`, `/api/exchange/quote`, `/api/exchange/bars`, `/api/exchange/order`, `/api/exchange/close-position`.
+   - Full backward compatibility aliases for legacy clients.
+3. **Zero-Lag Terminal with IST / UTC Dual Clocks**:
+   - Next.js 16.3 glassmorphism dashboard featuring real-time Binance order book, dual session clocks (**IST UTC+5:30** and **UTC**), WebGL 3D Volatility Surface, and an Audited ACID SQLite Trade Ledger.
 
 ---
 
 ## 4. Performance & Account Verification
 
-| Competition Parameter | Required Spec | VolHelix AI Status |
+| Parameter | Required Spec | VolHelix AI Status |
 |---|---|---|
-| **Account Type** | Brand-New Dedicated Paper Account | ✅ Verified & Connected |
-| **Starting NAV** | Exactly $100,000.00 USD | ✅ Calibrated ($100,000.00) |
-| **Max Risk / Trade** | $\le 2.5\%$ NAV | ✅ Hardcoded ($2,500.00) |
-| **Circuit Breaker** | $3.0\%$ Daily Drawdown | ✅ Active ($3,000.00) |
-| **Automated Test Suite**| Full Test Coverage | ✅ 50 / 50 Tests Passed (100%) |
-| **Production Build** | Zero Errors | ✅ Compiled in 727ms |
+| **Account Type** | Binance Spot Testnet Account | ✅ Verified & Connected |
+| **Starting NAV** | 10,000.00 USDT | ✅ Calibrated ($10,000.00) |
+| **Max Risk / Trade** | $\le 2.5\%$ NAV | ✅ Hardcoded ($250.00) |
+| **Circuit Breaker** | $3.0\%$ Daily Drawdown | ✅ Active ($300.00) |
+| **Automated Test Suite**| Full Test Coverage | ✅ 59 / 59 Tests Passed (100%) |
+| **Production Build** | Zero Errors & Zero Warnings | ✅ Prerendered Static Build Clean |
