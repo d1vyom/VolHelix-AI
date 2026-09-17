@@ -155,7 +155,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
 
             <Link
               href="/audit"
-              className="pt-1.5 border-t border-[#26282f] flex items-center justify-between text-[10px] hover:text-[#f7a600] transition-colors cursor-pointer block"
+              className="pt-1.5 border-t border-[#26282f] flex items-center justify-between text-[10px] hover:text-[#f7a600] transition-colors cursor-pointer"
               title="View Deterministic Rules in Risk & Margin Audit"
             >
               <span className="text-[#878996] hover:text-[#f5f5f5]">Deterministic Gate</span>
