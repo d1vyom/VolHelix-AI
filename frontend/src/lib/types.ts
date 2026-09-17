@@ -6,6 +6,10 @@ export type StrategyType =
   | "SPOT_SHORT"
   | "DCA_BUY"
   | "BREAKOUT_LONG"
+  | "VOL_BREAKOUT"
+  | "MOMENTUM_EXPANSION"
+  | "SQUEEZE_SCALP"
+  | "VWAP_TREND"
   | "MEAN_REVERSION"
   | "MOMENTUM"
   | "CASH"
@@ -14,7 +18,8 @@ export type StrategyType =
   | "IRON_CONDOR"
   | "LONG_STRADDLE"
   | "CALENDAR_SPREAD"
-  | "PROTECTIVE_PUT";
+  | "PROTECTIVE_PUT"
+  | (string & {});
 
 export type TradeStatus = "PENDING" | "OPEN" | "CLOSED" | "STOPPED_OUT" | "TAKE_PROFIT" | "CANCELLED" | "FILLED" | string;
 export type OrderType = "MARKET" | "LIMIT";
