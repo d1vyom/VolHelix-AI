@@ -7,7 +7,7 @@ def test_risk_gate_approves_valid_crypto_proposal(base_portfolio, sample_crypto_
     gate = CryptoRiskGate()
     result = gate.evaluate(sample_crypto_proposal, base_portfolio)
     assert result.approved is True
-    assert "All 10 crypto risk checks passed" in result.reason
+    assert "All 10 checks passed" in result.reason
     assert result.checks["capital_limit"].passed is True
     assert result.checks["stop_loss"].passed is True
     assert result.checks["take_profit"].passed is True
