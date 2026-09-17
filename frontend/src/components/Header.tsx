@@ -3,8 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Clock, Download, Play, Zap, ChevronDown, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getExchangeAccount, getExchangeQuote, getMarketStatus, ExchangeQuote, ExchangeAccount } from "../lib/api";
-import { MarketClockStatus } from "../lib/types";
+import { getExchangeAccount, getExchangeQuote, ExchangeQuote, ExchangeAccount } from "../lib/api";
 
 const TICKERS = [
   { symbol: "BTCUSDT", name: "Bitcoin / USDT", market: "SPOT" },
@@ -24,7 +23,6 @@ export function Header() {
 
   const [utcTimeStr, setUtcTimeStr] = useState("");
   const [istTimeStr, setIstTimeStr] = useState("");
-  const [marketClock, setMarketClock] = useState<MarketClockStatus | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
