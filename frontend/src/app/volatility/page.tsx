@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { BarChart3, Gauge, Activity, TrendingUp, Layers, Zap } from "lucide-react";
 import { motion } from "framer-motion";
-import { getAlpacaQuote } from "../../lib/api";
+import { getExchangeQuote } from "../../lib/api";
 
 const VolSurface = dynamic(() => import("../../components/VolSurface"), {
   ssr: false,
@@ -52,31 +52,31 @@ const REGIME_LABELS: Record<string, string> = {
 };
 
 const DEFAULT_SPOTS: Record<string, number> = {
-  SPY: 574.85,
-  QQQ: 718.50,
-  AAPL: 327.15,
-  NVDA: 130.40,
-  TSLA: 224.80,
+  BTCUSDT: 76650.0,
+  ETHUSDT: 2465.0,
+  SOLUSDT: 101.5,
+  BNBUSDT: 727.0,
+  XRPUSDT: 1.30,
 };
 
 const BASE_IVS: Record<string, number> = {
-  SPY: 0.162,
-  QQQ: 0.224,
-  AAPL: 0.285,
-  NVDA: 0.448,
-  TSLA: 0.519,
+  BTCUSDT: 0.52,
+  ETHUSDT: 0.58,
+  SOLUSDT: 0.72,
+  BNBUSDT: 0.45,
+  XRPUSDT: 0.65,
 };
 
 export default function VolatilityLab() {
-  const [selectedTicker, setSelectedTicker] = useState("SPY");
+  const [selectedTicker, setSelectedTicker] = useState("BTCUSDT");
   const [spotPrices, setSpotPrices] = useState<Record<string, number>>(DEFAULT_SPOTS);
 
-  // Live spot price fetching from Alpaca
+  // Live spot price fetching from Binance
   useEffect(() => {
     let isMounted = true;
     const fetchSpot = async () => {
       try {
-        const q = await getAlpacaQuote(selectedTicker);
+        const q = await getExchangeQuote(selectedTicker);
         if (isMounted && q && q.last > 0) {
           setSpotPrices((prev) => ({ ...prev, [selectedTicker]: q.last }));
         }
@@ -94,8 +94,8 @@ export default function VolatilityLab() {
 
   // Dynamically compute calibrated strike prices centered around the asset's real spot price
   const strikes = useMemo(() => {
-    const spot = spotPrices[selectedTicker] || DEFAULT_SPOTS[selectedTicker] || 500;
-    const step = spot > 500 ? 5 : spot > 250 ? 2.5 : 1;
+    const spot = spotPrices[selectedTicker] || DEFAULT_SPOTS[selectedTicker] || 76500;
+    const step = spot > 10000 ? 500 : spot > 1000 ? 25 : spot > 100 ? 2.5 : spot > 10 ? 1 : 0.05;
     const center = Math.round(spot / step) * step;
     return [
       center - 3 * step,
@@ -130,19 +130,19 @@ export default function VolatilityLab() {
   }, [selectedTicker, strikes, spotPrices]);
 
   const ivGauges: IVGaugeData[] = useMemo(() => [
-    { symbol: "SPY", ivRank: 0.42, ivPercentile: 0.38, currentIV: BASE_IVS["SPY"], spotPrice: spotPrices["SPY"] || DEFAULT_SPOTS["SPY"] },
-    { symbol: "QQQ", ivRank: 0.55, ivPercentile: 0.51, currentIV: BASE_IVS["QQQ"], spotPrice: spotPrices["QQQ"] || DEFAULT_SPOTS["QQQ"] },
-    { symbol: "AAPL", ivRank: 0.68, ivPercentile: 0.72, currentIV: BASE_IVS["AAPL"], spotPrice: spotPrices["AAPL"] || DEFAULT_SPOTS["AAPL"] },
-    { symbol: "NVDA", ivRank: 0.82, ivPercentile: 0.85, currentIV: BASE_IVS["NVDA"], spotPrice: spotPrices["NVDA"] || DEFAULT_SPOTS["NVDA"] },
-    { symbol: "TSLA", ivRank: 0.71, ivPercentile: 0.69, currentIV: BASE_IVS["TSLA"], spotPrice: spotPrices["TSLA"] || DEFAULT_SPOTS["TSLA"] },
+    { symbol: "BTCUSDT", ivRank: 0.42, ivPercentile: 0.38, currentIV: BASE_IVS["BTCUSDT"], spotPrice: spotPrices["BTCUSDT"] || DEFAULT_SPOTS["BTCUSDT"] },
+    { symbol: "ETHUSDT", ivRank: 0.55, ivPercentile: 0.51, currentIV: BASE_IVS["ETHUSDT"], spotPrice: spotPrices["ETHUSDT"] || DEFAULT_SPOTS["ETHUSDT"] },
+    { symbol: "SOLUSDT", ivRank: 0.68, ivPercentile: 0.72, currentIV: BASE_IVS["SOLUSDT"], spotPrice: spotPrices["SOLUSDT"] || DEFAULT_SPOTS["SOLUSDT"] },
+    { symbol: "BNBUSDT", ivRank: 0.38, ivPercentile: 0.41, currentIV: BASE_IVS["BNBUSDT"], spotPrice: spotPrices["BNBUSDT"] || DEFAULT_SPOTS["BNBUSDT"] },
+    { symbol: "XRPUSDT", ivRank: 0.71, ivPercentile: 0.69, currentIV: BASE_IVS["XRPUSDT"], spotPrice: spotPrices["XRPUSDT"] || DEFAULT_SPOTS["XRPUSDT"] },
   ], [spotPrices]);
 
   const greeksHeatmap: GreekExposure[] = useMemo(() => [
-    { symbol: "SPY", delta: 120, theta: 45, vega: -80, gamma: 15, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
-    { symbol: "QQQ", delta: -80, theta: 62, vega: -120, gamma: 20, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
-    { symbol: "NVDA", delta: 140, theta: 35, vega: -95, gamma: 40, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
-    { symbol: "AAPL", delta: -21, theta: 38, vega: -45, gamma: 25, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
-    { symbol: "TSLA", delta: 48, theta: 28, vega: -62, gamma: 30, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
+    { symbol: "BTCUSDT", delta: 120, theta: 45, vega: -80, gamma: 15, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
+    { symbol: "ETHUSDT", delta: -80, theta: 62, vega: -120, gamma: 20, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
+    { symbol: "SOLUSDT", delta: 140, theta: 35, vega: -95, gamma: 40, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
+    { symbol: "BNBUSDT", delta: -21, theta: 38, vega: -45, gamma: 25, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
+    { symbol: "XRPUSDT", delta: 48, theta: 28, vega: -62, gamma: 30, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
   ], []);
 
   const [regimeHistory] = useState<{ date: string; regime: string; vix?: number }[]>([
@@ -220,7 +220,7 @@ export default function VolatilityLab() {
 
         {/* Ticker Selector */}
         <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#181a20] border border-[#2b313a] font-mono text-xs">
-          {["SPY", "QQQ", "AAPL", "NVDA", "TSLA"].map((sym) => (
+          {["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"].map((sym) => (
             <button
               key={sym}
               onClick={() => setSelectedTicker(sym)}
