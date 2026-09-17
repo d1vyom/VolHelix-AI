@@ -5,34 +5,27 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import List, Optional, Dict
 
-from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest, TakeProfitRequest, StopLossRequest, GetOrdersRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass, QueryOrderStatus
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockLatestQuoteRequest
-from alpaca.data.enums import DataFeed
-
 from backend.config import settings
 from backend.models.market import StrategyType, TradeStatus
 from backend.models.trade import TradeProposal, TradeRecord
 from backend.store.trade_log import trade_log
-from backend.mcp.client import AlpacaClient
+from backend.mcp.client import BinanceClient
 from backend.engine.order_flow import (
     analyze_order_flow,
     calculate_master_strategy_tp_sl,
     evaluate_master_strategy_setup
 )
-from backend.engine.gamma_profile import calculate_gamma_profile
 from backend.utils.logger import get_logger
 
 logger = get_logger("auto_trader")
 
+
 class AutoTrader:
     """
-    Autonomous Background Trading Daemon.
-    Continuously scans market structure, evaluates Order Blocks (OB), Fair Value Gaps (FVG),
-    and Gamma Profile (GEX), automatically calculates dynamic TP and SL, and places
-    institutional bracket orders on Alpaca.
+    Autonomous Background Trading Daemon for 24/7 Crypto Spot Trading.
+    Continuously scans market structure (Order Blocks, Fair Value Gaps, Liquidity Heatmap),
+    evaluates Master Strategy confluence (Score >= 0.70), automatically calculates dynamic TP and SL,
+    and dispatches paper orders on Binance Spot Testnet with 24/7 Position Guardian protection.
     """
     _instance = None
 
@@ -48,7 +41,7 @@ class AutoTrader:
         self.is_running: bool = False
         self.interval_seconds: int = 30
         self.max_open_positions: int = 3
-        self.watched_symbols: List[str] = ["SPY", "QQQ", "NVDA", "AAPL", "TSLA"]
+        self.watched_symbols: List[str] = list(settings.WATCHED_SYMBOLS)
         self.total_automated_trades: int = 0
         self.last_run_timestamp: Optional[str] = None
         self.last_trade_result: Optional[Dict] = None
@@ -56,6 +49,7 @@ class AutoTrader:
         self.scanner_diagnostics: Dict[str, Dict] = {}
         self._stop_event: threading.Event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
+        self._binance_client: Optional[BinanceClient] = None
 
         # 24/7 Position Guardian & TP/SL Manager: Runs continuously even if Auto-Pilot is OFF
         self.guardian_interval_seconds: int = 5
@@ -63,18 +57,17 @@ class AutoTrader:
         self._guardian_stop_event: threading.Event = threading.Event()
         self.ensure_guardian_running()
 
-    def _get_trading_client(self) -> TradingClient:
-        return TradingClient(
-            settings.ALPACA_API_KEY,
-            settings.ALPACA_API_SECRET,
-            paper=True
-        )
+    def _get_binance_client(self) -> BinanceClient:
+        if self._binance_client is None:
+            self._binance_client = BinanceClient()
+        return self._binance_client
 
-    def _get_stock_client(self) -> StockHistoricalDataClient:
-        return StockHistoricalDataClient(
-            settings.ALPACA_API_KEY,
-            settings.ALPACA_API_SECRET
-        )
+    # Backward compatibility alias
+    def _get_trading_client(self) -> BinanceClient:
+        return self._get_binance_client()
+
+    def _get_stock_client(self) -> BinanceClient:
+        return self._get_binance_client()
 
     def ensure_guardian_running(self):
         """Ensures the 24/7 Position Guardian thread is active."""
@@ -89,7 +82,7 @@ class AutoTrader:
         Monitors active positions, evaluates dynamic TP and SL thresholds, and automatically
         closes positions when TP or SL is breached, EVEN IF AUTO-PILOT IS TURNED OFF!
         """
-        logger.info("Position Guardian & TP/SL Manager active (24/7 Protection).")
+        logger.info("Position Guardian & TP/SL Manager active (24/7 Crypto Protection).")
         while not self._guardian_stop_event.is_set():
             try:
                 self._check_and_manage_positions()
@@ -105,12 +98,12 @@ class AutoTrader:
         Monitors active positions, evaluates dynamic TP and SL thresholds,
         and automatically closes positions when TP or SL is reached.
         """
+        client = self._get_binance_client()
         try:
-            client = self._get_trading_client()
-            alpaca_positions = client.get_all_positions()
-            pos_by_sym = {p.symbol: p for p in alpaca_positions}
+            positions = client.get_positions()
+            pos_by_sym = {p["symbol"]: p for p in positions}
         except Exception as e:
-            logger.debug(f"Position Guardian failed to query Alpaca: {e}")
+            logger.debug(f"Position Guardian failed to query Binance positions: {e}")
             return
 
         try:
@@ -119,29 +112,28 @@ class AutoTrader:
             logger.debug(f"Position Guardian failed to fetch open trades from DB: {e}")
             return
 
-        sc = self._get_stock_client()
-
         for trade in open_trades:
-            sym = trade.proposal.underlying
+            sym = trade.proposal.symbol or trade.proposal.underlying
             tp_price = trade.take_profit_price or getattr(trade.proposal, "take_profit", None)
             sl_price = trade.stop_loss_price or getattr(trade.proposal, "stop_loss", None)
-            entry_price = trade.proposal.breakevens[0] if trade.proposal.breakevens else 575.0
-            entry_time_str = trade.entry_time or ""
+            entry_price = trade.entry_price or trade.proposal.entry_price or (trade.proposal.breakevens[0] if trade.proposal.breakevens else 0.0)
 
-            # Case A: Position is active on Alpaca
+            # Get current price
+            current_price = 0.0
             if sym in pos_by_sym:
-                pos = pos_by_sym[sym]
-                qty = float(pos.qty or 1.0)
-                current_price = float(pos.current_price or 0.0)
-                if current_price <= 0:
-                    try:
-                        latest = sc.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=sym, feed=DataFeed.IEX))
-                        if latest and sym in latest:
-                            current_price = float(latest[sym].ask_price or latest[sym].bid_price or entry_price)
-                    except Exception:
-                        current_price = entry_price
+                current_price = pos_by_sym[sym]["current_price"]
+                qty = pos_by_sym[sym]["qty"]
+            else:
+                p_data = client.get_price(sym)
+                current_price = p_data.get("price", entry_price)
+                qty = trade.proposal.qty or 0.001
 
-                # Check Take Profit for Long position
+            if current_price <= 0:
+                current_price = entry_price
+
+            # Case A: Position is active on Binance
+            if sym in pos_by_sym:
+                # Check Take Profit
                 if tp_price and tp_price > 0 and current_price >= tp_price:
                     logger.info(f"Target reached for {sym}! Current: ${current_price:.2f} >= TP: ${tp_price:.2f}. Executing Take Profit.")
                     self._close_position_and_finalize_trade(
@@ -150,13 +142,13 @@ class AutoTrader:
                         symbol=sym,
                         exit_price=current_price,
                         entry_price=entry_price,
-                        qty=abs(qty),
+                        qty=qty,
                         exit_type="TAKE_PROFIT",
                         reason=f"Take Profit Target Reached: Current ${current_price:.2f} >= TP ${tp_price:.2f}"
                     )
                     continue
 
-                # Check Stop Loss for Long position
+                # Check Stop Loss
                 if sl_price and sl_price > 0 and current_price <= sl_price:
                     logger.info(f"Stop breached for {sym}! Current: ${current_price:.2f} <= SL: ${sl_price:.2f}. Executing Stop Loss.")
                     self._close_position_and_finalize_trade(
@@ -165,26 +157,15 @@ class AutoTrader:
                         symbol=sym,
                         exit_price=current_price,
                         entry_price=entry_price,
-                        qty=abs(qty),
+                        qty=qty,
                         exit_type="STOP_LOSS",
                         reason=f"Stop Loss Protection Triggered: Current ${current_price:.2f} <= SL ${sl_price:.2f}"
                     )
                     continue
 
             else:
-                # Case B: Position is not currently active in Alpaca filled positions!
-                # 1. First verify if the order is still working or pending on the broker
-                try:
-                    open_orders = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
-                    matching_open = [o for o in open_orders if o.symbol == sym]
-                    if matching_open:
-                        # The order is still pending execution on Alpaca (e.g. queued for market open or resting limit)
-                        # Keep trade as OPEN awaiting execution
-                        continue
-                except Exception as e:
-                    logger.debug(f"Failed checking open orders for {sym}: {e}")
-
-                # 2. Only if NO open/pending orders exist, check if a filled exit occurred on broker
+                # Case B: Trade recorded in DB but position not in wallet (e.g. manually sold or stopped)
+                entry_time_str = trade.entry_time or ""
                 time_elapsed = 999
                 if entry_time_str:
                     try:
@@ -192,46 +173,30 @@ class AutoTrader:
                     except Exception:
                         time_elapsed = 999
 
-                if time_elapsed > 15:
-                    exit_price = None
-                    try:
-                        orders = client.get_orders(GetOrdersRequest(status="closed", limit=10))
-                        closed_order = next((o for o in orders if o.symbol == sym and o.filled_avg_price and float(o.filled_avg_price) > 0), None)
-                        if closed_order and closed_order.filled_avg_price:
-                            exit_price = float(closed_order.filled_avg_price)
-                    except Exception:
-                        pass
+                if time_elapsed > 30:
+                    realized_pnl = round((current_price - entry_price) * qty, 2)
+                    exit_type = "TAKE_PROFIT" if (tp_price and current_price >= tp_price * 0.99) else "STOP_LOSS"
+                    trade.status = TradeStatus.CLOSED
+                    trade.realized_pnl = realized_pnl
+                    trade.exit_time = datetime.now().isoformat()
+                    trade.exit_price = current_price
+                    asyncio.run(trade_log.save_trade(trade))
 
-                    if exit_price is not None:
-                        realized_pnl = round((exit_price - entry_price) * 1.0, 2)
-                        exit_type = "TAKE_PROFIT" if (tp_price and exit_price >= tp_price * 0.99) else "STOP_LOSS"
-                        trade.status = TradeStatus.CLOSED
-                        trade.realized_pnl = realized_pnl
-                        trade.exit_time = datetime.now().isoformat()
-                        trade.exit_price = exit_price
-                        asyncio.run(trade_log.save_trade(trade))
-
-                        msg = f"Position {sym} closed on broker (Bracket fulfilled). Exit: ${exit_price:.2f} | Realized PnL: ${realized_pnl:+.2f}"
-                        logger.info(msg)
-                        self._emit_guardian_event(exit_type, sym, exit_price, realized_pnl, msg)
+                    msg = f"Position {sym} synchronized with wallet. Exit: ${current_price:.2f} | Realized PnL: ${realized_pnl:+.2f}"
+                    logger.info(msg)
+                    self._emit_guardian_event(exit_type, sym, current_price, realized_pnl, msg)
 
         # Check and fill pending limit orders when market price reaches limit
         try:
             pending_trades = asyncio.run(trade_log.get_pending_trades())
             for ptrade in pending_trades:
-                sym = ptrade.proposal.underlying
+                sym = ptrade.proposal.symbol or ptrade.proposal.underlying
                 limit_p = ptrade.proposal.limit_price or (ptrade.proposal.breakevens[0] if ptrade.proposal.breakevens else None)
                 if not limit_p:
                     continue
-                
-                cur_price = 0.0
-                try:
-                    latest = sc.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=sym, feed=DataFeed.IEX))
-                    if latest and sym in latest:
-                        cur_price = float(latest[sym].ask_price or latest[sym].bid_price or 0.0)
-                except Exception:
-                    pass
 
+                p_info = client.get_price(sym)
+                cur_price = p_info.get("price", 0.0)
                 if cur_price <= 0:
                     continue
 
@@ -252,7 +217,7 @@ class AutoTrader:
 
     def _close_position_and_finalize_trade(
         self,
-        client: TradingClient,
+        client: BinanceClient,
         trade: TradeRecord,
         symbol: str,
         exit_price: float,
@@ -261,18 +226,20 @@ class AutoTrader:
         exit_type: str,
         reason: str
     ):
-        """Closes position on Alpaca, cancels resting bracket child orders, and updates DB."""
+        """Closes crypto spot position by selling held asset on testnet and updates DB."""
         try:
-            try:
-                orders = client.get_orders(GetOrdersRequest(status="open"))
-                for o in orders:
-                    if o.symbol == symbol:
-                        client.cancel_order_by_id(o.id)
-            except Exception:
-                pass
-
+            # 1. Cancel open orders for this pair
+            client.cancel_all_orders(symbol)
             time.sleep(0.3)
-            client.close_position(symbol)
+
+            # 2. Sell held quantity on testnet
+            if qty > 0:
+                client.place_order(
+                    symbol=symbol,
+                    side="SELL",
+                    order_type="MARKET",
+                    quantity=qty
+                )
         except Exception as e:
             logger.warning(f"Error executing position close for {symbol}: {e}")
 
@@ -334,7 +301,7 @@ class AutoTrader:
         self.interval_seconds = max(10, interval)
         self._stop_event.clear()
         self.is_running = True
-        self.last_log = f"Autonomous loop started. Scanning every {self.interval_seconds}s."
+        self.last_log = f"Autonomous loop started. Scanning every {self.interval_seconds}s across crypto pairs."
         logger.info(self.last_log)
 
         self._worker_thread = threading.Thread(target=self._loop, daemon=True)
@@ -350,7 +317,7 @@ class AutoTrader:
         self.is_running = False
         if self._worker_thread and self._worker_thread.is_alive() and threading.current_thread() != self._worker_thread:
             self._worker_thread.join(timeout=3.0)
-        self.last_log = "Autonomous scanning paused by operator. Position Guardian active for TP/SL."
+        self.last_log = "Autonomous scanning paused by operator. Position Guardian active 24/7 for TP/SL."
         logger.info(self.last_log)
         return {"success": True, "message": "Auto-trader stopped successfully", "status": self.status()}
 
@@ -377,9 +344,9 @@ class AutoTrader:
         self.ensure_guardian_running()
         clean_sym = symbol.strip().upper() if symbol else None
         if clean_sym:
-            logger.info(f"Manual trigger of autonomous trading cycle requested specifically for active chart: {clean_sym}")
+            logger.info(f"Manual trigger of autonomous trading cycle requested for symbol: {clean_sym}")
         else:
-            logger.info("Manual trigger of autonomous trading cycle requested across watchlist.")
+            logger.info("Manual trigger of autonomous trading cycle requested across crypto watchlist.")
         return self._execute_scan_cycle(requested_symbol=clean_sym)
 
     def _loop(self):
@@ -400,33 +367,18 @@ class AutoTrader:
     def _execute_scan_cycle(self, requested_symbol: Optional[str] = None) -> Dict:
         """
         Scans symbols against the Master Strategy Confluence Gate (Score >= 0.70).
-        If requested_symbol is provided, evaluates ONLY that single asset from the active chart.
-        STRICT: Only executes if a candidate meets OB retest + FVG imbalance + GEX wall criteria.
+        Evaluates Order Blocks, Fair Value Gaps, and Liquidity Heatmaps from Binance.
         """
         self.last_run_timestamp = datetime.now().isoformat()
         if not requested_symbol and self._stop_event.is_set():
             return {"success": True, "executed": False, "reason": "Stopped", "scanner_diagnostics": self.scanner_diagnostics}
-        
-        # 0. STRICT MARKET HOURS ENFORCEMENT: trades are only executable when markets are open
-        from backend.utils.market_hours import is_market_open
-        if not is_market_open():
-            msg = "Market is closed. Regular trading session: 09:30 - 16:00 ET, Mon-Fri. Scanner on standby."
-            self.last_log = msg
-            logger.info(msg)
-            return {
-                "success": True,
-                "executed": False,
-                "market_open": False,
-                "symbol": requested_symbol,
-                "reason": msg,
-                "scanner_diagnostics": self.scanner_diagnostics
-            }
+
+        client = self._get_binance_client()
 
         # 1. Check open positions limit
         try:
-            client = self._get_trading_client()
-            positions = client.get_all_positions()
-            active_symbols = {p.symbol for p in positions}
+            positions = client.get_positions()
+            active_symbols = {p["symbol"] for p in positions}
             if len(positions) >= self.max_open_positions:
                 msg = f"Max positions reached ({len(positions)}/{self.max_open_positions}). Scanner on standby."
                 self.last_log = msg
@@ -437,10 +389,7 @@ class AutoTrader:
             logger.warning(f"Failed to check positions: {e}")
 
         # 2. Evaluate target symbol or all watched symbols concurrently
-        mcp = AlpacaClient()
-        sc = self._get_stock_client()
         valid_candidates = []
-
         symbols_to_scan = [requested_symbol] if requested_symbol else self.watched_symbols
 
         def _evaluate_single_symbol(sym: str):
@@ -461,35 +410,34 @@ class AutoTrader:
                 }
 
             try:
-                bars_data = mcp.get_stock_bars(sym, days=25)
-                bars = bars_data.get("bars", [])
-                order_flow = analyze_order_flow(sym, bars)
-                chain = mcp.get_option_chain(sym)
+                klines = client.get_klines(sym, interval="1h", limit=50)
+                if not klines:
+                    return {
+                        "symbol": sym,
+                        "diag": {"symbol": sym, "is_valid": False, "score": 0.0, "status_label": "NO DATA", "reasons": ["No klines returned"]},
+                        "candidate": None
+                    }
 
+                order_flow = analyze_order_flow(sym, klines)
                 current_price = order_flow.current_price
                 if current_price <= 0:
-                    latest = sc.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=sym, feed=DataFeed.IEX))
-                    if latest and sym in latest:
-                        current_price = float(latest[sym].ask_price or latest[sym].bid_price or 575.0)
-                    else:
-                        current_price = 575.0
+                    p_info = client.get_price(sym)
+                    current_price = p_info.get("price", 0.0)
 
-                gamma_prof = calculate_gamma_profile(chain.get("legs", []), current_price)
                 eval_res = evaluate_master_strategy_setup(
                     symbol=sym,
                     current_price=current_price,
                     order_flow=order_flow,
-                    gamma_profile=gamma_prof
+                    gamma_profile=None
                 )
 
                 cand = None
-                if eval_res["is_valid"]:
+                if eval_res.get("is_valid"):
                     cand = {
                         "symbol": sym,
                         "eval": eval_res,
                         "current_price": current_price,
-                        "order_flow": order_flow,
-                        "gamma_profile": gamma_prof
+                        "order_flow": order_flow
                     }
 
                 return {
@@ -511,7 +459,7 @@ class AutoTrader:
                     "candidate": None
                 }
 
-        # Fast parallel execution: scan all symbols concurrently
+        # Fast parallel execution across watched symbols
         max_workers = min(5, len(symbols_to_scan))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             scan_results = list(executor.map(_evaluate_single_symbol, symbols_to_scan))
@@ -521,8 +469,7 @@ class AutoTrader:
             if item["candidate"]:
                 valid_candidates.append(item["candidate"])
 
-        # 3. STRICT MASTER STRATEGY GATE:
-        # If no symbol satisfies the Master Strategy criteria (Score >= 0.70), DO NOT EXECUTE ANY TRADE!
+        # 3. STRICT MASTER STRATEGY GATE
         if not valid_candidates:
             if requested_symbol:
                 diag = self.scanner_diagnostics.get(requested_symbol, {})
@@ -532,7 +479,7 @@ class AutoTrader:
                     reasons_str = " | ".join(diag.get("reasons", [])) if diag.get("reasons") else "Score < 70%"
                     msg = f"Scan on {requested_symbol} complete: Setup criteria not met ({reasons_str}). Capital preserved."
             else:
-                msg = f"Radar scan across {len(self.watched_symbols)} symbols complete: 0 setups formed with strict Master Strategy confluence. Capital preserved."
+                msg = f"Radar scan across {len(self.watched_symbols)} crypto pairs complete: 0 setups with Master Strategy confluence. Capital preserved."
             self.last_log = msg
             logger.info(msg)
 
@@ -541,7 +488,7 @@ class AutoTrader:
                 async def _emit_hold():
                     await sio.emit("reasoning_event", {
                         "agent": "AutoTrader",
-                        "message": f"Scan for {requested_symbol or 'Watchlist'}: Strict Master Strategy criteria not met. Holding cash safely.",
+                        "message": f"Scan for {requested_symbol or 'Crypto Watchlist'}: Strict confluence criteria not met. Holding USDT safely.",
                         "confidence": 0.95
                     })
                 threading.Thread(target=lambda: asyncio.run(_emit_hold()), daemon=True).start()
@@ -565,53 +512,37 @@ class AutoTrader:
         tp_price = levels["take_profit_price"]
         sl_price = levels["stop_loss_price"]
 
-        # 5. Place native Alpaca Bracket Order
-        try:
-            order_req = MarketOrderRequest(
-                symbol=chosen_symbol,
-                qty=1,
-                side=OrderSide.BUY,
-                time_in_force=TimeInForce.DAY,
-                order_class=OrderClass.BRACKET,
-                take_profit=TakeProfitRequest(limit_price=tp_price),
-                stop_loss=StopLossRequest(stop_price=sl_price)
-            )
-            alpaca_order = client.submit_order(order_req)
-            order_id = str(alpaca_order.id)
-            order_type = "BRACKET"
-        except Exception as e:
-            try:
-                alpaca_order = client.submit_order(
-                    MarketOrderRequest(
-                        symbol=chosen_symbol,
-                        qty=1,
-                        side=OrderSide.BUY,
-                        time_in_force=TimeInForce.DAY
-                    )
-                )
-                order_id = str(alpaca_order.id)
-                order_type = "SOFTWARE_TP_SL"
-            except Exception as e2:
-                import uuid
-                order_id = f"AUTO-{uuid.uuid4().hex[:8].upper()}"
-                order_type = "SIMULATED_BRACKET"
+        # 5. Place Paper Order on Binance Spot Testnet
+        # Size position safely at 2.0% of NAV (~$200 USDT)
+        order_quote_qty = 200.0
+        calculated_qty = round(order_quote_qty / current_price, 5) if current_price > 0 else 0.001
+
+        order_res = client.place_order(
+            symbol=chosen_symbol,
+            side="BUY",
+            order_type="MARKET",
+            quote_quantity=order_quote_qty
+        )
+        order_id = str(order_res.get("order_id", f"BINANCE-{int(time.time())}"))
+        order_type = "SPOT_MARKET"
 
         # 6. Build and persist TradeRecord to SQLite ledger
         proposal = TradeProposal(
             id=order_id,
+            symbol=chosen_symbol,
             underlying=chosen_symbol,
             strategy_type=StrategyType.MASTER_ORDER_FLOW,
-            legs=[],
-            is_credit=True,
-            net_premium=round(current_price * 0.015, 2),
-            max_profit=round(current_price * (levels["take_profit_pct"] / 100) * 100, 2),
-            max_loss=round(current_price * (levels["stop_loss_pct"] / 100) * 100, 2),
-            breakevens=[round(current_price, 2)],
-            dte=21,
-            ev=round(current_price * (levels["take_profit_pct"] / 100) * 0.7 - current_price * (levels["stop_loss_pct"] / 100) * 0.3, 2),
-            thesis=f"Master Strategy Execution ({eval_data['status_label']}, Score {eval_data['score']}): TP ${tp_price} ({levels['tp_reason']}) | SL ${sl_price} ({levels['sl_reason']}) [R:R {levels['risk_reward_ratio']}:1]",
+            side="BUY",
+            order_type="MARKET",
+            qty=calculated_qty,
+            quote_qty=order_quote_qty,
+            entry_price=current_price,
             take_profit=tp_price,
-            stop_loss=sl_price
+            stop_loss=sl_price,
+            max_profit=round(current_price * (levels["take_profit_pct"] / 100) * calculated_qty, 2),
+            max_loss=round(current_price * (levels["stop_loss_pct"] / 100) * calculated_qty, 2),
+            breakevens=[round(current_price, 2)],
+            thesis=f"Master Strategy Execution ({eval_data['status_label']}, Score {eval_data['score']}): TP ${tp_price} ({levels['tp_reason']}) | SL ${sl_price} ({levels['sl_reason']}) [R:R {levels['risk_reward_ratio']}:1]"
         )
 
         trade_rec = TradeRecord(
@@ -619,9 +550,11 @@ class AutoTrader:
             proposal=proposal,
             status=TradeStatus.OPEN,
             entry_time=datetime.now().isoformat(),
+            entry_price=current_price,
             realized_pnl=0.0,
             take_profit_price=tp_price,
-            stop_loss_price=sl_price
+            stop_loss_price=sl_price,
+            binance_order_id=order_id
         )
 
         def _save():
@@ -661,7 +594,7 @@ class AutoTrader:
             async def _emit():
                 await sio.emit("reasoning_event", {
                     "agent": "AutoTrader",
-                    "message": f"High-Confluence Master Strategy Setup ({eval_data['status_label']}, Score {eval_data['score']}) triggered on {chosen_symbol}! Bracket Order Dispatched. TP: ${tp_price} | SL: ${sl_price}",
+                    "message": f"High-Confluence Master Strategy Setup ({eval_data['status_label']}, Score {eval_data['score']}) triggered on {chosen_symbol}! Spot Order Dispatched on Binance Testnet. TP: ${tp_price} | SL: ${sl_price}",
                     "confidence": eval_data["score"]
                 })
             threading.Thread(target=lambda: asyncio.run(_emit()), daemon=True).start()
@@ -669,6 +602,7 @@ class AutoTrader:
             pass
 
         return result
+
 
 # Singleton instance
 auto_trader = AutoTrader()
