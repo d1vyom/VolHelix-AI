@@ -15,9 +15,7 @@ import {
   LineChart as LineIcon, 
   RefreshCw, 
   Clock, 
-  XCircle, 
   Trash2, 
-  AlertCircle,
   Award,
   Layers,
   Zap
