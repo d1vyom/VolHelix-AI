@@ -68,19 +68,20 @@ export async function getAuditTrail(): Promise<Record<string, unknown>[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Alpaca Real Live Market Data & Execution Client
+// Binance Exchange Live Market Data & Execution Client
 // ---------------------------------------------------------------------------
 
-export interface AlpacaAccount {
+export interface ExchangeAccount {
   equity: number;
   buying_power: number;
   cash: number;
   portfolio_value: number;
   status: string;
   currency: string;
+  balances?: Record<string, { free: number; locked: number; total: number; value_usdt?: number }>;
 }
 
-export interface AlpacaPosition {
+export interface ExchangePosition {
   id?: string;
   trade_id?: string;
   symbol: string;
@@ -98,7 +99,7 @@ export interface AlpacaPosition {
   order_type?: string;
 }
 
-export interface AlpacaOrder {
+export interface ExchangeOrder {
   id: string;
   symbol: string;
   qty: number;
@@ -113,7 +114,7 @@ export interface AlpacaOrder {
   created_at: string;
 }
 
-export interface AlpacaQuote {
+export interface ExchangeQuote {
   symbol: string;
   bid: number;
   ask: number;
@@ -121,10 +122,15 @@ export interface AlpacaQuote {
   spread: number;
   bid_size?: number;
   ask_size?: number;
+  high_24h?: number;
+  low_24h?: number;
+  volume_24h?: number;
+  price_change_24h?: number;
+  price_change_percent_24h?: number;
   timestamp: string;
 }
 
-export interface AlpacaBar {
+export interface ExchangeBar {
   time: string;
   open: number;
   high: number;
@@ -133,80 +139,92 @@ export interface AlpacaBar {
   volume: number;
 }
 
-export async function getAlpacaAccount(): Promise<AlpacaAccount> {
+// Compatibility Type Aliases
+export type AlpacaAccount = ExchangeAccount;
+export type AlpacaPosition = ExchangePosition;
+export type AlpacaOrder = ExchangeOrder;
+export type AlpacaQuote = ExchangeQuote;
+export type AlpacaBar = ExchangeBar;
+
+export async function getExchangeAccount(): Promise<ExchangeAccount> {
   try {
-    const res = await fetch(`${API_BASE}/api/alpaca/account`);
-    return await safeJson<AlpacaAccount>(res, {
-      equity: 100000.0,
-      buying_power: 400000.0,
-      cash: 100000.0,
-      portfolio_value: 100000.0,
+    const res = await fetch(`${API_BASE}/api/exchange/account`);
+    return await safeJson<ExchangeAccount>(res, {
+      equity: 10000.0,
+      buying_power: 10000.0,
+      cash: 10000.0,
+      portfolio_value: 10000.0,
       status: "ACTIVE",
-      currency: "USD",
+      currency: "USDT",
     });
   } catch {
     return {
-      equity: 100000.0,
-      buying_power: 400000.0,
-      cash: 100000.0,
-      portfolio_value: 100000.0,
+      equity: 10000.0,
+      buying_power: 10000.0,
+      cash: 10000.0,
+      portfolio_value: 10000.0,
       status: "ACTIVE",
-      currency: "USD",
+      currency: "USDT",
     };
   }
 }
+export const getAlpacaAccount = getExchangeAccount;
 
-export async function getAlpacaPositions(): Promise<AlpacaPosition[]> {
+export async function getExchangePositions(): Promise<ExchangePosition[]> {
   try {
-    const res = await fetch(`${API_BASE}/api/alpaca/positions`);
-    return await safeJson<AlpacaPosition[]>(res, []);
+    const res = await fetch(`${API_BASE}/api/exchange/positions`);
+    return await safeJson<ExchangePosition[]>(res, []);
   } catch {
     return [];
   }
 }
+export const getAlpacaPositions = getExchangePositions;
 
-export async function getAlpacaOrders(): Promise<AlpacaOrder[]> {
+export async function getExchangeOrders(): Promise<ExchangeOrder[]> {
   try {
-    const res = await fetch(`${API_BASE}/api/alpaca/orders`);
-    return await safeJson<AlpacaOrder[]>(res, []);
+    const res = await fetch(`${API_BASE}/api/exchange/orders`);
+    return await safeJson<ExchangeOrder[]>(res, []);
   } catch {
     return [];
   }
 }
+export const getAlpacaOrders = getExchangeOrders;
 
-export async function getAlpacaQuote(symbol: string): Promise<AlpacaQuote> {
+export async function getExchangeQuote(symbol: string): Promise<ExchangeQuote> {
   try {
-    const res = await fetch(`${API_BASE}/api/alpaca/quote?symbol=${encodeURIComponent(symbol)}`);
-    return await safeJson<AlpacaQuote>(res, {
+    const res = await fetch(`${API_BASE}/api/exchange/quote?symbol=${encodeURIComponent(symbol)}`);
+    return await safeJson<ExchangeQuote>(res, {
       symbol,
-      bid: 574.8,
-      ask: 574.9,
-      last: 574.85,
-      spread: 0.1,
+      bid: 76500.0,
+      ask: 76501.0,
+      last: 76500.5,
+      spread: 1.0,
       timestamp: new Date().toISOString(),
     });
   } catch {
     return {
       symbol,
-      bid: 574.8,
-      ask: 574.9,
-      last: 574.85,
-      spread: 0.1,
+      bid: 76500.0,
+      ask: 76501.0,
+      last: 76500.5,
+      spread: 1.0,
       timestamp: new Date().toISOString(),
     };
   }
 }
+export const getAlpacaQuote = getExchangeQuote;
 
-export async function getAlpacaBars(symbol: string, timeframe: string = "1H"): Promise<AlpacaBar[]> {
+export async function getExchangeBars(symbol: string, timeframe: string = "1H"): Promise<ExchangeBar[]> {
   try {
-    const res = await fetch(`${API_BASE}/api/alpaca/bars?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`);
-    return await safeJson<AlpacaBar[]>(res, []);
+    const res = await fetch(`${API_BASE}/api/exchange/bars?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`);
+    return await safeJson<ExchangeBar[]>(res, []);
   } catch {
     return [];
   }
 }
+export const getAlpacaBars = getExchangeBars;
 
-export interface AlpacaOrderResponse {
+export interface ExchangeOrderResponse {
   success: boolean;
   order_id?: string;
   symbol?: string;
@@ -219,13 +237,15 @@ export interface AlpacaOrderResponse {
   message?: string;
   error?: string;
 }
+export type AlpacaOrderResponse = ExchangeOrderResponse;
 
-export interface AlpacaCloseResponse {
+export interface ExchangeCloseResponse {
   success: boolean;
   symbol?: string;
   status?: string;
   error?: string;
 }
+export type AlpacaCloseResponse = ExchangeCloseResponse;
 
 export interface BotTradeResponse {
   success: boolean;
@@ -233,8 +253,8 @@ export interface BotTradeResponse {
   strategy?: string;
   decision?: string;
   consensus_score?: number;
+  binance_order_id?: string;
   alpaca_order_id?: string;
-  alpaca_status?: string;
   entry_price?: number;
   take_profit_price?: number;
   stop_loss_price?: number;
@@ -251,28 +271,30 @@ export interface BotTradeResponse {
   error?: string;
 }
 
-export async function submitAlpacaOrder(
+export async function submitExchangeOrder(
   symbol: string,
   qty: number,
   side: "buy" | "sell",
   order_type: "market" | "limit" = "market",
-  limit_price?: number
-): Promise<AlpacaOrderResponse> {
+  limit_price?: number,
+  quote_quantity?: number
+): Promise<ExchangeOrderResponse> {
   try {
-    const res = await fetch(`${API_BASE}/api/alpaca/order`, {
+    const res = await fetch(`${API_BASE}/api/exchange/order`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol, qty, side, order_type, limit_price }),
+      body: JSON.stringify({ symbol, qty, side, order_type, limit_price, quote_quantity }),
     });
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
       return { success: false, error: errJson.detail || `Server error: HTTP ${res.status}` };
     }
-    return await safeJson<AlpacaOrderResponse>(res, { success: false });
+    return await safeJson<ExchangeOrderResponse>(res, { success: false });
   } catch (e: any) {
     return { success: false, error: e.message || "Failed to submit order" };
   }
 }
+export const submitAlpacaOrder = submitExchangeOrder;
 
 export async function fillPendingTrade(tradeId: string, fillPrice?: number): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
@@ -295,20 +317,20 @@ export async function getMarketStatus(): Promise<MarketClockStatus> {
   try {
     const res = await fetch(`${API_BASE}/api/market-status`);
     return await safeJson<MarketClockStatus>(res, {
-      is_open: false,
-      raw_is_open: false,
+      is_open: true,
+      raw_is_open: true,
       simulation_active: false,
       current_time_et: "",
-      reason: "Clock offline",
+      reason: "24/7 Crypto Session Active",
     });
   } catch {
     return {
-      is_open: false,
-      raw_is_open: false,
+      is_open: true,
+      raw_is_open: true,
       simulation_active: false,
       simulation_override: false,
       current_time_et: "",
-      reason: "Clock offline",
+      reason: "24/7 Crypto Session Active",
     };
   }
 }
@@ -326,22 +348,23 @@ export async function setMarketSimulationOverride(enabled: boolean): Promise<{ s
   }
 }
 
-export async function closeAlpacaPosition(symbol: string): Promise<AlpacaCloseResponse> {
+export async function closeExchangePosition(symbol: string): Promise<ExchangeCloseResponse> {
   try {
-    const res = await fetch(`${API_BASE}/api/alpaca/close-position`, {
+    const res = await fetch(`${API_BASE}/api/exchange/close-position`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ symbol }),
     });
-    return await safeJson<AlpacaCloseResponse>(res, { success: false });
+    return await safeJson<ExchangeCloseResponse>(res, { success: false });
   } catch {
     return { success: false };
   }
 }
+export const closeAlpacaPosition = closeExchangePosition;
 
-export async function cancelAlpacaOrder(orderId: string): Promise<{ success: boolean; error?: string }> {
+export async function cancelExchangeOrder(orderId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const res = await fetch(`${API_BASE}/api/alpaca/orders/${encodeURIComponent(orderId)}`, {
+    const res = await fetch(`${API_BASE}/api/exchange/orders/${encodeURIComponent(orderId)}`, {
       method: "DELETE",
     });
     return await safeJson(res, { success: false });
@@ -349,10 +372,11 @@ export async function cancelAlpacaOrder(orderId: string): Promise<{ success: boo
     return { success: false };
   }
 }
+export const cancelAlpacaOrder = cancelExchangeOrder;
 
-export async function cancelAllAlpacaOrders(): Promise<{ success: boolean; cancelled?: number; error?: string }> {
+export async function cancelAllExchangeOrders(): Promise<{ success: boolean; cancelled?: number; error?: string }> {
   try {
-    const res = await fetch(`${API_BASE}/api/alpaca/cancel-all`, {
+    const res = await fetch(`${API_BASE}/api/exchange/cancel-all`, {
       method: "POST",
     });
     return await safeJson(res, { success: false });
@@ -360,6 +384,7 @@ export async function cancelAllAlpacaOrders(): Promise<{ success: boolean; cance
     return { success: false };
   }
 }
+export const cancelAllAlpacaOrders = cancelAllExchangeOrders;
 
 export interface OrderFlowData {
   success: boolean;
@@ -371,14 +396,6 @@ export interface OrderFlowData {
     nearest_bearish_ob?: { low: number; high: number; strength: number };
     unfilled_fvgs?: { gap_type: string; top: number; bottom: number; size: number }[];
     liquidity_heatmap?: { price: number; volume: number; side: string; intensity: number }[];
-  };
-  gamma_profile?: {
-    spot_price: number;
-    total_net_gex: number;
-    call_wall: number;
-    put_wall: number;
-    gamma_flip: number;
-    regime: string;
   };
 }
 
@@ -451,8 +468,8 @@ export async function getAutoTradingStatus(): Promise<AutoTradingStatus> {
     return await safeJson<AutoTradingStatus>(res, {
       is_running: false,
       interval_seconds: 30,
-      max_open_positions: 3,
-      watched_symbols: ["SPY", "QQQ", "NVDA", "AAPL", "TSLA"],
+      max_open_positions: 5,
+      watched_symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"],
       total_automated_trades: 0,
       last_log: "Standby",
     });
@@ -460,8 +477,8 @@ export async function getAutoTradingStatus(): Promise<AutoTradingStatus> {
     return {
       is_running: false,
       interval_seconds: 30,
-      max_open_positions: 3,
-      watched_symbols: ["SPY", "QQQ", "NVDA", "AAPL", "TSLA"],
+      max_open_positions: 5,
+      watched_symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"],
       total_automated_trades: 0,
       last_log: "Standby",
     };
