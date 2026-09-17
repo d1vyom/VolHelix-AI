@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import pytest
 from datetime import datetime
@@ -68,12 +68,17 @@ def sample_bull_put_proposal(sample_legs):
     return TradeProposal(
         id="test-prop-001",
         underlying="SPY",
+        symbol="SPY",
         strategy_type=StrategyType.BULL_PUT_SPREAD,
         legs=[short_put, long_put],
         is_credit=True,
         net_premium=1.50,
         max_profit=1.50,
         max_loss=3.50,  # $350 risk per contract
+        entry_price=500.0,
+        qty=2.0,
+        stop_loss=490.0,
+        take_profit=520.0,
         breakevens=[498.50],
         net_delta=-0.10,
         net_theta=0.05,
@@ -81,6 +86,28 @@ def sample_bull_put_proposal(sample_legs):
         dte=30,
         ev=1.10,
         thesis="Bullish support bounce at 500"
+    )
+
+@pytest.fixture
+def sample_crypto_proposal():
+    return TradeProposal(
+        id="test-crypto-001",
+        underlying="BTCUSDT",
+        symbol="BTCUSDT",
+        strategy_type="VOL_BREAKOUT",
+        legs=[],
+        is_credit=False,
+        entry_price=60000.0,
+        qty=0.01,  # $600 notional
+        quote_qty=600.0,
+        stop_loss=58800.0,
+        take_profit=62400.0,
+        max_profit=2400.0,
+        max_loss=1200.0,
+        breakevens=[60000.0],
+        dte=0,
+        ev=18.5,
+        thesis="24/7 Parkinson volatility breakout with positive order book imbalance"
     )
 
 @pytest.fixture
