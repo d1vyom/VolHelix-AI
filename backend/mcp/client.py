@@ -192,8 +192,8 @@ class BinanceClient:
                     curr_price = tickers_map.get(symbol, 0.0)
                     if curr_price > 0:
                         market_value = amounts["total"] * curr_price
-                        # Include if it has non-trivial value (>= $0.10) or is a watched symbol
-                        if market_value >= 0.10 or symbol in settings.WATCHED_SYMBOLS:
+                        # Only track watched symbols to avoid arbitrary testnet airdrop/gift balances
+                        if symbol in settings.WATCHED_SYMBOLS:
                             positions.append({
                                 "symbol": symbol,
                                 "asset": asset,
