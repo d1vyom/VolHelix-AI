@@ -13,6 +13,8 @@ import socketio
 from backend.engine.auto_trader import auto_trader
 from contextlib import asynccontextmanager
 
+from backend.marketdata.hub import hub
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Initializing Database...")
@@ -20,7 +22,18 @@ async def lifespan(app: FastAPI):
     await postmortem_store.init_db()
     auto_trader.ensure_guardian_running()
     print("Position Guardian 24/7 TP/SL Engine Active...")
+    
+    try:
+        await hub.start()
+    except Exception as e:
+        print(f"Failed to start MarketDataHub: {e}")
+        
     yield
+    
+    try:
+        await hub.stop()
+    except Exception as e:
+        print(f"Failed to stop MarketDataHub: {e}")
 
 fastapi_app = FastAPI(title="VolHelix AI Backend", lifespan=lifespan)
 

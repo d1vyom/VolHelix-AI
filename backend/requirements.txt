@@ -17,3 +17,4 @@ python-dotenv
 aiosqlite
 httpx
 pytest
+websockets

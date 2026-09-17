@@ -88,3 +88,29 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - [x] TS interfaces compile under `npm run build`.
 - [x] Existing 59 tests still pass (62 passed total).
 
+---
+
+## Phase 2 — WebSocket Ingestion Layer
+
+**Date:** 2026-09-18  
+**Status:** COMPLETE  
+
+### 1. Changes
+- Installed `websockets` dependency and added it to `backend/requirements.txt`.
+- Created `backend/marketdata/connectors/base.py` and `binance_spot.py` (ExchangeConnector protocol).
+- Created `backend/marketdata/buffers.py` with gap detection logic.
+- Created `backend/marketdata/orderbook.py` with L2 diff-depth logic, correctly handling overlapping first events and zero-qty deletions.
+- Created `backend/marketdata/stream_manager.py` for multiplexing max 200 streams and maintaining 24h connection rotation.
+- Created `backend/marketdata/hub.py` as a central singleton.
+- Wired `hub.start()` and `hub.stop()` into `backend/main.py` app lifecycle.
+- Added `backend/tests/test_orderbook_sync.py` verifying gap detection, synchronization, and L2 operations.
+
+### 2. Verification
+- `python -m pytest backend/tests/test_orderbook_sync.py -v` -> PASSED.
+- `python -m pytest backend/tests` -> 63 passed.
+
+### 3. Acceptance Criteria Verification
+- [x] Stream chunking logic exists (groups of 20 streams).
+- [x] Gap tracking exists (trade sequencing and update_id chains).
+- [x] `test_orderbook_sync.py` asserts correct book diff-depth application and gap triggering.
+- [x] Main app lifecyle controls the hub start/stop.
