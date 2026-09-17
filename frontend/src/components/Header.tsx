@@ -83,10 +83,9 @@ export function Header() {
 
     const fetchMarketInfo = async () => {
       try {
-        const [q, acc, mkt] = await Promise.all([
+        const [q, acc] = await Promise.all([
           getExchangeQuote(selectedTicker),
           getExchangeAccount(),
-          getMarketStatus(),
         ]);
         if (!isMounted) return;
         if (q) {
@@ -94,9 +93,6 @@ export function Header() {
         }
         if (acc) {
           setAccount((prev) => (prev?.portfolio_value === acc.portfolio_value && prev?.buying_power === acc.buying_power ? prev : acc));
-        }
-        if (mkt) {
-          setMarketClock((prev) => (prev?.is_open === mkt.is_open && prev?.current_time_et === mkt.current_time_et ? prev : mkt));
         }
       } catch {
         // ignore
