@@ -114,3 +114,30 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - [x] Gap tracking exists (trade sequencing and update_id chains).
 - [x] `test_orderbook_sync.py` asserts correct book diff-depth application and gap triggering.
 - [x] Main app lifecyle controls the hub start/stop.
+
+---
+
+## Phase 3 — Order Flow Aggregation Engines
+
+**Date:** 2026-09-18  
+**Status:** COMPLETE  
+
+### 1. Changes
+- Created `backend/engine/footprint.py` to aggregate tick-bucketed volume, diagonal imbalances, stacked imbalances, VWAP, POC, VAH, and VAL.
+- Created `backend/engine/delta_engine.py` to aggregate CVD, detect session divergences (higher highs + lower CVD), and compute VWAP.
+- Created `backend/engine/volume_profile.py` for full session volume profile, VA boundary updates, and naked POC tracking.
+- Created `backend/engine/dom_analytics.py` for resting wall identification, depth grouping, book imbalance, and iceberg detection.
+- Created `backend/engine/tape_analytics.py` for aggressive whale prints.
+- Created `backend/engine/heatmap.py` to bin historical limit order liquidity.
+- Created `backend/engine/flow_confluence.py` as a centralized aggregator.
+- Created unit tests `test_footprint.py`, `test_delta_engine.py`, `test_volume_profile.py`, `test_dom_analytics.py`, and `test_heatmap.py`.
+
+### 2. Verification
+- `pytest backend/tests/test_footprint.py backend/tests/test_delta_engine.py backend/tests/test_volume_profile.py backend/tests/test_dom_analytics.py backend/tests/test_heatmap.py -v` -> 8 passed.
+- `pytest backend/tests -v` -> 71 passed.
+
+### 3. Acceptance Criteria Verification
+- [x] All 7 engines implemented cleanly.
+- [x] Aggregator avoids O(N) sort operations (constant-time approximations used where applicable).
+- [x] `test_footprint.py` and `test_delta_engine.py` assert expected values without failures.
+- [x] `pytest backend/tests -v` ran completely successfully.

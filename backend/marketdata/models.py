@@ -44,6 +44,7 @@ class LadderLevel(BaseModel):
     ask_notional: float = Field(default=0.0, description="Resting ask notional in quote units (USD)")
     is_wall: bool = Field(default=False, description="Flag indicating large resting liquidity wall")
     is_poc: bool = Field(default=False, description="Flag indicating point of control price")
+    iceberg_suspected: bool = Field(default=False, description="Flag indicating possible iceberg activity")
     traded_buy: float = Field(default=0.0, description="Recently executed aggressive buy volume at this price")
     traded_sell: float = Field(default=0.0, description="Recently executed aggressive sell volume at this price")
     depth_pct: float = Field(default=0.0, description="Size relative to largest visible level on ladder (0.0 - 1.0)")
