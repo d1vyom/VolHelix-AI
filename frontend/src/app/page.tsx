@@ -18,9 +18,6 @@ import {
   XCircle, 
   Trash2, 
   AlertCircle,
-  Lock,
-  CheckCircle2,
-  DollarSign,
   Award,
   Layers,
   Zap
@@ -255,14 +252,6 @@ export default function BybitTradingTerminal() {
       return ["accepted", "new", "pending_new", "held", "open", "calculated"].includes(s);
     });
   }, [orders]);
-
-  // Primary executed entry orders (excluding internal held bracket children)
-  const pendingParentTrades = useMemo(() => {
-    return pendingOrders.filter((o) => {
-      const s = (o.status || "").toLowerCase();
-      return s !== "held";
-    });
-  }, [pendingOrders]);
 
   // Computed closed trades for history & ledger analytics
   const closedTrades = useMemo(() => {
@@ -539,8 +528,9 @@ export default function BybitTradingTerminal() {
         showToast(res.error || "Order rejected by broker");
         await refreshAccountAndPositions();
       }
-    } catch (e: any) {
-      showToast(e?.message || "Order submission failed");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Order submission failed";
+      showToast(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -1314,12 +1304,12 @@ export default function BybitTradingTerminal() {
                           </tr>
                         </thead>
                         <tbody>
-                          {closedTrades.map((t) => {
+                          {closedTrades.map((t, idx) => {
                             const pnl = t.realized_pnl ?? 0;
                             const isWin = pnl >= 0;
-                            const tradeId = t.trade_id || t.id || "TRD-" + Math.random().toString(36).substring(2, 7);
-                            const symbol = t.symbol || t.proposal?.underlying || "SPY";
-                            const strategy = t.strategy || t.proposal?.strategy_type || "MASTER_ORDER_FLOW";
+                            const tradeId = t.trade_id || t.id || `TRD-REC-${idx}`;
+                            const symbol = t.symbol || t.proposal?.underlying || "BTCUSDT";
+                            const strategy = t.strategy || t.proposal?.strategy_type || "VOL_BREAKOUT";
                             const side = t.side || t.proposal?.side || "BUY";
                             const qty = t.qty || t.proposal?.qty || 1;
                             const entryPrice = t.entry_price ?? t.proposal?.net_premium ?? t.proposal?.limit_price ?? 0;
