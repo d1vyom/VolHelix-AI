@@ -204,3 +204,8 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - **Status:** Completed
 - **Details:** Verified ring buffers have maxlen (e.g., 2000 for tape). Added 429 and 418 REST limit handlers in `hub.py` and `binance_spot.py` (degrades health to `DEGRADED` on IP ban). Implemented optional SQLite persistence for closed footprint bars in `flow_store.py`. Implemented lazy loading via `next/dynamic` for heavy panels in `WorkspaceGrid.tsx`. Verified failure matrix criteria (reconnects, unknown symbols, feature flag toggles).
 
+## Phase 11: Feature Flip & Release
+- **Date:** 2026-09-18
+- **Status:** Completed
+- **Details:** Set `FLOW_ENABLED = True` and `FLOW_CONFLUENCE_ENABLED = True` in `config.py`. Re-ran all 80 backend tests successfully. Upgrade successful.
+
