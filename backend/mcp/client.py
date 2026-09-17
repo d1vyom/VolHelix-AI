@@ -1,474 +1,708 @@
-import os
-import re
+"""
+BinanceClient — Dual-mode client for VolHelix AI.
+
+Market data  → Production Binance API (api.binance.com, real prices, no key needed)
+Trading      → Testnet Binance API (testnet.binance.vision, paper trading, no real money)
+"""
 import time
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Tuple
-from alpaca.trading.client import TradingClient
-from alpaca.data.historical.stock import StockHistoricalDataClient
-from alpaca.data.historical.option import OptionHistoricalDataClient
-from alpaca.data.requests import (
-    StockBarsRequest, 
-    StockSnapshotRequest,
-    OptionChainRequest,
-    OptionSnapshotRequest,
-    OptionLatestQuoteRequest
-)
-from alpaca.data.timeframe import TimeFrame
-from alpaca.data.enums import DataFeed
-from alpaca.trading.requests import (
-    GetOrdersRequest, 
-    MarketOrderRequest, 
-    LimitOrderRequest,
-    ReplaceOrderRequest
-)
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass, QueryOrderStatus
-from alpaca.common.exceptions import APIError
+from datetime import datetime
+from typing import List, Optional, Dict, Tuple, Any
+
+from binance.client import Client as BinanceSDKClient
+from binance.exceptions import BinanceAPIException
 
 from backend.config import settings
 from backend.utils.logger import get_logger
 from backend.models.trade import MCPCallLog
 
-logger = get_logger("mcp_client")
+logger = get_logger("binance_client")
 
-# In-memory TTL cache to prevent redundant API latency during high-frequency scans
-_CLIENT_CACHE: Dict[str, Tuple[any, float]] = {}
+# In-memory TTL cache
+_CLIENT_CACHE: Dict[str, Tuple[Any, float]] = {}
 
-def _get_client_cache(key: str, ttl_seconds: float = 20.0):
+
+def _get_client_cache(key: str, ttl_seconds: float = 10.0) -> Optional[Any]:
     if key in _CLIENT_CACHE:
         val, ts = _CLIENT_CACHE[key]
         if time.time() - ts < ttl_seconds:
             return val
     return None
 
-def _set_client_cache(key: str, val: any):
+
+def _set_client_cache(key: str, val: Any) -> None:
     _CLIENT_CACHE[key] = (val, time.time())
 
 
-class AlpacaClient:
-    """Wrapper around Alpaca SDK for paper trading and market data."""
+class BinanceClient:
+    """
+    Dual-mode client for Binance.
     
+    - market_client: Production API for real market data (public endpoints, no auth required).
+    - trading_client: Testnet API for paper trading (requires testnet API key & secret).
+    """
+
     def __init__(self):
-        if not settings.ALPACA_API_KEY or not settings.ALPACA_API_SECRET:
-            logger.warning("Alpaca API keys missing from configuration.")
-            
-        self.trading_client = TradingClient(
-            settings.ALPACA_API_KEY, 
-            settings.ALPACA_API_SECRET, 
-            paper=True
+        # Production market client (real market data)
+        self.market_client = BinanceSDKClient("", "")
+
+        # Testnet paper trading client
+        if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
+            logger.warning("Binance testnet API keys missing. Paper trading operations will fail.")
+
+        self.trading_client = BinanceSDKClient(
+            settings.BINANCE_API_KEY,
+            settings.BINANCE_API_SECRET,
+            testnet=True
         )
-        self.stock_client = StockHistoricalDataClient(
-            settings.ALPACA_API_KEY, 
-            settings.ALPACA_API_SECRET
-        )
-        self.option_client = OptionHistoricalDataClient(
-            settings.ALPACA_API_KEY, 
-            settings.ALPACA_API_SECRET
-        )
-        self.mcp_logs = []
-        
-    def _log_call(self, tool: str, req: dict, res: dict, start_time: datetime):
+        self._sync_time()
+
+        self.call_logs: List[MCPCallLog] = []
+        # Backward compatibility attribute alias
+        self.mcp_logs = self.call_logs
+
+    def _sync_time(self) -> None:
+        """Synchronize system clock difference with Binance server time to avoid -1021 errors."""
+        try:
+            server_time = self.trading_client.get_server_time()
+            self.trading_client.timestamp_offset = server_time["serverTime"] - int(time.time() * 1000)
+            logger.info(f"Binance testnet time synced. Offset: {self.trading_client.timestamp_offset}ms")
+        except Exception as e:
+            logger.warning(f"Could not calculate Binance timestamp offset: {e}")
+
+    def _log_call(self, tool: str, req: dict, res: Any, start_time: datetime) -> MCPCallLog:
         duration = int((datetime.now() - start_time).total_seconds() * 1000)
+        if isinstance(res, dict):
+            res_dict = res
+        elif isinstance(res, list):
+            res_dict = {"count": len(res)}
+        else:
+            res_dict = {"data": str(res)}
+
         log_entry = MCPCallLog(
             tool=tool,
             request=req,
-            response=res,
+            response=res_dict,
             timestamp=datetime.now().isoformat(),
             duration_ms=duration
         )
-        self.mcp_logs.append(log_entry)
-        logger.debug(f"MCP Call [{tool}] completed in {duration}ms")
+        self.call_logs.append(log_entry)
+        logger.debug(f"Binance [{tool}] completed in {duration}ms")
         return log_entry
 
+    # ──────────────────────────────────────────────
+    # ACCOUNT & BALANCE (Testnet Paper Trading)
+    # ──────────────────────────────────────────────
+
     def get_account(self) -> dict:
+        """Get testnet account information with non-zero balances and USDT equity."""
         start = datetime.now()
-        acct = self.trading_client.get_account()
-        res = {
-            "status": acct.status,
-            "equity": float(acct.equity),
-            "buying_power": float(acct.buying_power),
-            "options_approved_level": acct.options_approved_level,
-            "options_trading_level": acct.options_trading_level
-        }
+        try:
+            account = self.trading_client.get_account()
+            balances = {
+                b["asset"]: {
+                    "free": float(b["free"]),
+                    "locked": float(b["locked"]),
+                    "total": float(b["free"]) + float(b["locked"])
+                }
+                for b in account.get("balances", [])
+                if float(b["free"]) > 0 or float(b["locked"]) > 0
+            }
+            total_usdt = balances.get("USDT", {}).get("total", 0.0)
+            res = {
+                "status": "ACTIVE",
+                "equity": total_usdt,
+                "buying_power": balances.get("USDT", {}).get("free", 0.0),
+                "balances": balances,
+                "can_trade": account.get("canTrade", True),
+            }
+        except BinanceAPIException as e:
+            if e.code == -1021:
+                self._sync_time()
+                try:
+                    return self.get_account()
+                except Exception:
+                    pass
+            logger.error(f"get_account Binance API error: {e}")
+            res = {
+                "status": "ERROR",
+                "equity": 0.0,
+                "buying_power": 0.0,
+                "balances": {},
+                "can_trade": False,
+                "error": str(e),
+            }
+        except Exception as e:
+            logger.error(f"get_account error: {e}")
+            res = {
+                "status": "ERROR",
+                "equity": 0.0,
+                "buying_power": 0.0,
+                "balances": {},
+                "can_trade": False,
+                "error": str(e),
+            }
         self._log_call("get_account", {}, res, start)
         return res
-        
-    def get_clock(self) -> dict:
-        start = datetime.now()
-        clock = self.trading_client.get_clock()
-        res = {
-            "is_open": clock.is_open,
-            "next_open": clock.next_open.isoformat() if clock.next_open else None,
-            "next_close": clock.next_close.isoformat() if clock.next_close else None
-        }
-        self._log_call("get_clock", {}, res, start)
-        return res
-    
-    def get_stock_snapshots(self, symbols: List[str]) -> dict:
-        """Get latest stock quotes for multiple symbols."""
-        start = datetime.now()
-        try:
-            req = StockSnapshotRequest(symbol_or_symbols=symbols, feed=DataFeed.IEX)
-            snapshots = self.stock_client.get_stock_snapshot(req)
-            
-            res = {}
-            for sym, snap in snapshots.items():
-                ask = 0.0
-                bid = 0.0
-                if getattr(snap, "latest_quote", None):
-                    ask = float(getattr(snap.latest_quote, "ask_price", getattr(snap.latest_quote, "ap", 0)) or 0)
-                    bid = float(getattr(snap.latest_quote, "bid_price", getattr(snap.latest_quote, "bp", 0)) or 0)
-                
-                price = ask or bid
-                vol = 0
-                if getattr(snap, "latest_trade", None):
-                    trade_price = float(getattr(snap.latest_trade, "price", getattr(snap.latest_trade, "p", 0)) or 0)
-                    if trade_price > 0:
-                        price = trade_price
-                    vol = int(getattr(snap.latest_trade, "size", getattr(snap.latest_trade, "s", 0)) or 0)
-                
-                ts = None
-                if getattr(snap, "latest_quote", None):
-                    raw_ts = getattr(snap.latest_quote, "timestamp", getattr(snap.latest_quote, "t", None))
-                    if raw_ts and hasattr(raw_ts, "isoformat"):
-                        ts = raw_ts.isoformat()
-                
-                res[sym] = {
-                    "price": price,
-                    "bid": bid,
-                    "ask": ask,
-                    "volume": vol,
-                    "timestamp": ts
-                }
-        except Exception as e:
-            logger.error(f"get_stock_snapshots error: {e}")
-            res = {sym: {"price": 0, "bid": 0, "ask": 0, "volume": 0, "timestamp": None} for sym in symbols}
-            
-        self._log_call("get_stock_snapshots", {"symbols": symbols}, res, start)
-        return res
-    
-    def get_stock_bars(self, symbol: str, days: int = 30, timeframe: TimeFrame = TimeFrame.Day) -> dict:
-        """Get historical bars for technical indicators with fast in-memory caching."""
-        cache_key = f"bars_{symbol}_{days}_{timeframe}"
-        cached = _get_client_cache(cache_key, ttl_seconds=20.0)
-        if cached is not None:
-            return cached
 
+    def get_wallet_balances(self) -> List[dict]:
+        """Get all non-zero asset balances from testnet."""
         start = datetime.now()
         try:
-            end = datetime.now()
-            start_date = end - timedelta(days=days + 5)  # Extra for weekends
-            
-            req = StockBarsRequest(
-                symbol_or_symbols=symbol,
-                timeframe=timeframe,
-                start=start_date,
-                end=end,
-                feed=DataFeed.IEX
-            )
-            bars = self.stock_client.get_stock_bars(req)
-            
-            if hasattr(bars, "data") and isinstance(bars.data, dict):
-                bar_list = bars.data.get(symbol, [])
-            elif hasattr(bars, "get"):
-                bar_list = bars.get(symbol, [])
-            else:
-                try:
-                    bar_list = bars[symbol]
-                except Exception:
-                    bar_list = []
-            closes = [float(getattr(bar, "close", getattr(bar, "c", 0))) for bar in bar_list]
-            highs = [float(getattr(bar, "high", getattr(bar, "h", 0))) for bar in bar_list]
-            lows = [float(getattr(bar, "low", getattr(bar, "l", 0))) for bar in bar_list]
-            volumes = [int(getattr(bar, "volume", getattr(bar, "v", 0))) for bar in bar_list]
-            
-            bars_dicts = []
-            for bar in bar_list:
-                ts_val = getattr(bar, "timestamp", getattr(bar, "t", ""))
-                ts_str = ts_val.isoformat() if hasattr(ts_val, "isoformat") else str(ts_val)
-                bars_dicts.append({
-                    "open": float(getattr(bar, "open", getattr(bar, "o", 0)) or 0),
-                    "high": float(getattr(bar, "high", getattr(bar, "h", 0)) or 0),
-                    "low": float(getattr(bar, "low", getattr(bar, "l", 0)) or 0),
-                    "close": float(getattr(bar, "close", getattr(bar, "c", 0)) or 0),
-                    "volume": int(getattr(bar, "volume", getattr(bar, "v", 0)) or 0),
-                    "time": ts_str
-                })
-
-            res = {
-                "bars": bars_dicts,
-                "closes": closes,
-                "highs": highs,
-                "lows": lows,
-                "volumes": volumes,
-                "current_price": closes[-1] if closes else 0
-            }
-            _set_client_cache(cache_key, res)
-        except Exception as e:
-            logger.error(f"get_stock_bars error: {e}")
-            res = {"bars": [], "closes": [], "highs": [], "lows": [], "volumes": [], "current_price": 0}
-            
-        self._log_call("get_stock_bars", {"symbol": symbol, "days": days}, res, start)
-        return res
-    
-    def get_option_chain(self, underlying: str, expiration_dates: Optional[List[str]] = None) -> dict:
-        """Get options chain with Greeks for an underlying with fast in-memory caching."""
-        cache_key = f"chain_{underlying}_{','.join(expiration_dates) if expiration_dates else 'default'}"
-        cached = _get_client_cache(cache_key, ttl_seconds=20.0)
-        if cached is not None:
-            return cached
-
-        start = datetime.now()
-        try:
-            if expiration_dates is None:
-                # Nearest 2 weekly/monthly expirations for fast, high-performance Greeks & GEX calculation
-                today = datetime.now().date()
-                expiration_dates = []
-                for i in range(2):
-                    # Find next Friday (monthly/weekly OPEX)
-                    days_ahead = (4 - today.weekday()) % 7
-                    if days_ahead == 0:
-                        days_ahead = 7
-                    next_friday = today + timedelta(days=days_ahead + i * 7)
-                    expiration_dates.append(next_friday.strftime("%Y-%m-%d"))
-            
-            req = OptionChainRequest(
-                underlying_symbol=underlying,
-                expiration_dates=expiration_dates
-            )
-            chain = self.option_client.get_option_chain(req)
-            
-            legs = []
-            contract_items = chain.values() if isinstance(chain, dict) else (chain if hasattr(chain, "__iter__") else [])
-            for contract in contract_items:
-                sym = getattr(contract, "symbol", "")
-                greeks = getattr(contract, "greeks", None)
-                quote = getattr(contract, "latest_quote", None)
-                
-                # Parse strike, expiry, and contract type
-                raw_strike = getattr(contract, "strike_price", None)
-                raw_expiry = getattr(contract, "expiration_date", None)
-                c_type = getattr(contract, "type", getattr(contract, "contract_type", None))
-                type_str = c_type.value if hasattr(c_type, "value") else (str(c_type).lower() if c_type else "")
-
-                if not raw_strike or not raw_expiry or not type_str:
-                    m = re.match(r'^([A-Za-z]+)(\d{2})(\d{2})(\d{2})([CPcp])(\d{8})$', sym)
-                    if m:
-                        _, yy, mm, dd, cp, strike_code = m.groups()
-                        if not raw_expiry:
-                            raw_expiry = f"20{yy}-{mm}-{dd}"
-                        if not type_str:
-                            type_str = "call" if cp.upper() == "C" else "put"
-                        if not raw_strike:
-                            raw_strike = float(int(strike_code) / 1000.0)
-
-                raw_oi = int(getattr(contract, "open_interest", 0) or 0)
-                raw_vol = int(getattr(contract, "volume", 0) or 0)
-                bid_price = float(getattr(quote, "bid_price", getattr(quote, "bp", 0)) or 0) if quote else 0.0
-                ask_price = float(getattr(quote, "ask_price", getattr(quote, "ap", 0)) or 0) if quote else 0.0
-                # On Alpaca free paper tier, open interest is 0; provide realistic floor for liquid quotes
-                effective_oi = raw_oi if raw_oi > 0 else (500 if (bid_price > 0 and ask_price > 0) else 0)
-
-                legs.append({
-                    "symbol": sym,
-                    "underlying": underlying,
-                    "strike": float(raw_strike or 0),
-                    "expiry": str(raw_expiry or ""),
-                    "type": type_str,
-                    "delta": float(getattr(greeks, "delta", 0) or 0) if greeks else 0.0,
-                    "gamma": float(getattr(greeks, "gamma", 0) or 0) if greeks else 0.0,
-                    "theta": float(getattr(greeks, "theta", 0) or 0) if greeks else 0.0,
-                    "vega": float(getattr(greeks, "vega", 0) or 0) if greeks else 0.0,
-                    "iv": float(getattr(greeks, "implied_volatility", 0) or 0) if greeks else 0.0,
-                    "bid": bid_price,
-                    "ask": ask_price,
-                    "open_interest": effective_oi,
-                    "volume": raw_vol
-                })
-            
-            res = {"underlying": underlying, "legs": legs, "expiration_dates": expiration_dates}
-            _set_client_cache(cache_key, res)
-        except Exception as e:
-            logger.error(f"get_option_chain error: {e}")
-            res = {"underlying": underlying, "legs": [], "expiration_dates": expiration_dates or []}
-            
-        self._log_call("get_option_chain", {"underlying": underlying, "expirations": expiration_dates}, res, start)
-        return res
-    
-    def get_option_snapshots(self, symbols: List[str]) -> dict:
-        """Get current option snapshots with Greeks for specific contract symbols."""
-        start = datetime.now()
-        try:
-            req = OptionSnapshotRequest(symbol_or_symbols=symbols)
-            snaps = self.option_client.get_option_snapshot(req)
-            
-            res = {}
-            for sym, snap in snaps.items():
-                res[sym] = {
-                    "symbol": sym,
-                    "price": float(snap.latest_quote.ap) if snap.latest_quote else 0,
-                    "bid": float(snap.latest_quote.bp) if snap.latest_quote else 0,
-                    "ask": float(snap.latest_quote.ap) if snap.latest_quote else 0,
-                    "delta": float(snap.greeks.delta) if snap.greeks and snap.greeks.delta else 0,
-                    "gamma": float(snap.greeks.gamma) if snap.greeks and snap.greeks.gamma else 0,
-                    "theta": float(snap.greeks.theta) if snap.greeks and snap.greeks.theta else 0,
-                    "vega": float(snap.greeks.vega) if snap.greeks and snap.greeks.vega else 0,
-                    "iv": float(snap.greeks.implied_volatility) if snap.greeks and snap.greeks.implied_volatility else 0,
-                    "open_interest": int(snap.open_interest) if snap.open_interest else 0,
-                    "volume": int(snap.volume) if snap.volume else 0
-                }
-        except Exception as e:
-            logger.error(f"get_option_snapshots error: {e}")
-            res = {sym: {"price": 0} for sym in symbols}
-            
-        self._log_call("get_option_snapshots", {"symbols": symbols}, res, start)
-        return res
-    
-    def get_vix_index(self) -> float:
-        """Get current VIX index value (approximated via VIXY or SPY IV)."""
-        start = datetime.now()
-        vix_val = 18.5
-        try:
-            req = StockSnapshotRequest(symbol_or_symbols=["VIXY"], feed=DataFeed.IEX)
-            snap = self.stock_client.get_stock_snapshot(req)
-            if "VIXY" in snap and snap["VIXY"]:
-                v = snap["VIXY"]
-                trade_price = float(getattr(v.latest_trade, "price", getattr(v.latest_trade, "p", 0)) or 0) if getattr(v, "latest_trade", None) else 0
-                if trade_price > 0:
-                    vix_val = trade_price
-            res = {"vix": vix_val}
-        except Exception as e:
-            logger.debug(f"get_vix_index error (using fallback {vix_val}): {e}")
-            res = {"vix": vix_val}
-            
-        self._log_call("get_vix_index", {}, res, start)
-        return res["vix"]
-    
-    def place_multi_leg_order(self, legs: List[dict], limit_price: float, quantity: int = 1) -> dict:
-        """Place a multi-leg options order (order_class='mleg')."""
-        start = datetime.now()
-        try:
-            # Build order legs
-            order_legs = []
-            for leg in legs:
-                order_legs.append({
-                    "symbol": leg["symbol"],
-                    "ratio_quantity": quantity,
-                    "side": OrderSide.BUY if leg["action"].upper() == "BUY" else OrderSide.SELL
-                })
-            
-            req = LimitOrderRequest(
-                symbol=legs[0]["symbol"].split("26")[0],  # Base symbol
-                limit_price=limit_price,
-                order_class=OrderClass.MLEG,
-                qty=quantity,
-                time_in_force=TimeInForce.DAY,
-                legs=order_legs
-            )
-            
-            order = self.trading_client.submit_order(req)
-            
-            res = {
-                "id": order.id,
-                "status": order.status.value,
-                "symbol": order.symbol,
-                "filled_qty": float(order.filled_qty) if order.filled_qty else 0,
-                "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else 0,
-                "legs": [
-                    {"symbol": l.symbol, "side": l.side.value, "qty": l.ratio_quantity}
-                    for l in order.legs
-                ] if order.legs else []
-            }
-        except APIError as e:
-            logger.error(f"place_multi_leg_order API error: {e}")
-            res = {"error": str(e), "status": "REJECTED"}
-        except Exception as e:
-            logger.error(f"place_multi_leg_order error: {e}")
-            res = {"error": str(e), "status": "ERROR"}
-            
-        self._log_call("place_multi_leg_order", {"legs": legs, "limit_price": limit_price, "qty": quantity}, res, start)
-        return res
-    
-    def get_positions(self) -> List[dict]:
-        """Get all open positions."""
-        start = datetime.now()
-        try:
-            positions = self.trading_client.get_all_positions()
+            account = self.trading_client.get_account()
             res = [
                 {
-                    "symbol": p.symbol,
-                    "qty": float(p.qty),
-                    "market_value": float(p.market_value),
-                    "unrealized_pl": float(p.unrealized_pl),
-                    "unrealized_plpc": float(p.unrealized_plpc) if p.unrealized_plpc else 0,
-                    "side": p.side.value,
-                    "asset_class": p.asset_class.value if p.asset_class else "unknown"
+                    "asset": b["asset"],
+                    "free": float(b["free"]),
+                    "locked": float(b["locked"]),
+                    "total": float(b["free"]) + float(b["locked"])
                 }
-                for p in positions
+                for b in account.get("balances", [])
+                if float(b["free"]) > 0 or float(b["locked"]) > 0
             ]
+        except BinanceAPIException as e:
+            if e.code == -1021:
+                self._sync_time()
+                try:
+                    return self.get_wallet_balances()
+                except Exception:
+                    pass
+            logger.error(f"get_wallet_balances error: {e}")
+            res = []
+        except Exception as e:
+            logger.error(f"get_wallet_balances error: {e}")
+            res = []
+        self._log_call("get_wallet_balances", {}, res, start)
+        return res
+
+    def get_positions(self) -> List[dict]:
+        """
+        Get crypto spot holdings as positions.
+        Returns all valid non-USDT assets with positive balance and current USDT value.
+        """
+        start = datetime.now()
+        positions = []
+        try:
+            acct = self.get_account()
+            balances = acct.get("balances", {})
+            tickers_map = {t["symbol"]: t["price"] for t in self.get_all_tickers()}
+
+            for asset, amounts in balances.items():
+                if asset != "USDT" and amounts["total"] > 0:
+                    symbol = f"{asset}USDT"
+                    curr_price = tickers_map.get(symbol, 0.0)
+                    if curr_price > 0:
+                        market_value = amounts["total"] * curr_price
+                        # Include if it has non-trivial value (>= $0.10) or is a watched symbol
+                        if market_value >= 0.10 or symbol in settings.WATCHED_SYMBOLS:
+                            positions.append({
+                                "symbol": symbol,
+                                "asset": asset,
+                                "qty": amounts["total"],
+                                "free_qty": amounts["free"],
+                                "locked_qty": amounts["locked"],
+                                "current_price": curr_price,
+                                "market_value": round(market_value, 2),
+                            })
         except Exception as e:
             logger.error(f"get_positions error: {e}")
-            res = []
-            
-        self._log_call("get_positions", {}, res, start)
-        return res
-    
-    def get_open_orders(self) -> List[dict]:
-        """Get all open orders."""
+        self._log_call("get_positions", {}, positions, start)
+        return positions
+
+    # ──────────────────────────────────────────────
+    # MARKET DATA (Production — Real Prices)
+    # ──────────────────────────────────────────────
+
+    def get_price(self, symbol: str) -> dict:
+        """Get current live price for a symbol (Production)."""
+        cache_key = f"price_{symbol}"
+        cached = _get_client_cache(cache_key, ttl_seconds=3.0)
+        if cached:
+            return cached
+
         start = datetime.now()
         try:
-            req = GetOrdersRequest(status=QueryOrderStatus.OPEN)
-            orders = self.trading_client.get_orders(req)
+            ticker = self.market_client.get_symbol_ticker(symbol=symbol)
+            res = {
+                "symbol": ticker["symbol"],
+                "price": float(ticker["price"]),
+                "timestamp": datetime.now().isoformat()
+            }
+            _set_client_cache(cache_key, res)
+        except Exception as e:
+            logger.error(f"get_price error for {symbol}: {e}")
+            res = {"symbol": symbol, "price": 0.0, "error": str(e)}
+        self._log_call("get_price", {"symbol": symbol}, res, start)
+        return res
+
+    def get_24hr_ticker(self, symbol: str) -> dict:
+        """Get 24hr statistics for a symbol (Production)."""
+        cache_key = f"ticker24_{symbol}"
+        cached = _get_client_cache(cache_key, ttl_seconds=5.0)
+        if cached:
+            return cached
+
+        start = datetime.now()
+        try:
+            ticker = self.market_client.get_ticker(symbol=symbol)
+            res = {
+                "symbol": ticker["symbol"],
+                "price_change": float(ticker.get("priceChange", 0)),
+                "price_change_pct": float(ticker.get("priceChangePercent", 0)),
+                "high": float(ticker.get("highPrice", 0)),
+                "low": float(ticker.get("lowPrice", 0)),
+                "volume": float(ticker.get("volume", 0)),
+                "quote_volume": float(ticker.get("quoteVolume", 0)),
+                "last_price": float(ticker.get("lastPrice", 0)),
+                "bid": float(ticker.get("bidPrice", 0)),
+                "ask": float(ticker.get("askPrice", 0)),
+                "open": float(ticker.get("openPrice", 0)),
+                "close": float(ticker.get("lastPrice", 0)),
+                "count": int(ticker.get("count", 0)),
+                "timestamp": datetime.now().isoformat()
+            }
+            _set_client_cache(cache_key, res)
+        except Exception as e:
+            logger.error(f"get_24hr_ticker error for {symbol}: {e}")
+            res = {"symbol": symbol, "error": str(e)}
+        self._log_call("get_24hr_ticker", {"symbol": symbol}, res, start)
+        return res
+
+    def get_all_tickers(self) -> List[dict]:
+        """Get prices for all active symbols (Production)."""
+        cache_key = "all_tickers"
+        cached = _get_client_cache(cache_key, ttl_seconds=5.0)
+        if cached:
+            return cached
+
+        start = datetime.now()
+        try:
+            tickers = self.market_client.get_all_tickers()
+            res = [
+                {"symbol": t["symbol"], "price": float(t["price"])}
+                for t in tickers
+            ]
+            _set_client_cache(cache_key, res)
+        except Exception as e:
+            logger.error(f"get_all_tickers error: {e}")
+            res = []
+        self._log_call("get_all_tickers", {}, res, start)
+        return res
+
+    def get_klines(self, symbol: str, interval: str = "1h", limit: int = 100) -> List[dict]:
+        """
+        Get candlestick/kline bars (Production).
+        Intervals: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
+        """
+        cache_key = f"klines_{symbol}_{interval}_{limit}"
+        cached = _get_client_cache(cache_key, ttl_seconds=15.0)
+        if cached:
+            return cached
+
+        start = datetime.now()
+        try:
+            klines = self.market_client.get_klines(
+                symbol=symbol,
+                interval=interval,
+                limit=limit
+            )
+            res = []
+            for k in klines:
+                res.append({
+                    "open_time": k[0],
+                    "open": float(k[1]),
+                    "high": float(k[2]),
+                    "low": float(k[3]),
+                    "close": float(k[4]),
+                    "volume": float(k[5]),
+                    "close_time": k[6],
+                    "quote_volume": float(k[7]),
+                    "trades": int(k[8]),
+                    "taker_buy_base": float(k[9]),
+                    "taker_buy_quote": float(k[10]),
+                })
+            _set_client_cache(cache_key, res)
+        except Exception as e:
+            logger.error(f"get_klines error for {symbol}: {e}")
+            res = []
+        self._log_call("get_klines", {"symbol": symbol, "interval": interval, "limit": limit}, res, start)
+        return res
+
+    def get_order_book(self, symbol: str, limit: int = 20) -> dict:
+        """Get order book depth (Production)."""
+        start = datetime.now()
+        try:
+            depth = self.market_client.get_order_book(symbol=symbol, limit=limit)
+            res = {
+                "symbol": symbol,
+                "bids": [[float(p), float(q)] for p, q in depth.get("bids", [])],
+                "asks": [[float(p), float(q)] for p, q in depth.get("asks", [])],
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"get_order_book error for {symbol}: {e}")
+            res = {"symbol": symbol, "bids": [], "asks": [], "error": str(e)}
+        self._log_call("get_order_book", {"symbol": symbol, "limit": limit}, res, start)
+        return res
+
+    def get_recent_trades(self, symbol: str, limit: int = 50) -> List[dict]:
+        """Get recent trades for a symbol (Production)."""
+        start = datetime.now()
+        try:
+            trades = self.market_client.get_recent_trades(symbol=symbol, limit=limit)
             res = [
                 {
-                    "id": o.id,
-                    "symbol": o.symbol,
-                    "status": o.status.value,
-                    "qty": float(o.qty),
-                    "filled_qty": float(o.filled_qty) if o.filled_qty else 0,
-                    "limit_price": float(o.limit_price) if o.limit_price else 0,
-                    "side": o.side.value,
-                    "order_class": o.order_class.value if o.order_class else "simple"
+                    "id": t["id"],
+                    "price": float(t["price"]),
+                    "qty": float(t["qty"]),
+                    "quote_qty": float(t.get("quoteQty", 0)),
+                    "time": t["time"],
+                    "is_buyer_maker": t.get("isBuyerMaker", False),
+                }
+                for t in trades
+            ]
+        except Exception as e:
+            logger.error(f"get_recent_trades error for {symbol}: {e}")
+            res = []
+        self._log_call("get_recent_trades", {"symbol": symbol, "limit": limit}, res, start)
+        return res
+
+    def get_exchange_info(self, symbol: Optional[str] = None) -> dict:
+        """Get exchange info and filters (Production)."""
+        start = datetime.now()
+        try:
+            if symbol:
+                info = self.market_client.get_symbol_info(symbol)
+                if not info:
+                    return {"error": f"Symbol {symbol} not found"}
+                res = {
+                    "symbol": info["symbol"],
+                    "base_asset": info["baseAsset"],
+                    "quote_asset": info["quoteAsset"],
+                    "status": info["status"],
+                    "filters": info.get("filters", []),
+                    "base_precision": info.get("baseAssetPrecision", 8),
+                    "quote_precision": info.get("quoteAssetPrecision", 8),
+                }
+            else:
+                info = self.market_client.get_exchange_info()
+                res = {
+                    "timezone": info.get("timezone", "UTC"),
+                    "server_time": info.get("serverTime", 0),
+                    "symbols_count": len(info.get("symbols", [])),
+                }
+        except Exception as e:
+            logger.error(f"get_exchange_info error: {e}")
+            res = {"error": str(e)}
+        self._log_call("get_exchange_info", {"symbol": symbol}, res, start)
+        return res
+
+    # ──────────────────────────────────────────────
+    # TRADING (Testnet Paper Trading)
+    # ──────────────────────────────────────────────
+
+    def place_order(
+        self,
+        symbol: str,
+        side: str,  # "BUY" or "SELL"
+        order_type: str = "MARKET",  # "MARKET" or "LIMIT"
+        quantity: Optional[float] = None,
+        quote_quantity: Optional[float] = None,
+        price: Optional[float] = None,
+        time_in_force: str = "GTC",
+    ) -> dict:
+        """Place an order on Binance Spot Testnet."""
+        start = datetime.now()
+        try:
+            params: Dict[str, Any] = {
+                "symbol": symbol.upper(),
+                "side": side.upper(),
+                "type": order_type.upper(),
+            }
+
+            if order_type.upper() == "MARKET":
+                if quote_quantity:
+                    params["quoteOrderQty"] = quote_quantity
+                elif quantity:
+                    params["quantity"] = quantity
+                else:
+                    raise ValueError("Either quantity or quote_quantity is required for MARKET order")
+            elif order_type.upper() == "LIMIT":
+                if not price:
+                    raise ValueError("price is required for LIMIT order")
+                if not quantity:
+                    raise ValueError("quantity is required for LIMIT order")
+                params["price"] = str(price)
+                params["quantity"] = quantity
+                params["timeInForce"] = time_in_force
+
+            order = self.trading_client.create_order(**params)
+            res = {
+                "order_id": order["orderId"],
+                "symbol": order["symbol"],
+                "side": order["side"],
+                "type": order["type"],
+                "status": order["status"],
+                "price": float(order.get("price", 0)),
+                "orig_qty": float(order.get("origQty", 0)),
+                "executed_qty": float(order.get("executedQty", 0)),
+                "cummulative_quote_qty": float(order.get("cummulativeQuoteQty", 0)),
+                "time_in_force": order.get("timeInForce", ""),
+                "fills": order.get("fills", []),
+            }
+        except BinanceAPIException as e:
+            if e.code == -1021:
+                self._sync_time()
+                try:
+                    return self.place_order(
+                        symbol=symbol,
+                        side=side,
+                        order_type=order_type,
+                        quantity=quantity,
+                        quote_quantity=quote_quantity,
+                        price=price,
+                        time_in_force=time_in_force
+                    )
+                except Exception:
+                    pass
+            logger.error(f"place_order API error: {e}")
+            res = {"error": str(e), "status": "REJECTED", "code": e.code}
+        except Exception as e:
+            logger.error(f"place_order error: {e}")
+            res = {"error": str(e), "status": "ERROR"}
+
+        self._log_call(
+            "place_order",
+            {"symbol": symbol, "side": side, "type": order_type, "qty": quantity, "quote_qty": quote_quantity, "price": price},
+            res,
+            start
+        )
+        return res
+
+    def cancel_order(self, symbol: str, order_id: int) -> dict:
+        """Cancel an open order on Testnet."""
+        start = datetime.now()
+        try:
+            result = self.trading_client.cancel_order(symbol=symbol.upper(), orderId=order_id)
+            res = {
+                "order_id": result.get("orderId", order_id),
+                "symbol": result.get("symbol", symbol),
+                "status": result.get("status", "CANCELED"),
+            }
+        except BinanceAPIException as e:
+            if e.code == -1021:
+                self._sync_time()
+                try:
+                    return self.cancel_order(symbol=symbol, order_id=order_id)
+                except Exception:
+                    pass
+            logger.error(f"cancel_order API error: {e}")
+            res = {"error": str(e), "code": e.code}
+        except Exception as e:
+            logger.error(f"cancel_order error: {e}")
+            res = {"error": str(e)}
+        self._log_call("cancel_order", {"symbol": symbol, "order_id": order_id}, res, start)
+        return res
+
+    def cancel_all_orders(self, symbol: str) -> dict:
+        """Cancel all open orders for a symbol on Testnet."""
+        start = datetime.now()
+        try:
+            open_orders = self.get_open_orders(symbol=symbol)
+            cancelled_ids = []
+            for ord_item in open_orders:
+                oid = ord_item.get("order_id")
+                if oid:
+                    try:
+                        self.trading_client.cancel_order(symbol=symbol.upper(), orderId=oid)
+                        cancelled_ids.append(oid)
+                    except Exception as ce:
+                        logger.warning(f"Failed to cancel order {oid}: {ce}")
+            res = {"symbol": symbol, "cancelled": True, "cancelled_order_ids": cancelled_ids}
+        except Exception as e:
+            logger.error(f"cancel_all_orders error: {e}")
+            res = {"symbol": symbol, "cancelled": False, "error": str(e)}
+        self._log_call("cancel_all_orders", {"symbol": symbol}, res, start)
+        return res
+
+    def get_open_orders(self, symbol: Optional[str] = None) -> List[dict]:
+        """Get all open orders on Testnet."""
+        start = datetime.now()
+        try:
+            params = {}
+            if symbol:
+                params["symbol"] = symbol.upper()
+            orders = self.trading_client.get_open_orders(**params)
+            res = [
+                {
+                    "order_id": o["orderId"],
+                    "symbol": o["symbol"],
+                    "side": o["side"],
+                    "type": o["type"],
+                    "status": o["status"],
+                    "price": float(o.get("price", 0)),
+                    "orig_qty": float(o.get("origQty", 0)),
+                    "executed_qty": float(o.get("executedQty", 0)),
+                    "time": o.get("time", 0),
                 }
                 for o in orders
             ]
+        except BinanceAPIException as e:
+            if e.code == -1021:
+                self._sync_time()
+                try:
+                    return self.get_open_orders(symbol=symbol)
+                except Exception:
+                    pass
+            logger.error(f"get_open_orders error: {e}")
+            res = []
         except Exception as e:
             logger.error(f"get_open_orders error: {e}")
             res = []
-            
-        self._log_call("get_open_orders", {}, res, start)
+        self._log_call("get_open_orders", {"symbol": symbol}, res, start)
         return res
-    
-    def close_position(self, symbol: str) -> dict:
-        """Close a specific position."""
+
+    def get_all_orders(self, symbol: str, limit: int = 50) -> List[dict]:
+        """Get all orders (open, filled, cancelled) for a symbol on Testnet."""
         start = datetime.now()
         try:
-            order = self.trading_client.close_position(symbol)
-            res = {
-                "id": order.id,
-                "status": order.status.value,
-                "symbol": order.symbol
-            }
+            orders = self.trading_client.get_all_orders(symbol=symbol.upper(), limit=limit)
+            res = [
+                {
+                    "order_id": o["orderId"],
+                    "symbol": o["symbol"],
+                    "side": o["side"],
+                    "type": o["type"],
+                    "status": o["status"],
+                    "price": float(o.get("price", 0)),
+                    "orig_qty": float(o.get("origQty", 0)),
+                    "executed_qty": float(o.get("executedQty", 0)),
+                    "cummulative_quote_qty": float(o.get("cummulativeQuoteQty", 0)),
+                    "time": o.get("time", 0),
+                    "update_time": o.get("updateTime", 0),
+                }
+                for o in orders
+            ]
+        except BinanceAPIException as e:
+            if e.code == -1021:
+                self._sync_time()
+                try:
+                    return self.get_all_orders(symbol=symbol, limit=limit)
+                except Exception:
+                    pass
+            logger.error(f"get_all_orders error for {symbol}: {e}")
+            res = []
         except Exception as e:
-            logger.error(f"close_position error: {e}")
-            res = {"error": str(e)}
-            
-        self._log_call("close_position", {"symbol": symbol}, res, start)
+            logger.error(f"get_all_orders error for {symbol}: {e}")
+            res = []
+        self._log_call("get_all_orders", {"symbol": symbol, "limit": limit}, res, start)
         return res
-    
-    def get_portfolio_history(self, period: str = "1D", timeframe: str = "1Min") -> dict:
-        """Get portfolio equity curve history."""
+
+    def get_my_trades(self, symbol: str, limit: int = 50) -> List[dict]:
+        """Get trade execution history for a symbol on Testnet."""
         start = datetime.now()
         try:
-            history = self.trading_client.get_portfolio_history(period=period, timeframe=timeframe)
-            res = {
-                "timestamp": [t.isoformat() for t in history.timestamp],
-                "equity": [float(e) for e in history.equity],
-                "profit_loss": [float(p) for p in history.profit_loss],
-                "profit_loss_pct": [float(p) for p in history.profit_loss_pct]
-            }
+            trades = self.trading_client.get_my_trades(symbol=symbol.upper(), limit=limit)
+            res = [
+                {
+                    "id": t["id"],
+                    "order_id": t["orderId"],
+                    "symbol": t["symbol"],
+                    "price": float(t["price"]),
+                    "qty": float(t["qty"]),
+                    "quote_qty": float(t.get("quoteQty", 0)),
+                    "commission": float(t.get("commission", 0)),
+                    "commission_asset": t.get("commissionAsset", ""),
+                    "time": t.get("time", 0),
+                    "is_buyer": t.get("isBuyer", False),
+                    "is_maker": t.get("isMaker", False),
+                }
+                for t in trades
+            ]
+        except BinanceAPIException as e:
+            if e.code == -1021:
+                self._sync_time()
+                try:
+                    return self.get_my_trades(symbol=symbol, limit=limit)
+                except Exception:
+                    pass
+            logger.error(f"get_my_trades error for {symbol}: {e}")
+            res = []
         except Exception as e:
-            logger.error(f"get_portfolio_history error: {e}")
-            res = {"timestamp": [], "equity": [], "profit_loss": [], "profit_loss_pct": []}
-            
-        self._log_call("get_portfolio_history", {"period": period, "timeframe": timeframe}, res, start)
+            logger.error(f"get_my_trades error for {symbol}: {e}")
+            res = []
+        self._log_call("get_my_trades", {"symbol": symbol, "limit": limit}, res, start)
         return res
+
+    # ──────────────────────────────────────────────
+    # MULTI-SYMBOL & HELPERS
+    # ──────────────────────────────────────────────
+
+    def get_watched_prices(self) -> dict:
+        """Get latest prices for all watched symbols."""
+        prices = {}
+        for symbol in settings.WATCHED_SYMBOLS:
+            data = self.get_price(symbol)
+            prices[symbol] = data.get("price", 0.0)
+        return prices
+
+    def get_portfolio_value(self) -> dict:
+        """Calculate total portfolio value in USDT across all holdings."""
+        account = self.get_account()
+        balances = account.get("balances", {})
+        total_value = 0.0
+        holdings = []
+        tickers_map = {t["symbol"]: t["price"] for t in self.get_all_tickers()}
+
+        for asset, amounts in balances.items():
+            if asset == "USDT":
+                total_value += amounts["total"]
+                holdings.append({
+                    "asset": asset,
+                    "quantity": amounts["total"],
+                    "value_usdt": amounts["total"],
+                    "price": 1.0
+                })
+            elif amounts["total"] > 0:
+                symbol = f"{asset}USDT"
+                price = tickers_map.get(symbol, 0.0)
+                if price > 0:
+                    value = amounts["total"] * price
+                    if value >= 0.10 or symbol in settings.WATCHED_SYMBOLS:
+                        total_value += value
+                        holdings.append({
+                            "asset": asset,
+                            "quantity": amounts["total"],
+                            "value_usdt": round(value, 2),
+                            "price": price
+                        })
+
+        return {
+            "total_value_usdt": round(total_value, 2),
+            "holdings": holdings,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    def get_clock(self) -> dict:
+        """Crypto markets operate 24/7."""
+        return {
+            "is_open": True,
+            "raw_is_open": True,
+            "simulation_active": False,
+            "current_time_et": datetime.now().isoformat(),
+            "reason": "Crypto markets operate 24/7"
+        }
+
+    # Backward compatibility helper wrappers
+    def get_stock_latest_quote(self, symbol: str) -> dict:
+        p = self.get_price(symbol)
+        return {"symbol": symbol, "price": p.get("price", 0.0), "bid": p.get("price", 0.0), "ask": p.get("price", 0.0)}
+
+    def get_stock_bars(self, symbol: str, days: int = 30) -> List[dict]:
+        return self.get_klines(symbol=symbol, interval="1d", limit=days)
+
+    def get_stock_snapshots(self, symbols: List[str]) -> dict:
+        return {s: self.get_price(s) for s in symbols}
+
+
+# Backward-compatible class alias during progressive migration
+AlpacaClient = BinanceClient
