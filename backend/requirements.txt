@@ -1,5 +1,4 @@
-alpaca-py
-alpaca-mcp-server
+python-binance
 google-genai
 langchain-google-genai
 langgraph
