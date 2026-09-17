@@ -94,7 +94,7 @@ def sample_crypto_proposal():
         id="test-crypto-001",
         underlying="BTCUSDT",
         symbol="BTCUSDT",
-        strategy_type="VOL_BREAKOUT",
+        strategy_type=StrategyType.BREAKOUT_LONG,
         legs=[],
         is_credit=False,
         entry_price=60000.0,
