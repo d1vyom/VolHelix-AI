@@ -6,8 +6,7 @@ from typing_extensions import TypedDict
 
 from backend.config import settings
 from backend.utils.logger import get_logger
-
-from backend.mcp.client import AlpacaClient
+from backend.mcp.client import BinanceClient
 from backend.agents.market_intel import MarketIntelAgent
 from backend.agents.event_scanner import EventScanner
 from backend.agents.strategy_synthesizer import StrategySynthesizerAgent
@@ -44,7 +43,7 @@ class TradingState(TypedDict):
 
 class TradingOrchestrator:
     def __init__(self):
-        self.mcp = AlpacaClient()
+        self.mcp = BinanceClient()
         self.market_intel = MarketIntelAgent()
         self.event_scanner = EventScanner()
         self.synthesizer = StrategySynthesizerAgent()
