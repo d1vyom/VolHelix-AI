@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { BarChart3, FileText, Shield, LayoutDashboard, ChevronLeft, ChevronRight, Activity, Cpu } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect } from "react";
-import { getAlpacaAccount } from "../lib/api";
+import { getExchangeAccount } from "../lib/api";
 
 const navItems = [
   { href: "/", label: "Trading Terminal", icon: LayoutDashboard, key: "dashboard" },
@@ -24,14 +24,14 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const [internalCollapsed, setInternalCollapsed] = useState(collapsed);
   const isCollapsed = onToggle !== undefined ? collapsed : internalCollapsed;
-  const [utaBalance, setUtaBalance] = useState<string>("$400.00K");
+  const [utaBalance, setUtaBalance] = useState<string>("$10.00K");
 
   useEffect(() => {
     let isMounted = true;
-    getAlpacaAccount()
+    getExchangeAccount()
       .then((acc) => {
         if (!isMounted) return;
-        const val = acc.buying_power || acc.portfolio_value || 400000;
+        const val = acc.buying_power || acc.portfolio_value || 10000;
         setUtaBalance(`$${(val / 1000).toFixed(2)}K`);
       })
       .catch(() => {});
@@ -57,7 +57,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       {/* Brand Header */}
       <div className="flex items-center justify-between h-14 px-3 border-b border-[#26282f]">
         <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="relative flex items-center justify-center w-8 h-8 rounded-lg bg-[#f7a600]/10 border border-[#f7a600]/40 group-hover:border-[#f7a600] transition-all duration-200 p-1 flex-shrink-0">
+          <div className="relative flex items-center justify-center w-8 h-8 rounded-lg bg-[#f7a600]/10 border border-[#f7a600]/40 group-hover:border-[#f7a600] transition-all duration-200 p-1 shrink-0">
             <Image
               src="/volhelix-logo.svg"
               alt="VolHelix AI"
@@ -119,7 +119,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
               title={isCollapsed ? item.label : undefined}
             >
               <div className="flex items-center gap-2.5 z-10">
-                <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? "text-[#121214]" : "text-[#878996] group-hover:text-[#f5f5f5]"}`} />
+                <Icon className={`w-4 h-4 shrink-0 ${isActive ? "text-[#121214]" : "text-[#878996] group-hover:text-[#f5f5f5]"}`} />
                 {!isCollapsed && (
                   <span className="text-xs font-bold truncate">
                     {item.label}
@@ -138,7 +138,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
             <div className="flex items-center justify-between text-[#878996]">
               <span className="flex items-center gap-1">
                 <Activity className="w-3 h-3 text-[#f7a600]" />
-                UTA Margin
+                Binance Spot
               </span>
               <span className="text-[#f7a600] font-bold">{utaBalance}</span>
             </div>
@@ -146,7 +146,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
             <div className="space-y-1">
               <div className="flex justify-between text-[10px] text-[#5e6673]">
                 <span>Risk Level (DD)</span>
-                <span>0.0% / 3.0%</span>
+                <span>0.0% / 5.0%</span>
               </div>
               <div className="w-full h-1 bg-[#121214] rounded-full overflow-hidden">
                 <div className="h-full bg-[#20b26c] rounded-full w-[4%]" />
