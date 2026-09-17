@@ -47,6 +47,7 @@ backend/data/*.jsonl
 logs/
 *.log
 
-# OS
+# OS & IDE
 .DS_Store
 Thumbs.db
+.vscode/
