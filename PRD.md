@@ -31,7 +31,7 @@
 
 ## 1. Executive Summary
 
-**VolHelix AI** is an autonomous multi-agent trading system that trades options on Alpaca via the **Model Context Protocol (MCP)**. It uses a dynamic **Volatility-Regime Engine** to classify market conditions in real-time and selects high-probability options strategies (Credit Spreads, Iron Condors, Directional Breakouts) backed by a **deterministic, zero-hallucination Risk Gatekeeper**.
+**VolHelix AI** is an autonomous multi-agent trading system that trades crypto spot on **Binance** via a dual-mode client architecture. It pairs real-time public market data (prices, klines, order books from `api.binance.com`) with Binance Spot Testnet (`testnet.binance.vision`) paper trading. It uses a dynamic **Volatility-Regime Engine** (365-day Parkinson realized volatility + Bollinger squeeze detection) to classify market conditions in real-time and selects high-probability crypto spot strategies (Breakout Long, Mean Reversion, Momentum, DCA Buy) backed by a **deterministic, zero-hallucination Risk Gatekeeper**.
 
 ### Why VolHelix Wins
 
@@ -42,27 +42,24 @@
 
 ### Key Numbers
 
-- **Starting Capital:** \$100,000 (paper account)
-- **Max Risk Per Trade:** ≤ 2.5% of NAV (\$2,500 initial)
-- **Target Win Rate:** 60–70% on defined-risk spreads
-- **Target Sharpe:** > 1.5 over competition period
-- **Agent Count:** 7 specialized agents + 1 deterministic risk gate
+- **Starting Capital:** \$10,000 USDT (Binance Spot Testnet)
+- **Max Risk Per Trade:** ≤ 2.5% of NAV (\$250.00 initial)
+- **Target Win Rate:** 65–75% on algorithmic spot breakout & mean-reversion setups
+- **Target Sharpe:** > 1.8 over 24/7 continuous crypto markets
+- **Agent Count:** Specialized agents + 1 deterministic 10-rule risk gate
 
 ---
 
-## 2. Hackathon Compliance Matrix
+## 2. Compliance Matrix
 
 | Requirement | Implementation | Status |
 |---|---|---|
-| **Autonomous Agent** | 7-agent reasoning loop: Market Scout → Strategy Engine → Devil's Advocate → Consensus → Risk Gate → Executor → Post-Mortem | ✅ |
-| **Alpaca MCP / CLI Integration** | All discovery, orders, and position management via Alpaca MCP Server (61+ tools exposed via FastMCP) | ✅ |
-| **Options Trading** | Multi-leg options execution (`order_class: mleg`) — Spreads, Iron Condors, Straddles, Greeks-neutral strategies via Alpaca Options API | ✅ |
-| **Fresh Paper Account** | Configurable for fresh paper trading account initialized at \$100,000 | ✅ |
+| **Autonomous Agent** | Specialized multi-agent reasoning loop: Market Intel → Strategy Synthesizer → Devil's Advocate → Consensus → Risk Gate → Executor | ✅ |
+| **Binance Integration** | Dual-mode Binance client: Production market data (`api.binance.com`) + Spot Testnet (`testnet.binance.vision`) with clock offset sync | ✅ |
+| **Crypto Spot Trading** | Fractional base asset spot orders, quote quantity USDT sizing, dynamic structural TP/SL anchors | ✅ |
+| **24/7 Continuous Trading** | Continuous crypto market operation, IST/UTC dual clocks, decoupled Position Guardian daemon | ✅ |
 | **One-Page Write-Up** | Built-in auto-generator pulls live metrics into architecture & risk-gate markdown document | ✅ |
-| **Dedicated Competition Account** | One account per email, isolated paper environment | ✅ |
-
-> [!CAUTION]
-> **TWO-ACCOUNT STRATEGY REQUIRED:** Use any paper account for **development & testing**. For **final submission**, create a **brand-new, fresh** Alpaca paper account dedicated to the hackathon. Projects run on existing or reused accounts will **NOT be eligible** for judging. The system must support swapping API keys via `.env` at submission time.
+| **Deterministic Risk Gate** | 10 hard mathematical invariants strictly vetoing LLM hallucinations | ✅ |
 
 ---
 
