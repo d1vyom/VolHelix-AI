@@ -141,3 +141,27 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - [x] Aggregator avoids O(N) sort operations (constant-time approximations used where applicable).
 - [x] `test_footprint.py` and `test_delta_engine.py` assert expected values without failures.
 - [x] `pytest backend/tests -v` ran completely successfully.
+
+---
+
+## Phase 4 — REST Snapshot API
+
+**Date:** 2026-09-18  
+**Status:** COMPLETE  
+
+### 1. Changes
+- Created `backend/api/flow_schemas.py` with standard Pydantic models for REST responses, mirroring `backend/engine/flow_models.py` but tuned for HTTP caching.
+- Created `backend/api/flow_routes.py` with endpoints: `/api/flow/status`, `/api/flow/footprint`, `/api/flow/dom`, `/api/flow/tape`, `/api/flow/heatmap`, `/api/flow/volume-profile`, `/api/flow/cvd`, `/api/flow/metrics`, `/api/flow/subscribe`, `/api/flow/unsubscribe`, `/api/flow/symbol-info`.
+- Fixed existing route defects in `backend/api/routes.py` (Defect 1: synthetic data masking 503; Defect 2: Pydantic parsing masking).
+- Hooked `flow_routes` into `backend/main.py`.
+- Wrote `backend/tests/test_flow_routes.py` with mocked `hub` to test graceful fallback, disabled logic, and structure matching. Removed strict Pydantic return model validations to allow graceful HTTP 200 payload returns when symbols are not subscribed, per acceptance criteria.
+
+### 2. Verification
+- `pytest backend/tests/test_flow_routes.py -v` -> 5 passed.
+- `pytest backend/tests/ -v` -> 76 passed. All backward compatibility maintained.
+
+### 3. Acceptance Criteria Verification
+- [x] `GET /api/flow/footprint` returns `{ "bars": [...] }` without raising 500s.
+- [x] `GET /api/flow/status` toggles properly when `FLOW_ENABLED` is switched.
+- [x] Fast, no blocking operations in the routes.
+
