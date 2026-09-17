@@ -290,8 +290,9 @@ export async function submitExchangeOrder(
       return { success: false, error: errJson.detail || `Server error: HTTP ${res.status}` };
     }
     return await safeJson<ExchangeOrderResponse>(res, { success: false });
-  } catch (e: any) {
-    return { success: false, error: e.message || "Failed to submit order" };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "Failed to submit order";
+    return { success: false, error: message };
   }
 }
 export const submitAlpacaOrder = submitExchangeOrder;
@@ -308,8 +309,9 @@ export async function fillPendingTrade(tradeId: string, fillPrice?: number): Pro
       return { success: false, error: errJson.detail || `Server error: HTTP ${res.status}` };
     }
     return await safeJson(res, { success: false });
-  } catch (e: any) {
-    return { success: false, error: e.message || "Network error" };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "Network error";
+    return { success: false, error: message };
   }
 }
 
