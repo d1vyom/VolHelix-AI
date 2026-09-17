@@ -165,3 +165,12 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - [x] `GET /api/flow/status` toggles properly when `FLOW_ENABLED` is switched.
 - [x] Fast, no blocking operations in the routes.
 
+
+
+## Phase 5 - Real-Time Broadcast Layer
+- Created background task in websocket.py to push frames to clients via socketio rooms.
+- Emitting tape, dom, footprint, heatmap, and health updates with appropriate rate limiting (FLOW_BROADCAST_HZ, FLOW_TAPE_BROADCAST_HZ).
+- Implemented low:subscribe, low:unsubscribe and low:settings to manage client states.
+- Kept compatibility with existing portfolio_update and 
+easoning_event broadcasts.
+- Acceptance criteria met.
