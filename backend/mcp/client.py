@@ -89,6 +89,11 @@ class BinanceClient:
         logger.debug(f"Binance [{tool}] completed in {duration}ms")
         return log_entry
 
+    def get_audit_logs(self, limit: int = 50) -> List[dict]:
+        """Return recent Binance MCP/API call logs formatted for audit inspection."""
+        logs = [log.model_dump() if hasattr(log, "model_dump") else log.__dict__ for log in self.call_logs[-limit:]]
+        return list(reversed(logs))
+
     # ──────────────────────────────────────────────
     # ACCOUNT & BALANCE (Testnet Paper Trading)
     # ──────────────────────────────────────────────
