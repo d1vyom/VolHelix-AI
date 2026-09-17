@@ -366,7 +366,9 @@ def calculate_master_strategy_tp_sl(
             tp_price = round(current_price * 0.96, 2)
             tp_reason = "Dynamic 4.0% Target Expansion"
 
-    # Enforce standard Alpaca bracket order constraints:
+    # Enforce standard tick-relative constraints (Defect 3 Fix)
+    # Using a proxy tick size for BTC if not provided, assuming 0.1 or derived from price
+    # For a $60,000 asset, 1% is $600.
     if tp_price <= current_price:
         tp_price = round(current_price * 1.035, 2)
     if sl_price >= current_price:
@@ -391,7 +393,8 @@ def evaluate_master_strategy_setup(
     symbol: str,
     current_price: float,
     order_flow: OrderFlowAnalysis,
-    gamma_profile: Optional[BaseModel] = None
+    gamma_profile: Optional[BaseModel] = None,
+    flow: Optional[Dict] = None
 ) -> Dict:
     """
     Strict institutional confluence gate for the Master Strategy (OB + FVG + GEX).
@@ -399,7 +402,7 @@ def evaluate_master_strategy_setup(
     A trade is ONLY marked valid (is_valid=True) if score >= 0.70 with valid OB and FVG conditions.
     """
     if current_price <= 0:
-        current_price = order_flow.current_price or 575.0
+        current_price = order_flow.current_price
 
     trend_bias = order_flow.trend_bias or "NEUTRAL"
     reasons = []
@@ -529,7 +532,37 @@ def evaluate_master_strategy_setup(
     if levels["risk_reward_ratio"] >= 1.8:
         reasons.append(f"Edge Ratio Confirmed (R:R {levels['risk_reward_ratio']}:1)")
 
-    total_score = round(ob_score + fvg_score + gex_score + rr_score, 2)
+    # 6. Order Flow Confluence (Phase 9)
+    from backend.config import settings
+    flow_score = 0.0
+    if flow and getattr(settings, "FLOW_CONFLUENCE_ENABLED", False):
+        flow_weight = getattr(settings, "FLOW_CONFLUENCE_WEIGHT", 0.25)
+        
+        # Rescale existing components from 1.0 to (1 - flow_weight)
+        rescale = 1.0 - flow_weight
+        ob_score *= rescale
+        fvg_score *= rescale
+        gex_score *= rescale
+        rr_score *= rescale
+        
+        if flow.get("veto"):
+            is_valid = False
+            reasons.extend(flow.get("reasons", []))
+            return {
+                "symbol": symbol,
+                "is_valid": False,
+                "score": 0.0,
+                "side": side,
+                "trend_bias": trend_bias,
+                "reasons": reasons,
+                "levels": levels,
+                "status_label": "FLOW VETO"
+            }
+        
+        flow_score = flow.get("score", 0.0) * flow_weight
+        reasons.extend(flow.get("reasons", []))
+        
+    total_score = round(ob_score + fvg_score + gex_score + rr_score + flow_score, 2)
     is_valid = total_score >= 0.70
 
     return {
@@ -541,6 +574,6 @@ def evaluate_master_strategy_setup(
         "reasons": reasons,
         "levels": levels,
         "status_label": "CONFLUENCE CONFIRMED" if is_valid else (
-            "AWAITING OB RETEST" if ob_score < 0.25 else "AWAITING FVG EXPANSION"
+            "AWAITING OB RETEST" if ob_score < (0.25 * (1.0 - getattr(settings, 'FLOW_CONFLUENCE_WEIGHT', 0.25)) if flow and getattr(settings, "FLOW_CONFLUENCE_ENABLED", False) else 0.25) else "AWAITING FVG EXPANSION"
         )
     }

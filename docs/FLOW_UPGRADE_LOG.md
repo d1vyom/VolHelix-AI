@@ -194,3 +194,8 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - **Status:** Completed
 - **Details:** Integrated `react-resizable-panels`. Implemented `WorkspaceGrid` handling complex dockable layouts for "ORDER_FLOW", "LIQUIDITY", and "ANALYSIS" presets. Bound sidebar toggle and fixed layout persistence using `localStorage`. Fixed strict-mode React lint and hydration bugs. All panels render via `<PanelGroup>`. Build succeeds.
 
+## Phase 9: Strategy & Risk Integration
+- **Date:** 2026-09-18
+- **Status:** Completed
+- **Details:** Implemented `evaluate_flow_confluence` with components (CVD, Imbalance, Absorption, Book Imbalance, Value Area) and hard vetoes (stale data, wide spread, insufficient bars). Wired flow analytics into `evaluate_master_strategy_setup` with shadow-mode logging. Fixed Defect 3 (tick-relative SL/TP buffers instead of absolute) and Defect 5 (Spot Short Selling Protection in Risk Gate). Added tests in `test_flow_confluence.py`. All 80 backend tests passing.
+
