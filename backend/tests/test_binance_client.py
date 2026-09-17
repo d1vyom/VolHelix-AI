@@ -37,10 +37,10 @@ def test_binance_client_get_ticker_24hr():
         "volume": "15000.0"
     }
     with patch.object(client.market_client, "get_ticker", return_value=mock_data):
-        res = client.get_ticker_24hr("ETHUSDT")
+        res = client.get_24hr_ticker("ETHUSDT")
         assert res["symbol"] == "ETHUSDT"
-        assert res["price"] == 3450.00
-        assert res["price_change_percent"] == 1.47
+        assert res["last_price"] == 3450.00
+        assert res["price_change_pct"] == 1.47
         assert res["high"] == 3500.00
         assert res["low"] == 3400.00
 
@@ -53,9 +53,10 @@ def test_binance_client_get_order_book():
     with patch.object(client.market_client, "get_order_book", return_value=mock_depth):
         res = client.get_order_book("BTCUSDT", limit=5)
         assert res["symbol"] == "BTCUSDT"
-        assert res["spread"] == pytest.approx(10.00, 0.01)
         assert len(res["bids"]) == 1
         assert len(res["asks"]) == 1
+        spread = res["asks"][0][0] - res["bids"][0][0]
+        assert spread == pytest.approx(10.00, 0.01)
 
 def test_binance_client_get_account_filters_non_zero():
     client = BinanceClient()
