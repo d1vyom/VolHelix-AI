@@ -6,6 +6,8 @@ from backend.api.flow_routes import router as flow_router
 from backend.api.websocket import socket_app
 from backend.store.trade_log import trade_log
 from backend.store.postmortem_store import postmortem_store
+# VolHelixScheduler is imported but deliberately not started here.
+# TradingOrchestrator is driven exclusively through the auto_trader loop and Position Guardian.
 from backend.scheduler import VolHelixScheduler
 
 from backend.api.websocket import sio

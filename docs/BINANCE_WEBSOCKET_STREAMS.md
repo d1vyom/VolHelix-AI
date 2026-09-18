@@ -438,3 +438,38 @@ class BinanceWSManager:
 > **Document Version:** 1.0  
 > **Created:** September 17, 2026  
 > **Purpose:** WebSocket reference for Gemini 3.8 Flash
+
+---
+
+## 6. Order Flow Engine Specifics (Phase 11 Addition)
+
+### 6.1 `aggTrade` Payload Specification
+The `aggTrade` stream provides grouped trades. This is the foundation of footprint and delta calculations.
+```json
+{
+  "e": "aggTrade",
+  "E": 1695916812345,
+  "s": "BTCUSDT",
+  "a": 12345,         // Aggregate trade ID (monotonic, use for gap detection)
+  "p": "67142.50",    // Price
+  "q": "0.015",       // Quantity
+  "f": 100,           // First underlying trade ID
+  "l": 105,           // Last underlying trade ID
+  "T": 1695916812300, // Trade time (Use this for bucketing)
+  "m": true           // Is buyer the market maker? If true, aggressor was SELLER.
+}
+```
+
+### 6.2 Diff-Depth Sync Procedure
+1. Open a stream to `wss://stream.binance.com:9443/ws/<symbol>@depth@100ms`.
+2. Buffer the events you receive from the stream.
+3. Get a depth snapshot from `https://api.binance.com/api/v3/depth?symbol=<symbol>&limit=1000`.
+4. Drop any event where `u` (final update ID) is `<= lastUpdateId` in the snapshot.
+5. The first processed event should have `U <= lastUpdateId+1` AND `u >= lastUpdateId+1`.
+6. While applying updates, each new event's `U` should be equal to the previous event's `u+1`. If not, a gap occurred and you must resync.
+
+### 6.3 Connection Limits and Rotation
+- **Stream Limit**: Maximum ~1024 streams per connection (chunk at 200).
+- **Control Message Limit**: 5 inbound control messages (SUBSCRIBE/UNSUBSCRIBE) per second.
+- **24-Hour Rotation**: Binance forcefully closes websocket connections after 24 hours. The stream manager must proactively reconnect/rotate at the 23-hour mark.
+- **Pings/Pongs**: Handled automatically by the underlying library, but dropping them leads to disconnects.

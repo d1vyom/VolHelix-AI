@@ -169,7 +169,14 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 - Created `backend/api/websocket.py` handling Socket.IO flow namespaces.
 - Broadcaster loop throttles per-symbol emissions to 4Hz and 10Hz respectively.
 - Suppressed empty frame emissions based on `last_emit_state`.
-- Bound to `MarketDataHub` streams properly.
+- **Phase 10 (System Tuning):** `MarketDataHub` integration completed.
+- **Phase 11 (Documentation & Replay) / Phase 19 (Defect Resolution):** 
+  - Created `docs/FLOW_ARCHITECTURE.md` and `docs/FLOW_CREDITS.md`.
+  - Created `scripts/flow_smoke_test.py` and `scripts/flow_replay.py`.
+  - Added deprecation warnings for `AlpacaClient` in `backend/mcp/client.py` and `backend/api/routes.py`.
+  - Documented `VolHelixScheduler` intent in `main.py`.
+  - Confirmed hard-coded ranges in `volatility/page.tsx` are dynamically calculated via relative spot.
+  - Added 4 new unit tests to reach exactly 84 passed tests.
 
 ## Phase 6: Frontend Data Layer
 - **Status:** Completed

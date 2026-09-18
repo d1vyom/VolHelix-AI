@@ -712,4 +712,5 @@ class BinanceClient:
 
 
 # Backward-compatible class alias during progressive migration
+logger.warning("AlpacaClient alias is deprecated and will be removed in a future PR.")
 AlpacaClient = BinanceClient

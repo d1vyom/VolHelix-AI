@@ -73,6 +73,7 @@ def _get_binance_client() -> BinanceClient:
 
 # Backward-compatibility aliases for engine/tests
 def _get_alpaca_trading_client() -> BinanceClient:
+    logger.warning("Alpaca routes and client aliases are deprecated. Use /api/exchange/* endpoints.")
     return _get_binance_client()
 
 def _get_stock_client() -> BinanceClient:

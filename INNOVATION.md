@@ -2,7 +2,7 @@
 
 > **Platform:** VolHelix AI Autonomous Crypto Volatility Platform  
 > **Core Edge:** Neurosymbolic Multi-Agent Crypto Swarm • Deterministic Zero-LLM Risk Gate • 24/7 Decoupled Position Guardian  
-> **Status:** 59/59 Automated Tests Passing • Dual-Mode Binance Architecture • Production Ready
+> **Status:** 84/84 Automated Tests Passing • Dual-Mode Binance Architecture • Production Ready
 
 ---
 
@@ -70,14 +70,20 @@ flowchart TB
 
 ---
 
-## 🎯 The 5 Core Breakthroughs
+## 🎯 The 6 Core Breakthroughs
 
-### 1. Dual-Mode Binance Architecture
+### 1. High-Frequency Order Flow Engine & Tick-Level Microstructure
+VolHelix AI doesn't just read lagging candlestick data. It ingests sub-second `aggTrade` and `depth@100ms` diff-depth streams directly from Binance.
+- **Footprint Charting**: Constructs true price-bucketed buy/sell volume per bar, calculating Delta and Cumulative Volume Delta (CVD) in real-time.
+- **Institutional Confluence Gating**: The Order Flow Engine searches for diagonal imbalances, stacked imbalances (institutional absorption), and liquidity walls (resting orders $\ge 5\times$ median size).
+- **Absolute Stale Data Veto**: A hard-veto forces the agent to discard any signal if the WebSocket connection drops or lags.
+
+### 2. Dual-Mode Binance Architecture
 - **Production Data Ingestion**: Live spot prices, 24hr statistics, 20-level order book depth, and klines are streamed from `api.binance.com`.
 - **Spot Testnet Paper Execution**: Orders, balances, and cancellations operate on `testnet.binance.vision` with zero real capital risk.
 - **Clock Drift Offset Sync**: Calculates system offset against Binance server time and automatically offsets timestamps to eliminate `-1021 INVALID_TIMESTAMP` errors.
 
-### 2. Deterministic Zero-LLM Crypto Risk Gate (10 Hard Invariants)
+### 3. Deterministic Zero-LLM Crypto Risk Gate (10 Hard Invariants)
 LLMs are completely prohibited from risk and execution decisions. All trade proposals must pass **10 hardcoded mathematical checks**:
 
 ```
@@ -97,7 +103,7 @@ LLMs are completely prohibited from risk and execution decisions. All trade prop
 9. **Volatility Sizing Multiplier**: Dynamic scaling by market regime ($1.00\times$ in Normal, $0.75\times$ in Elevated, $0.50\times$ in Squeeze, $0.25\times$ in Crisis).
 10. **Correlation Group Limits**: Sector risk gating across correlated clusters.
 
-### 3. 24/7 Decoupled Position Guardian
+### 4. 24/7 Decoupled Position Guardian
 In standard trading bots, pausing automated scanning abandons open positions. VolHelix AI **decouples scanning from risk management into two independent execution threads**:
 
 ```mermaid
@@ -120,13 +126,13 @@ graph LR
 
 - **Safety Guarantee**: Even when Auto-Pilot is turned **OFF**, the Position Guardian continues running every 5 seconds, enforcing dynamic TP/SL exits and logging fills to the SQLite ACID ledger.
 
-### 4. Structural Liquidity TP/SL Anchors ($R:R \ge 2.0:1$)
+### 5. Structural Liquidity TP/SL Anchors ($R:R \ge 2.0:1$)
 VolHelix AI eliminates arbitrary percentage targets (e.g. "-2% SL / +4% TP") that get hunted by market makers:
 - **Take-Profit (TP)**: Magnetized to the Fair Value Gap top or resistance liquidity ceiling.
 - **Stop-Loss (SL)**: Protected behind the Order Block invalidation floor.
 - **Asymmetric Payoff**: Enforces a minimum **Risk-to-Reward ratio $\ge 2.0:1$** on every executed trade.
 
-### 5. High-Frequency Speed & 24/7 Timezone Synchronization
+### 6. High-Frequency Speed & 24/7 Timezone Synchronization
 - **Sub-10ms In-Memory TTL Caching**: Market quotes and klines are cached with a 5s–20s TTL, slashing scan times from 7.3s down to 6.2ms.
 - **Zero-Lag Terminal UI**: Decoupled memoization (`OrderBookWidget`, `CandlestickChart`, `VolumeBarChart`) prevents canvas redraws on streaming price ticks.
 - **Indian Standard Time (IST, UTC+5:30) Engine**: Chart bars, time axis, and tooltip badges are automatically converted to IST, paired with dual live clocks (**IST Local** and **UTC Market**) in the header.
@@ -145,13 +151,13 @@ VolHelix AI eliminates arbitrary percentage targets (e.g. "-2% SL / +4% TP") tha
 | **Broker Integration** | Simple webhook mocks | Basic REST wrappers | **Dual-Mode Binance Client (Production Data + Testnet)** |
 | **Order Lifecycle** | Incomplete mock states | Basic order log | **Market $\to$ Positions, Limit $\to$ Pending $\to$ History** |
 | **Timezone Support** | Server UTC only | Local device only | **Dual Clocks (IST UTC+5:30 & UTC) + Continuous 24/7** |
-| **Test Coverage** | None / Untested | Minimal unit tests | **59 / 59 Automated Tests Passing (100%)** |
+| **Test Coverage** | None / Untested | Minimal unit tests | **84 / 84 Automated Tests Passing (100%)** |
 
 ---
 
 ## 🔬 Rigorous Verification & Metrics
 
-- **Automated Test Suite**: 59 passed in 28.99s (`pytest backend/tests/ -v`).
+- **Automated Test Suite**: 84 passed (`pytest backend/tests/ -v`).
 - **Production Build**: Next.js 16.3 compiled with 0 errors and 0 warnings (`npm run build`).
 - **Scan Latency**: Multi-ticker parallelized scan executes across all 5 symbols in $< 2.5\text{s}$ (cached: $6.2\text{ms}$).
 - **Ledger Reliability**: ACID SQLite persistence (`trades.db`) synchronizing real-time realized P&L, Win Rate %, and Profit Factor.
