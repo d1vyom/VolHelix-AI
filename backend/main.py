@@ -2,9 +2,12 @@ import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes import router
+from backend.api.flow_routes import router as flow_router
 from backend.api.websocket import socket_app
 from backend.store.trade_log import trade_log
 from backend.store.postmortem_store import postmortem_store
+# VolHelixScheduler is imported but deliberately not started here.
+# TradingOrchestrator is driven exclusively through the auto_trader loop and Position Guardian.
 from backend.scheduler import VolHelixScheduler
 
 from backend.api.websocket import sio
@@ -13,6 +16,8 @@ import socketio
 from backend.engine.auto_trader import auto_trader
 from contextlib import asynccontextmanager
 
+from backend.marketdata.hub import hub
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Initializing Database...")
@@ -20,7 +25,18 @@ async def lifespan(app: FastAPI):
     await postmortem_store.init_db()
     auto_trader.ensure_guardian_running()
     print("Position Guardian 24/7 TP/SL Engine Active...")
+    
+    try:
+        await hub.start()
+    except Exception as e:
+        print(f"Failed to start MarketDataHub: {e}")
+        
     yield
+    
+    try:
+        await hub.stop()
+    except Exception as e:
+        print(f"Failed to stop MarketDataHub: {e}")
 
 fastapi_app = FastAPI(title="VolHelix AI Backend", lifespan=lifespan)
 
@@ -35,6 +51,7 @@ fastapi_app.add_middleware(
 
 # Include REST routes
 fastapi_app.include_router(router)
+fastapi_app.include_router(flow_router)
 
 app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)
 

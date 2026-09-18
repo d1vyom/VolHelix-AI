@@ -5,7 +5,7 @@
 [![Next.js 16](https://img.shields.io/badge/Next.js-16.3-black.svg)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
 [![Binance Spot](https://img.shields.io/badge/Broker-Binance_Spot_Testnet-F0B90B.svg)](https://testnet.binance.vision/)
-[![Tests](https://img.shields.io/badge/Tests-59%2F59_Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-84%2F84_Passed-brightgreen.svg)]()
 
 > **Autonomous Multi-Agent Crypto Spot Volatility Trading Swarm with Dual-Mode Binance Architecture, Deterministic Zero-Hallucination Risk Gate & 24/7 Position Guardian** 
 
@@ -44,6 +44,11 @@ flowchart TB
         A3[Order Book Depth 20-Level] --> B2[Liquidity & Imbalance Engine]
         B1 --> B3[SMC: Order Blocks & FVG Imbalance]
         B2 --> B4[Order Book Bid/Ask Imbalance & Spread]
+        subgraph WebSocketIngestion ["Order Flow Streaming (MarketDataHub)"]
+            WS[Production Streams] --> NORM[Normalization & Sync]
+            NORM --> BUF[State Buffers & Local Book]
+        end
+        BUF --> B1
     end
 
     subgraph ConfluenceGate ["Institutional Confluence Gate (Score ≥ 70%)"]
@@ -139,8 +144,16 @@ The Risk Gate has **ZERO LLM involvement** and cannot be overridden by prompt in
 
 ### 8. Interactive 3D Derivatives & Vol Lab (`/volatility`)
 - **WebGL 3D Realized Volatility Surface**: Interactive manifold plotting historical Parkinson realized volatility across tenors.
-- **Dynamic Strike Ladders**: Automatically centers dynamic price ladders around live spot quotes ($55,000–$75,000 range for BTC).
+- **Dynamic Strike Ladders**: Automatically centers dynamic price ladders around live spot quotes.
 - **HMM Regime Classifier**: 5-state Hidden Markov Model categorizing volatility into `LOW_VOL`, `NORMAL`, `ELEVATED`, `SQUEEZE`, and `CRISIS`.
+
+### 9. Institutional Order Flow Terminal
+- **Real-Time Data**: Sub-second push over Socket.IO of tick-level microstructures.
+- **Footprint Charting**: True price-bucketed buy/sell volume per bar, diagonal and stacked imbalances, and CVD/Delta calculations.
+- **Liquidity Heatmaps**: Visualizes resting liquidity and institutional "walls" directly from 100ms order book depth-diffs.
+- **Confluence Gating**: High frequency analytics augment the Master Strategy setup; stale streams result in an absolute hardware veto.
+![Order Flow Terminal](docs/assets/terminal_orderflow.png)
+![Liquidity Heatmap](docs/assets/terminal_heatmap.png)
 
 ---
 
@@ -149,6 +162,7 @@ The Risk Gate has **ZERO LLM involvement** and cannot be overridden by prompt in
 | Layer | Technology |
 |---|---|
 | **Backend Framework** | FastAPI (Python 3.13), Uvicorn |
+| **Market Data Ingestion**| `python-binance` `BinanceSocketManager` (Websocket Async Event Loop) |
 | **Broker Execution** | `python-binance` (Dual-Mode: Production Data + Testnet Trading) |
 | **Agent Swarm** | LangGraph, Google Gemini 2.5 Flash / Pro |
 | **Quantitative Engines** | NumPy, SciPy (Parkinson Volatility), HMMlearn |

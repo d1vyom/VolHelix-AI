@@ -73,6 +73,7 @@ def _get_binance_client() -> BinanceClient:
 
 # Backward-compatibility aliases for engine/tests
 def _get_alpaca_trading_client() -> BinanceClient:
+    logger.warning("Alpaca routes and client aliases are deprecated. Use /api/exchange/* endpoints.")
     return _get_binance_client()
 
 def _get_stock_client() -> BinanceClient:
@@ -613,20 +614,7 @@ def get_exchange_bars(symbol: str = "BTCUSDT", timeframe: str = "1H", limit: int
         return result
     except Exception as e:
         logger.error(f"get_exchange_bars error: {e}")
-        base_p = 76600.0 if "BTC" in clean_sym else 2460.0
-        now_ist = datetime.now(timezone.utc).astimezone(IST_TZ)
-        return [
-            {
-                "time": (now_ist - timedelta(hours=limit - i)).strftime("%m-%d %H:%M"),
-                "raw_time": (now_ist - timedelta(hours=limit - i)).isoformat(),
-                "open": round(base_p + i * 2.5, 2),
-                "high": round(base_p + i * 2.5 + 15.0, 2),
-                "low": round(base_p + i * 2.5 - 12.0, 2),
-                "close": round(base_p + i * 2.5 + 4.0, 2),
-                "volume": 12.5 + (i * 0.4),
-            }
-            for i in range(limit)
-        ]
+        raise HTTPException(status_code=503, detail="Market data unavailable")
 
 
 class OrderSubmission(BaseModel):
@@ -1018,14 +1006,14 @@ def get_order_flow_analytics(symbol: str = "BTCUSDT"):
         klines = client.get_klines(clean_sym, interval="1h", limit=48)
         # Adapt klines to simple bar objects
         bars = [
-            type("Bar", (), {
+            {
                 "open": float(k["open"]),
                 "high": float(k["high"]),
                 "low": float(k["low"]),
                 "close": float(k["close"]),
                 "volume": float(k["volume"]),
                 "timestamp": datetime.fromtimestamp(k["open_time"] / 1000)
-            })()
+            }
             for k in klines
         ]
         order_flow = analyze_order_flow(clean_sym, bars)

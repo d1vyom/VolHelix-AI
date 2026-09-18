@@ -213,6 +213,19 @@ class CryptoRiskGate:
             detail=corr_detail
         )
 
+        # 11. Short Selling Protection (Defect 5 Fix)
+        # Spot testnet cannot short. If side is SELL, we must already have inventory to sell.
+        short_passed = True
+        short_detail = "Buy order or selling existing inventory"
+        if proposal.side == "SELL" and not already_holding:
+            short_passed = False
+            short_detail = f"Spot cannot short: no existing inventory for {base_asset} to SELL"
+        
+        checks["short_selling_protection"] = CheckResult(
+            passed=short_passed,
+            detail=short_detail
+        )
+
         # Verdict
         failed_rules = [k for k, v in checks.items() if not v.passed]
         is_approved = len(failed_rules) == 0

@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
+  const pathname = usePathname();
+  const isFullBleed = pathname?.startsWith("/terminal");
 
   useEffect(() => {
     const handleSidebarToggle = (e: Event) => {
@@ -25,7 +28,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         }`}
       >
         <Header />
-        <main className="flex-1 p-4 md:p-6 max-w-7xl w-full mx-auto">
+        <main
+          className={`flex-1 w-full mx-auto ${
+            isFullBleed
+              ? "p-0 max-w-none h-[calc(100vh-56px)] overflow-hidden"
+              : "p-4 md:p-6 max-w-7xl"
+          }`}
+        >
           {children}
         </main>
       </div>
