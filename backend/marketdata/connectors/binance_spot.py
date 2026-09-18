@@ -13,6 +13,10 @@ class BinanceSpotConnector:
     """Binance Spot implementation of ExchangeConnector."""
     name: str = "Binance Spot"
 
+    def __init__(self):
+        # Cached exchangeInfo filters per symbol (tick/step size, min notional, precision)
+        self.symbol_filters: dict[str, dict[str, float]] = {}
+
     def normalize_symbol(self, symbol: str) -> str:
         return symbol.upper()
 
@@ -60,17 +64,37 @@ class BinanceSpotConnector:
             return normalize_depth_snapshot(data, symbol, source="REST")
 
     async def tick_size(self, symbol: str) -> float:
-        """Fetch tick size from exchangeInfo."""
+        """
+        Fetch the symbol's tick size from exchangeInfo, caching every trading filter
+        (tick size, step size, min notional, price/qty precision) for reuse.
+        """
+        upper = symbol.upper()
+        cached = self.symbol_filters.get(upper)
+        if cached:
+            return float(cached["tick_size"])
+
         url = "https://api.binance.com/api/v3/exchangeInfo"
-        params = {"symbol": symbol.upper()}
+        params = {"symbol": upper}
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, params=params, timeout=10.0)
             resp.raise_for_status()
             data = resp.json()
             for s in data.get("symbols", []):
-                if s["symbol"] == symbol.upper():
-                    for f in s.get("filters", []):
-                        if f["filterType"] == "PRICE_FILTER":
-                            return float(f["tickSize"])
+                if s["symbol"] != upper:
+                    continue
+                filters: dict[str, float] = {}
+                for f in s.get("filters", []):
+                    ftype = f.get("filterType")
+                    if ftype == "PRICE_FILTER":
+                        filters["tick_size"] = float(f["tickSize"])
+                    elif ftype == "LOT_SIZE":
+                        filters["step_size"] = float(f["stepSize"])
+                    elif ftype in ("NOTIONAL", "MIN_NOTIONAL"):
+                        filters["min_notional"] = float(f.get("minNotional", 0.0) or 0.0)
+                filters["price_precision"] = float(s.get("quotePrecision", 0) or 0)
+                filters["qty_precision"] = float(s.get("baseAssetPrecision", 0) or 0)
+                self.symbol_filters[upper] = filters
+                if "tick_size" in filters:
+                    return float(filters["tick_size"])
             raise ValueError(f"PRICE_FILTER not found for {symbol}")
 

@@ -35,71 +35,8 @@ function AuditTrailContent() {
         } else if (data && Array.isArray(data.records) && data.records.length > 0) {
           setAuditRecords(data.records);
         } else {
-          setAuditRecords([
-            {
-              trade_id: "AUDIT-20260917-001",
-              timestamp: "2026-09-17T14:28:22Z",
-              underlying: "BTCUSDT",
-              regime: "NORMAL",
-              strategy: "VOL_BREAKOUT",
-              confidence: 0.94,
-              consensus_score: 1.0,
-              votes: [
-                { agent_name: "MarketIntel", vote: "APPROVE", reasoning: "Parkinson Realized Vol (38.4%) confirms expansion regime. Bullish order book imbalance with high 24h taker volume." },
-                { agent_name: "StrategySynthesizer", vote: "APPROVE", reasoning: "BTCUSDT volatility breakout with trailing ATR stop provides optimal risk/reward ($1.85 EV)." },
-                { agent_name: "DevilsAdvocate", vote: "APPROVE", reasoning: "Assessed funding rates and 1-hour depth. Slippage expected < 0.05% on Binance Testnet." },
-                { agent_name: "RiskGate", vote: "APPROVE", reasoning: "Deterministic 10/10 crypto rules verified. Max allocation: 2.0% (Limit: 5.0% NAV)." },
-              ],
-              checks: {
-                "Capital Limit <= 5.0% NAV": { passed: true, detail: "Allocated 2.0% ($200.00 of $10,000 USDT NAV)" },
-                "Daily Drawdown <= 5.0%": { passed: true, detail: "Current session drawdown 0.00%" },
-                "Min Order Notional >= $10.00": { passed: true, detail: "Order notional is $200.00 USDT" },
-                "Max Slippage <= 0.50%": { passed: true, detail: "Top of book bid-ask spread is 0.012%" },
-                "Open Positions <= 5": { passed: true, detail: "Current open positions: 1 (Limit: 5)" },
-                "Max Asset Concentration <= 30%": { passed: true, detail: "BTCUSDT total allocation: 2.0%" },
-                "Realized Volatility Spike Guard": { passed: true, detail: "30-day realized volatility 42.1% is below 85% circuit breaker" },
-                "24/7 Market Liquidity Depth": { passed: true, detail: "Bid depth within 2% exceeds $5,000,000" },
-                "Execution Mode Verification": { passed: true, detail: "Targeting Binance Testnet paper trading spot engine" },
-                "Deterministic Consensus Met": { passed: true, detail: "Unanimous approval (4/4)" },
-              },
-              mcp_calls: [
-                { tool: "binance_mcp.get_klines", duration_ms: 64, status: "SUCCESS" },
-                { tool: "binance_mcp.get_order_book", duration_ms: 32, status: "SUCCESS" },
-                { tool: "binance_mcp.get_account", duration_ms: 45, status: "SUCCESS" },
-              ],
-            },
-            {
-              trade_id: "AUDIT-20260917-002",
-              timestamp: "2026-09-17T10:14:50Z",
-              underlying: "ETHUSDT",
-              regime: "LOW_VOL",
-              strategy: "MEAN_REVERSION",
-              confidence: 0.88,
-              consensus_score: 0.75,
-              votes: [
-                { agent_name: "MarketIntel", vote: "APPROVE", reasoning: "Low volatility consolidation near 200 EMA favors range-bound mean reversion." },
-                { agent_name: "StrategySynthesizer", vote: "APPROVE", reasoning: "ETHUSDT mean reversion entry targeting VWAP reversion with tight 1.5% stop." },
-                { agent_name: "DevilsAdvocate", vote: "DISSENT", reasoning: "Upcoming Ethereum network hardfork schedule could induce sudden gas volatility." },
-                { agent_name: "RiskGate", vote: "APPROVE", reasoning: "Rule checks pass; allocation sized down to 1.5% NAV to hedge network upgrade risk." },
-              ],
-              checks: {
-                "Capital Limit <= 5.0% NAV": { passed: true, detail: "Allocated 1.5% ($150.00 of $10,000 USDT NAV)" },
-                "Daily Drawdown <= 5.0%": { passed: true, detail: "Current session drawdown 0.18%" },
-                "Min Order Notional >= $10.00": { passed: true, detail: "Order notional is $150.00 USDT" },
-                "Max Slippage <= 0.50%": { passed: true, detail: "Spread width is 0.024% of mid" },
-                "Open Positions <= 5": { passed: true, detail: "Current open positions: 2 (Limit: 5)" },
-                "Max Asset Concentration <= 30%": { passed: true, detail: "ETHUSDT total allocation: 1.5%" },
-                "Realized Volatility Spike Guard": { passed: true, detail: "Realized vol 35.2% normal" },
-                "24/7 Market Liquidity Depth": { passed: true, detail: "Top book depth exceeds $2,500,000" },
-                "Execution Mode Verification": { passed: true, detail: "Verified Binance Testnet spot mode" },
-                "Deterministic Consensus Met": { passed: true, detail: "Consensus threshold 75% met" },
-              },
-              mcp_calls: [
-                { tool: "binance_mcp.get_klines", duration_ms: 78, status: "SUCCESS" },
-                { tool: "binance_mcp.get_positions", duration_ms: 38, status: "SUCCESS" },
-              ],
-            },
-          ]);
+          // No fabricated records: an empty audit trail is reported honestly.
+          setAuditRecords([]);
         }
       } catch {
         setAuditRecords([]);
@@ -158,6 +95,12 @@ function AuditTrailContent() {
 
       {/* Audit Records List */}
       <div className="space-y-4">
+        {filteredRecords.length === 0 && (
+          <div className="p-10 rounded-2xl bg-[#181a20] border border-dashed border-[#2b313a] text-center text-xs font-mono text-[#848e9c]">
+            No audit records yet. Every Master Strategy decision is logged here with its full risk gate matrix.
+          </div>
+        )}
+
         {filteredRecords.map((rec) => {
           const isExpanded = expandedId === rec.trade_id;
           const checksObj = rec.checks || {};

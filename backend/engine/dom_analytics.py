@@ -61,7 +61,11 @@ class DomEngine:
         spread = best_ask - best_bid if best_ask and best_bid else 0.0
         spread_bps = (spread / mid * 10000.0) if mid > 0 else 0.0
         
-        all_sizes = list(bids.values()) + list(asks.values())
+        # Median is taken over the levels nearest mid only. Medians over the whole deep
+        # book are dominated by far-away dust, which flags nearly every level as a wall.
+        near_bid_sizes = [s for _, s in sorted(bids.items(), key=lambda kv: kv[0], reverse=True)[:60]]
+        near_ask_sizes = [s for _, s in sorted(asks.items(), key=lambda kv: kv[0])[:60]]
+        all_sizes = near_bid_sizes + near_ask_sizes
         median_size = statistics.median(all_sizes) if all_sizes else 0.0
         wall_threshold = median_size * settings.FLOW_WALL_MULTIPLIER
         

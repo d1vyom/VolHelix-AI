@@ -18,7 +18,7 @@ const getLayout = (id: string) => {
   return val ? JSON.parse(val) : undefined;
 };
 
-const saveLayout = (id: string, layout: any) => {
+const saveLayout = (id: string, layout: unknown) => {
   if (typeof window !== "undefined") {
     localStorage.setItem(id, JSON.stringify(layout));
   }
@@ -30,10 +30,11 @@ interface WorkspaceGridProps {
   symbol: string;
 }
 
-function ResizeHandle() {
-  return (
-    <PanelResizeHandle className="w-1 h-full bg-[#1C1C1E] hover:bg-[#007AFF] transition-colors cursor-col-resize group-data-[direction=vertical]:h-1 group-data-[direction=vertical]:w-full group-data-[direction=vertical]:cursor-row-resize" />
-  );
+function ResizeHandle({ direction = "horizontal" }: { direction?: "horizontal" | "vertical" }) {
+  if (direction === "vertical") {
+    return <PanelResizeHandle className="h-1 w-full bg-[#1C1C1E] hover:bg-[#007AFF] transition-colors cursor-row-resize" />;
+  }
+  return <PanelResizeHandle className="w-1 h-full bg-[#1C1C1E] hover:bg-[#007AFF] transition-colors cursor-col-resize" />;
 }
 
 export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
@@ -44,7 +45,7 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
         if (saved && ["ORDER_FLOW", "LIQUIDITY", "ANALYSIS"].includes(saved)) {
           return saved as WorkspacePreset;
         }
-      } catch (e) {
+      } catch {
         // ignore
       }
     }
@@ -55,7 +56,7 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
     setPreset(newPreset);
     try {
       localStorage.setItem("volhelix.workspace.v1.preset", newPreset);
-    } catch (e) {
+    } catch {
       // ignore
     }
   };
@@ -74,19 +75,19 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
                 <Panel defaultSize={75} minSize={30}>
                   <FootprintChart symbol={symbol} />
                 </Panel>
-                <ResizeHandle />
+                <ResizeHandle direction="vertical" />
                 <Panel defaultSize={25} minSize={10}>
                   <CVDPanel symbol={symbol} />
                 </Panel>
               </PanelGroup>
             </Panel>
-            <ResizeHandle />
+            <ResizeHandle direction="horizontal" />
             <Panel defaultSize={35} minSize={20}>
               <PanelGroup orientation="horizontal">
                 <Panel defaultSize={60} minSize={30}>
                   <DOMLadder symbol={symbol} />
                 </Panel>
-                <ResizeHandle />
+                <ResizeHandle direction="horizontal" />
                 <Panel defaultSize={40} minSize={20}>
                   <TimeAndSales symbol={symbol} />
                 </Panel>
@@ -105,17 +106,17 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
             <Panel defaultSize={65} minSize={30}>
               <LiquidityHeatmap symbol={symbol} />
             </Panel>
-            <ResizeHandle />
+            <ResizeHandle direction="horizontal" />
             <Panel defaultSize={35} minSize={20}>
               <PanelGroup orientation="horizontal">
                 <Panel defaultSize={50} minSize={20}>
                   <DOMLadder symbol={symbol} />
                 </Panel>
-                <ResizeHandle />
+                <ResizeHandle direction="horizontal" />
                 <Panel defaultSize={25} minSize={10}>
                   <TimeAndSales symbol={symbol} />
                 </Panel>
-                <ResizeHandle />
+                <ResizeHandle direction="horizontal" />
                 <Panel defaultSize={25} minSize={10}>
                   <VolumeProfile symbol={symbol} />
                 </Panel>
@@ -136,13 +137,13 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
                 <Panel defaultSize={75} minSize={30}>
                   <FootprintChart symbol={symbol} />
                 </Panel>
-                <ResizeHandle />
+                <ResizeHandle direction="vertical" />
                 <Panel defaultSize={25} minSize={10}>
                   <CVDPanel symbol={symbol} />
                 </Panel>
               </PanelGroup>
             </Panel>
-            <ResizeHandle />
+            <ResizeHandle direction="horizontal" />
             <Panel defaultSize={30} minSize={20}>
               <VolumeProfile symbol={symbol} />
             </Panel>
@@ -158,7 +159,7 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
     <div className="flex flex-col h-full w-full bg-[#121214] text-neutral-100 p-1.5 gap-1.5 overflow-hidden">
       {/* Metrics Strip */}
       <div className="shrink-0 rounded overflow-hidden">
-        <FlowMetricsStrip symbol={symbol} />
+        <FlowMetricsStrip />
       </div>
 
       <div className="shrink-0 flex items-center justify-end gap-2 px-1">

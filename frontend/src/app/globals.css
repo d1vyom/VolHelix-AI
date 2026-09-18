@@ -74,3 +74,16 @@ body {
   background: rgba(247, 166, 0, 0.35);
   color: #fff;
 }
+
+/* Fix react-resizable-panels nested PanelGroup height collapse */
+div[data-panel="true"] > div {
+  height: 100% !important;
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+div[data-group="true"] {
+  height: 100% !important;
+  width: 100% !important;
+  flex: 1 1 0% !important;
+}

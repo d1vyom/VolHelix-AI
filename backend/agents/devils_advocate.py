@@ -1,5 +1,6 @@
-from typing import List
+from typing import List, cast
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.runnables import Runnable
 from pydantic import BaseModel, Field
 
 from backend.config import settings
@@ -25,8 +26,11 @@ class DevilsAdvocateAgent:
             google_api_key=settings.GOOGLE_API_KEY,
             temperature=0.7 # Higher temp for more creative counter-arguments
         )
-        self.structured_llm = self.llm.with_structured_output(AdvocateResponse)
-        
+        self.structured_llm = cast(
+            Runnable[str, AdvocateResponse],
+            self.llm.with_structured_output(AdvocateResponse)
+        )
+    
     def evaluate(self, proposals: List[TradeProposal], signal: MarketSignal, risk: RiskFlags) -> List[AgentVote]:
         votes = []
         for prop in proposals:
@@ -53,7 +57,7 @@ class DevilsAdvocateAgent:
             """
             
             try:
-                response = self.structured_llm.invoke(prompt)
+                response: AdvocateResponse = self.structured_llm.invoke(prompt)
                 vote = AgentVote(
                     agent_name="DevilsAdvocate",
                     vote=response.vote,

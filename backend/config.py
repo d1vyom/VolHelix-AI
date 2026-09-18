@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     FLOW_DEPTH_SNAPSHOT_LIMIT: int = 1000
     FLOW_USE_DIFF_DEPTH: bool = True
     FLOW_TICK_GROUP_MULTIPLIER: float = 1.0
+    # Calibrated base price increments so a panel never renders raw 0.01 ticks on
+    # BTC (which would be ~100k rows). Unlisted symbols fall back to the tick size.
+    FLOW_TICK_GROUP_DEFAULTS: dict[str, float] = {
+        "BTCUSDT": 10.0,
+        "ETHUSDT": 1.0,
+        "SOLUSDT": 0.1,
+        "BNBUSDT": 0.1,
+        "XRPUSDT": 0.0001,
+    }
     FLOW_FOOTPRINT_INTERVALS_STR: str = Field(
         default="1m,5m,15m",
         alias="FLOW_FOOTPRINT_INTERVALS"
@@ -84,6 +93,16 @@ class Settings(BaseSettings):
     @property
     def FLOW_FOOTPRINT_INTERVALS(self) -> list[str]:
         return [i.strip() for i in self.FLOW_FOOTPRINT_INTERVALS_STR.split(",") if i.strip()]
+
+    def flow_tick_group_base(self, symbol: str, tick_size: float) -> float:
+        """
+        Return the base price increment used to bucket this symbol's ticks.
+
+        Uses the calibrated per-symbol default when one exists, otherwise the
+        exchange tick size so an unknown instrument still buckets at raw precision.
+        """
+        base = self.FLOW_TICK_GROUP_DEFAULTS.get(symbol.upper())
+        return base if base and base > 0 else tick_size
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),

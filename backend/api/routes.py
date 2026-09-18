@@ -29,7 +29,7 @@ from backend.engine.order_flow import (
 from backend.engine.auto_trader import auto_trader
 from backend.mcp.client import BinanceClient
 from backend.utils.logger import get_logger
-from backend.utils.market_hours import get_market_clock, check_market_open, set_simulation_override
+from backend.utils.market_hours import get_market_clock, check_market_open
 from backend.utils.calendar import get_upcoming_events
 
 logger = get_logger("routes")
@@ -50,7 +50,7 @@ def _get_cached(key: str, ttl: float = 3.0):
 def _set_cached(key: str, data):
     _CACHE[key] = {"time": time.time(), "data": data}
 
-def _invalidate_cache(prefixes: list = None):
+def _invalidate_cache(prefixes: Optional[List[str]] = None):
     global _CACHE
     if prefixes:
         for k in list(_CACHE.keys()):
@@ -122,7 +122,10 @@ async def get_trades():
     # Synchronize with live Binance Testnet orders so execution ledger is 100% complete
     try:
         client = _get_binance_client()
-        orders = client.get_all_orders()
+        # get_all_orders requires a symbol; merge recent orders across the watched list
+        orders: List[dict] = []
+        for watch_sym in settings.WATCHED_SYMBOLS:
+            orders.extend(client.get_all_orders(watch_sym))
         for o in orders:
             oid = str(o.get("order_id") or o.get("orderId", ""))
             if oid and oid not in trade_ids:
@@ -198,22 +201,8 @@ async def get_pending_trades():
 
 @router.get("/api/market-status")
 def get_market_status():
+    """Return the 24/7 crypto session clock. Execution is never gated on market hours."""
     return get_market_clock()
-
-
-class SimulationOverrideRequest(BaseModel):
-    enabled: bool
-
-@router.post("/api/market-status/simulation-override")
-def override_market_status(req: SimulationOverrideRequest):
-    new_status = set_simulation_override(req.enabled)
-    clock = get_market_clock()
-    return {
-        "success": True,
-        "simulation_override": new_status,
-        "effective_is_open": clock["is_open"],
-        "market_clock": clock
-    }
 
 
 @router.get("/api/audit")
@@ -233,17 +222,20 @@ def get_audit_trail():
 
 @router.get("/api/signals")
 def get_signals():
+    """Return live 24h market signals for every watched symbol."""
     client = _get_binance_client()
-    prices = client.get_watched_prices()
     signals = []
     for s in settings.WATCHED_SYMBOLS:
-        p_data = prices.get(s, {})
+        ticker = client.get_24hr_ticker(s) or {}
+        change = float(ticker.get("price_change_pct", 0.0) or 0.0)
         signals.append({
             "symbol": s,
-            "current_price": p_data.get("price", 0.0),
-            "change_24h": p_data.get("change_percent_24h", 0.0),
-            "volume_24h": p_data.get("volume_24h", 0.0),
-            "trend": "BULLISH" if p_data.get("change_percent_24h", 0.0) >= 0 else "BEARISH",
+            "current_price": float(ticker.get("last_price", 0.0) or 0.0),
+            "change_24h": change,
+            "volume_24h": float(ticker.get("quote_volume", 0.0) or 0.0),
+            "high_24h": float(ticker.get("high", 0.0) or 0.0),
+            "low_24h": float(ticker.get("low", 0.0) or 0.0),
+            "trend": "BULLISH" if change >= 0 else "BEARISH",
             "timestamp": datetime.now().isoformat()
         })
     return signals
@@ -271,7 +263,7 @@ def get_iv_data(symbol: str = "BTCUSDT"):
 
 @router.get("/api/postmortems")
 async def get_postmortems():
-    return await postmortem_store.get_all_postmortems()
+    return await postmortem_store.get_all()
 
 
 class InternalLogRequest(BaseModel):
@@ -363,7 +355,7 @@ async def get_exchange_positions():
                 "unrealized_plpc": 0.0,
                 "take_profit_price": round(cur_p * 1.04, 2),
                 "stop_loss_price": round(cur_p * 0.985, 2),
-                "strategy": "SPOT_LONG",
+                "strategy": "MASTER_ORDER_FLOW",
                 "order_type": "MARKET"
             }
     except Exception as e:
@@ -426,7 +418,9 @@ async def get_exchange_orders(limit: int = 50):
     client = _get_binance_client()
 
     try:
-        raw_orders = client.get_all_orders()
+        raw_orders: List[dict] = []
+        for watch_sym in settings.WATCHED_SYMBOLS:
+            raw_orders.extend(client.get_all_orders(watch_sym))
         for o in raw_orders[-limit:]:
             oid = str(o.get("order_id") or o.get("orderId"))
             seen_ids.add(oid)
@@ -480,7 +474,7 @@ async def cancel_exchange_order(order_id: str, symbol: Optional[str] = None):
     client = _get_binance_client()
     clean_sym = _normalize_symbol(symbol) if symbol else "BTCUSDT"
     try:
-        client.cancel_order(clean_sym, order_id)
+        client.cancel_order(clean_sym, int(order_id))
     except Exception as e:
         logger.debug(f"cancel_order error: {e}")
 
@@ -500,8 +494,8 @@ async def cancel_all_exchange_orders():
     cancelled_count = 0
     for sym in settings.WATCHED_SYMBOLS:
         try:
-            cancels = client.cancel_open_orders(sym)
-            cancelled_count += len(cancels)
+            result = client.cancel_all_orders(sym)
+            cancelled_count += len(result.get("cancelled_order_ids", []))
         except Exception:
             pass
 
@@ -713,7 +707,7 @@ async def submit_exchange_order(order_req: OrderSubmission):
         fill_price = current_price
 
         try:
-            kwargs = {"symbol": clean_sym, "side": side_upper, "order_type": "MARKET"}
+            kwargs: Dict[str, Any] = {"symbol": clean_sym, "side": side_upper, "order_type": "MARKET"}
             if order_req.quote_quantity and order_req.quote_quantity > 0:
                 kwargs["quote_quantity"] = order_req.quote_quantity
             else:
@@ -1048,7 +1042,7 @@ class AutoTradingStartRequest(BaseModel):
     interval: int = 30
 
 @router.post("/api/bot/auto-trading/start")
-def start_auto_trading(req: AutoTradingStartRequest = None):
+def start_auto_trading(req: Optional[AutoTradingStartRequest] = None):
     interval = req.interval if req else 30
     return auto_trader.start(interval=interval)
 

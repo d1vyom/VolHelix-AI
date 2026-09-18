@@ -5,7 +5,7 @@
 [![Next.js 16](https://img.shields.io/badge/Next.js-16.3-black.svg)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
 [![Binance Spot](https://img.shields.io/badge/Broker-Binance_Spot_Testnet-F0B90B.svg)](https://testnet.binance.vision/)
-[![Tests](https://img.shields.io/badge/Tests-84%2F84_Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-80%2F80_Passed-brightgreen.svg)]()
 
 > **Autonomous Multi-Agent Crypto Spot Volatility Trading Swarm with Dual-Mode Binance Architecture, Deterministic Zero-Hallucination Risk Gate & 24/7 Position Guardian** 
 
@@ -13,7 +13,9 @@
 
 ## 📸 Executive Terminal Dashboard
 
-![VolHelix AI Autonomous Trading Terminal](docs/assets/terminal_dashboard.png)
+> **Run it locally:** `python backend/main.py` then `cd frontend && npm run dev`, and open
+> `http://localhost:3000` (Classic Dashboard) or `http://localhost:3000/terminal` (Pro Order Flow Terminal).
+> To capture screenshots for this README, run `python scripts/capture_real_screenshot.py` with both servers up.
 
 ---
 
@@ -152,8 +154,7 @@ The Risk Gate has **ZERO LLM involvement** and cannot be overridden by prompt in
 - **Footprint Charting**: True price-bucketed buy/sell volume per bar, diagonal and stacked imbalances, and CVD/Delta calculations.
 - **Liquidity Heatmaps**: Visualizes resting liquidity and institutional "walls" directly from 100ms order book depth-diffs.
 - **Confluence Gating**: High frequency analytics augment the Master Strategy setup; stale streams result in an absolute hardware veto.
-![Order Flow Terminal](docs/assets/terminal_orderflow.png)
-![Liquidity Heatmap](docs/assets/terminal_heatmap.png)
+- **Panels**: Footprint clusters, DOM ladder, Time & Sales, liquidity heatmap, volume profile, CVD/delta and the flow metrics strip — all in a dockable, persisted workspace.
 
 ---
 

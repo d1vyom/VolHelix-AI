@@ -102,6 +102,23 @@ class LocalOrderBook:
             else:
                 self.asks[p] = q
 
+    def get_snapshot(self, levels: int = 20) -> BookSnapshot:
+        """Return a BookSnapshot object for the current book state."""
+        bids_src = self.bids if self.is_synced and settings.FLOW_USE_DIFF_DEPTH else self.partial_bids
+        asks_src = self.asks if self.is_synced and settings.FLOW_USE_DIFF_DEPTH else self.partial_asks
+        
+        sorted_bids = sorted(bids_src.items(), key=lambda x: x[0], reverse=True)[:levels]
+        sorted_asks = sorted(asks_src.items(), key=lambda x: x[0])[:levels]
+        
+        return BookSnapshot(
+            symbol=self.symbol,
+            last_update_id=self.last_update_id or 0,
+            bids=[[p, q] for p, q in sorted_bids],
+            asks=[[p, q] for p, q in sorted_asks],
+            ts=int(time.time() * 1000),
+            source="MAINTAINED"
+        )
+
     def get_ladder(self, levels: int = 20, tick_group_multiplier: float = 1.0) -> list[LadderLevel]:
         """Project the book into a ladder."""
         bucket_size = self.tick_size * tick_group_multiplier

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, List
+from typing import Any, Optional, List
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -18,24 +18,14 @@ class Trend(str, Enum):
 
 
 class StrategyType(str, Enum):
+    """VolHelix executes exactly one strategy: the Master Order Flow confluence setup.
+
+    ``CASH`` is retained as the explicit risk-off state (hold USDT, place no order)
+    rather than as a competing strategy.
+    """
+
     MASTER_ORDER_FLOW = "MASTER_ORDER_FLOW"
-    SPOT_LONG = "SPOT_LONG"
-    SPOT_SHORT = "SPOT_SHORT"          # Sell existing holdings
-    DCA_BUY = "DCA_BUY"               # Dollar-cost average buy
-    BREAKOUT_LONG = "BREAKOUT_LONG"    # Buy on breakout
-    MEAN_REVERSION = "MEAN_REVERSION"  # Buy dip / sell rip
-    MOMENTUM = "MOMENTUM"             # Follow trend
     CASH = "CASH"                      # Hold USDT, no trade
-    
-    # Backward compatibility and strategy aliases
-    VOL_BREAKOUT = "BREAKOUT_LONG"
-    MOMENTUM_EXPANSION = "MOMENTUM"
-    BULL_PUT_SPREAD = "SPOT_LONG"
-    BEAR_CALL_SPREAD = "SPOT_SHORT"
-    IRON_CONDOR = "MEAN_REVERSION"
-    LONG_STRADDLE = "BREAKOUT_LONG"
-    CALENDAR_SPREAD = "DCA_BUY"
-    PROTECTIVE_PUT = "CASH"
 
 
 class TradeStatus(str, Enum):
@@ -102,7 +92,7 @@ class MarketSignal(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def sync_symbol_and_underlying(cls, data: any):
+    def sync_symbol_and_underlying(cls, data: Any):
         if isinstance(data, dict):
             if "symbol" in data and not data.get("underlying"):
                 data["underlying"] = data["symbol"]

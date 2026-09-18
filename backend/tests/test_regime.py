@@ -48,25 +48,19 @@ def test_detect_squeeze_logic():
     wide_prices = [50000.0 * (1.1 ** (i % 5)) for i in range(25)]
     assert detect_squeeze(wide_prices) is False
 
-def test_strategy_bias_returns_correct_mappings():
-    bias_low = get_strategy_bias(Regime.LOW_VOL)
-    assert StrategyType.SPOT_LONG in bias_low["strategies"]
-    assert bias_low["size_mod"] == 1.0
+def test_strategy_bias_recommends_only_the_master_strategy():
+    # VolHelix trades one strategy; only the regime size modifier varies.
+    for regime, size_mod in (
+        (Regime.LOW_VOL, 1.0),
+        (Regime.NORMAL, 1.0),
+        (Regime.ELEVATED, 0.75),
+        (Regime.SQUEEZE, 0.50),
+    ):
+        bias = get_strategy_bias(regime)
+        assert bias["strategies"] == [StrategyType.MASTER_ORDER_FLOW]
+        assert bias["size_mod"] == size_mod
 
-    bias_normal = get_strategy_bias(Regime.NORMAL)
-    assert StrategyType.MASTER_ORDER_FLOW in bias_normal["strategies"]
-    assert StrategyType.SPOT_LONG in bias_normal["strategies"]
-    assert bias_normal["size_mod"] == 1.0
-
-    bias_elevated = get_strategy_bias(Regime.ELEVATED)
-    assert StrategyType.MEAN_REVERSION in bias_elevated["strategies"]
-    assert bias_elevated["size_mod"] == 0.75
-
-    bias_squeeze = get_strategy_bias(Regime.SQUEEZE)
-    assert StrategyType.BREAKOUT_LONG in bias_squeeze["strategies"]
-    assert bias_squeeze["size_mod"] == 0.50
-
+    # CRISIS is the sole risk-off state: stand aside in CASH at reduced size.
     bias_crisis = get_strategy_bias(Regime.CRISIS)
-    assert StrategyType.CASH in bias_crisis["strategies"]
-    assert StrategyType.SPOT_SHORT in bias_crisis["strategies"]
+    assert bias_crisis["strategies"] == [StrategyType.CASH]
     assert bias_crisis["size_mod"] == 0.25

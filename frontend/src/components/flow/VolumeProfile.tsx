@@ -94,13 +94,13 @@ function ProfileSVG({ profile, width, height }: { profile: VolumeProfileSnapshot
       )}
 
       {/* Levels */}
-      {sortedLevels.map((lvl) => {
+      {sortedLevels.map((lvl, levelIdx) => {
         const y = getY(lvl.price);
         const buyW = lvl.buy_volume * wScaling;
         const sellW = lvl.sell_volume * wScaling;
         
         return (
-          <g key={lvl.price}>
+          <g key={`${lvl.price}-${levelIdx}`}>
             {/* Sell Volume (Red) */}
             <rect
               x={0}

@@ -1,6 +1,7 @@
 import uuid
-from typing import List, Optional
+from typing import List, Optional, cast
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.runnables import Runnable
 from pydantic import BaseModel, Field
 
 from backend.config import settings
@@ -30,7 +31,10 @@ class StrategySynthesizerAgent:
             google_api_key=settings.GOOGLE_API_KEY,
             temperature=0.3
         )
-        self.structured_llm = self.llm.with_structured_output(StrategySelection)
+        self.structured_llm = cast(
+            Runnable[str, StrategySelection],
+            self.llm.with_structured_output(StrategySelection)
+        )
         
     def synthesize(self, signal: MarketSignal, risk: RiskFlags, option_chain=None) -> List[TradeProposal]:
         symbol = signal.symbol or signal.underlying or "BTCUSDT"
@@ -55,7 +59,7 @@ class StrategySynthesizerAgent:
         """
         
         try:
-            selection = self.structured_llm.invoke(prompt)
+            selection: StrategySelection = self.structured_llm.invoke(prompt)
             strat_type = selection.strategy_type
             thesis = selection.reasoning
         except Exception as e:
@@ -96,9 +100,9 @@ class StrategySynthesizerAgent:
         max_loss = round((current_price - sl_price) * qty, 2)
         ev = round(max_profit * 0.65 - max_loss * 0.35, 2)
         
-        side = "BUY"
-        if strat_type == StrategyType.SPOT_SHORT or strat_type == StrategyType.CASH:
-            side = "SELL"
+        # VolHelix trades a single strategy, so the synthesized proposal is always the
+        # Master Flow setup on the BUY side; CASH simply stands aside into USDT.
+        side = "SELL" if strat_type == StrategyType.CASH else "BUY"
             
         proposal = TradeProposal(
             id=f"PROP-{uuid.uuid4().hex[:8].upper()}",

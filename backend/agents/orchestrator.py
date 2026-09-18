@@ -1,6 +1,6 @@
 import asyncio
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, cast
 from langgraph.graph import StateGraph, END
 from typing_extensions import TypedDict
 
@@ -121,8 +121,10 @@ class TradingOrchestrator:
         if not proposals:
             logger.warning(f"[{state['underlying']}] No proposals generated for debate.")
             result = DebateResult(
+                proposal_id="",
                 winning_proposal_id="",
                 consensus_reached=False,
+                consensus_score=0.0,
                 summary="No valid proposals generated to debate.",
                 votes=[]
             )
@@ -212,6 +214,6 @@ class TradingOrchestrator:
             "market_data": market_data
         }
         
-        result = self.graph.invoke(initial_state)
+        result = self.graph.invoke(cast(TradingState, initial_state))
         print(f"\nCycle Complete for {underlying}. Result state keys: {result.keys()}\n")
         return result

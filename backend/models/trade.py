@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, model_validator
-from typing import Optional, List
+from typing import Any, Optional, List
 
 from backend.models.market import StrategyType, TradeStatus, OrderType, OrderSide, OptionLeg
 
@@ -39,7 +39,7 @@ class TradeProposal(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def sync_symbol_and_underlying(cls, data: any):
+    def sync_symbol_and_underlying(cls, data: Any):
         if isinstance(data, dict):
             if "symbol" in data and not data.get("underlying"):
                 data["underlying"] = data["symbol"]

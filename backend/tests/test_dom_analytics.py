@@ -6,8 +6,8 @@ from backend.marketdata.models import BookSnapshot
 def test_dom_engine_walls_and_imbalance():
     engine = DomEngine("BTCUSDT", 1.0)
     
-    bids = [(100.0, 10.0), (99.0, 10.0), (90.0, 500.0)] # 90 is a wall
-    asks = [(101.0, 10.0), (102.0, 10.0), (110.0, 10.0)]
+    bids = [[100.0, 10.0], [99.0, 10.0], [90.0, 500.0]] # 90 is a wall
+    asks = [[101.0, 10.0], [102.0, 10.0], [110.0, 10.0]]
     
     book = BookSnapshot(
         symbol="BTCUSDT",

@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+from typing import Optional
 from backend.utils.logger import get_logger
 
 logger = get_logger("iv_calculator")
@@ -28,7 +29,7 @@ def calculate_iv_percentile(current_iv: float, historical_ivs: list[float]) -> f
     days_lower = sum(1 for iv in historical_ivs if iv < current_iv)
     return days_lower / len(historical_ivs)
 
-def store_iv_snapshot(underlying: str, iv: float, date: str = None):
+def store_iv_snapshot(underlying: str, iv: float, date: Optional[str] = None):
     """Store daily IV snapshot for future rank/percentile calculations."""
     os.makedirs(IV_HISTORY_DIR, exist_ok=True)
     file_path = os.path.join(IV_HISTORY_DIR, f"{underlying}.json")

@@ -1,7 +1,8 @@
 import numpy as np
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, cast
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.runnables import Runnable
 from pydantic import BaseModel, Field
 
 from backend.config import settings
@@ -32,7 +33,10 @@ class MarketIntelAgent:
             google_api_key=settings.GOOGLE_API_KEY,
             temperature=0.2
         )
-        self.structured_llm = self.llm.with_structured_output(ThesisResponse)
+        self.structured_llm = cast(
+            Runnable[str, ThesisResponse],
+            self.llm.with_structured_output(ThesisResponse)
+        )
         
     def generate_signals(self, market_data: Optional[Dict] = None, target_symbol: Optional[str] = None) -> List[MarketSignal]:
         """
@@ -89,7 +93,7 @@ class MarketIntelAgent:
                     """
                     
                     try:
-                        response = self.structured_llm.invoke(prompt)
+                        response: ThesisResponse = self.structured_llm.invoke(prompt)
                         thesis = response.thesis
                         confidence = response.confidence
                     except Exception as e:

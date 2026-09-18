@@ -5,6 +5,7 @@ import random
 from typing import Callable, Any, Dict, List, Set
 from loguru import logger
 import websockets
+from websockets.asyncio.client import ClientConnection
 from backend.config import settings
 
 class ConnectionChunk:
@@ -15,7 +16,7 @@ class ConnectionChunk:
         self.trigger_resync = trigger_resync
         self.running = False
         self.task: asyncio.Task | None = None
-        self.ws: websockets.WebSocketClientProtocol | None = None
+        self.ws: ClientConnection | None = None
         self.reconnects = 0
 
     async def start(self):

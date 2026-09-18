@@ -29,7 +29,6 @@ TapeRow.displayName = "TapeRow";
 
 export function TimeAndSales({ symbol }: { symbol: string }) {
   const state = useFlowStore();
-  const tape = state.tape || [];
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);

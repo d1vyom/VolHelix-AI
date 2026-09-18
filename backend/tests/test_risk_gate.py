@@ -7,7 +7,7 @@ def test_risk_gate_approves_valid_crypto_proposal(base_portfolio, sample_crypto_
     gate = CryptoRiskGate()
     result = gate.evaluate(sample_crypto_proposal, base_portfolio)
     assert result.approved is True
-    assert "All 10 checks passed" in result.reason
+    assert "All 10 checks passed" in (result.reason or "")
     assert result.checks["capital_limit"].passed is True
     assert result.checks["stop_loss"].passed is True
     assert result.checks["take_profit"].passed is True
@@ -21,7 +21,7 @@ def test_risk_gate_rejects_exceeding_capital_limit(base_portfolio, sample_crypto
     result = gate.evaluate(sample_crypto_proposal, base_portfolio)
     assert result.approved is False
     assert result.checks["capital_limit"].passed is False
-    assert "capital_limit" in result.reason
+    assert "capital_limit" in (result.reason or "")
 
 def test_risk_gate_rejects_missing_stop_loss(base_portfolio, sample_crypto_proposal):
     gate = CryptoRiskGate()

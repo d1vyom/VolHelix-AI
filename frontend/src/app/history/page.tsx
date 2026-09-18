@@ -25,99 +25,10 @@ function TradeHistoryContent() {
     setIsRefreshing(true);
     try {
       const data = await getTrades();
-      if (Array.isArray(data) && data.length > 0) {
-        setTrades(data);
-      } else {
-        setTrades((prev) => prev.length > 0 ? prev : ([
-          {
-            trade_id: "TRD-20260917-BTC-01",
-            status: "TAKE_PROFIT",
-            realized_pnl: 340.0,
-            entry_time: "2026-09-17T10:15:00Z",
-            exit_time: "2026-09-17T13:45:00Z",
-            entry_price: 63250.0,
-            take_profit_price: 64500.0,
-            stop_loss_price: 62400.0,
-            proposal: {
-              id: "TRD-20260917-BTC-01",
-              underlying: "BTCUSDT",
-              strategy_type: "VOL_BREAKOUT",
-              regime_at_entry: "NORMAL",
-              legs: [],
-              is_credit: false,
-              net_premium: 63250.0,
-              max_profit: 440.0,
-              max_loss: 200.0,
-              breakevens: [63250.0],
-              net_delta: 1.0,
-              net_theta: 0,
-              net_vega: 0,
-              dte: 0,
-              ev: 18.5,
-              thesis: "Volatility Breakout with Order Book Imbalance Confirmation",
-            },
-          },
-          {
-            trade_id: "TRD-20260916-ETH-02",
-            status: "CLOSED",
-            realized_pnl: 280.0,
-            entry_time: "2026-09-16T11:00:00Z",
-            exit_time: "2026-09-16T15:30:00Z",
-            entry_price: 3420.0,
-            take_profit_price: 3550.0,
-            stop_loss_price: 3350.0,
-            proposal: {
-              id: "TRD-20260916-ETH-02",
-              underlying: "ETHUSDT",
-              strategy_type: "MEAN_REVERSION",
-              regime_at_entry: "LOW_VOL",
-              legs: [],
-              is_credit: false,
-              net_premium: 3420.0,
-              max_profit: 350.0,
-              max_loss: 150.0,
-              breakevens: [3420.0],
-              net_delta: 1.0,
-              net_theta: 0,
-              net_vega: 0,
-              dte: 0,
-              ev: 15.0,
-              thesis: "Low Vol Squeeze Boundary Reversion to 200 EMA",
-            },
-          },
-          {
-            trade_id: "TRD-20260915-SOL-03",
-            status: "STOPPED_OUT",
-            realized_pnl: -110.0,
-            entry_time: "2026-09-15T14:30:00Z",
-            exit_time: "2026-09-15T16:00:00Z",
-            entry_price: 148.5,
-            take_profit_price: 158.0,
-            stop_loss_price: 144.0,
-            proposal: {
-              id: "TRD-20260915-SOL-03",
-              underlying: "SOLUSDT",
-              strategy_type: "MOMENTUM_EXPANSION",
-              regime_at_entry: "ELEVATED",
-              legs: [],
-              is_credit: false,
-              net_premium: 148.5,
-              max_profit: 320.0,
-              max_loss: 120.0,
-              breakevens: [148.5],
-              net_delta: 1.0,
-              net_theta: 0,
-              net_vega: 0,
-              dte: 0,
-              ev: -5.0,
-              thesis: "Elevated Vol Momentum Breakout stopped at dynamic ATR threshold",
-            },
-          },
-        ] as unknown as TradeRecord[]));
-      }
+      setTrades(Array.isArray(data) ? data : []);
       setLastUpdated(new Date().toLocaleTimeString());
     } catch {
-      // keep existing
+      // Keep the last known ledger on a transient fetch failure.
     } finally {
       setIsRefreshing(false);
     }
@@ -154,63 +65,48 @@ function TradeHistoryContent() {
 
   const stats = useMemo(() => {
     const total = trades.length;
-    const wins = trades.filter((t) => (t.realized_pnl || 0) > 0 || t.status === "TAKE_PROFIT" || t.status === "CLOSED");
-    const losses = trades.filter((t) => (t.realized_pnl || 0) < 0 || t.status === "STOPPED_OUT");
+    const wins = trades.filter((t) => (t.realized_pnl || 0) > 0);
+    const losses = trades.filter((t) => (t.realized_pnl || 0) < 0);
     const totalPnL = trades.reduce((sum, t) => sum + (t.realized_pnl || 0), 0);
-    const winRate = total > 0 ? (wins.length / total) * 100 : 75.0;
+    const winRate = total > 0 ? (wins.length / total) * 100 : 0;
     const grossProfit = wins.reduce((sum, t) => sum + Math.max(0, t.realized_pnl || 0), 0);
     const grossLoss = Math.abs(losses.reduce((sum, t) => sum + Math.min(0, t.realized_pnl || 0), 0));
-    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 99.9 : 2.85;
+    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 99.9 : 0;
 
     return {
       total,
       wins: wins.length,
       losses: losses.length,
       totalPnL,
-      winRate: Math.max(winRate, 66.7),
-      profitFactor: Math.max(profitFactor, 2.45),
-      avgWin: wins.length > 0 && grossProfit > 0 ? grossProfit / wins.length : 340,
-      avgLoss: losses.length > 0 && grossLoss > 0 ? grossLoss / losses.length : 160,
+      winRate,
+      profitFactor,
+      avgWin: wins.length > 0 ? grossProfit / wins.length : 0,
+      avgLoss: losses.length > 0 ? grossLoss / losses.length : 0,
     };
   }, [trades]);
 
-  // Dynamically compute Quantitative Analytics from actual trades
+  // Quantitative analytics computed from real ledger rows only.
   const strategyChartData = useMemo(() => {
     const groups: Record<string, { total: number; wins: number; pnl: number }> = {};
     trades.forEach((t) => {
-      const rawType = t.proposal?.strategy_type || "VOL_BREAKOUT";
-      const name = rawType
-        .replace("VOL_BREAKOUT", "Vol Breakout")
-        .replace("MOMENTUM_EXPANSION", "Momentum Exp")
-        .replace("MEAN_REVERSION", "Mean Reversion")
-        .replace("SQUEEZE_SCALP", "Squeeze Scalp")
-        .replace("VWAP_TREND", "VWAP Trend")
-        .replace("MASTER_ORDER_FLOW", "Master Flow");
+      const rawType = t.proposal?.strategy_type || "UNCLASSIFIED";
+      const name = rawType === "MASTER_ORDER_FLOW" ? "Master Flow" : rawType.replace(/_/g, " ");
       if (!groups[name]) {
         groups[name] = { total: 0, wins: 0, pnl: 0 };
       }
       groups[name].total += 1;
-      if ((t.realized_pnl || 0) > 0 || t.status === "TAKE_PROFIT") {
+      if ((t.realized_pnl || 0) > 0) {
         groups[name].wins += 1;
       }
       groups[name].pnl += (t.realized_pnl || 0);
     });
 
-    const rows = Object.entries(groups).map(([strategy, data]) => ({
+    return Object.entries(groups).map(([strategy, data]) => ({
       strategy,
       winRate: data.total > 0 ? Math.round((data.wins / data.total) * 100) : 0,
       trades: data.total,
       pnl: Math.round(data.pnl),
     }));
-
-    if (rows.length === 0) {
-      return [
-        { strategy: "Vol Breakout", winRate: 100, trades: 1, pnl: 340 },
-        { strategy: "Mean Reversion", winRate: 75, trades: 4, pnl: 480 },
-        { strategy: "Momentum Exp", winRate: 67, trades: 3, pnl: 210 },
-      ];
-    }
-    return rows;
   }, [trades]);
 
   return (
@@ -225,7 +121,7 @@ function TradeHistoryContent() {
           Crypto Spot Trade Ledger & Quantitative Analytics
         </h1>
         <p className="text-xs text-[#848e9c] font-mono mt-1">
-          Real-time Binance Testnet spot execution logs, win rate distribution & dynamic analytics
+          Real-time Binance Testnet spot execution logs from the VolHelix Master Flow strategy
         </p>
         </div>
 
@@ -293,7 +189,7 @@ function TradeHistoryContent() {
             <span className="text-[#f6465d] text-lg">-${stats.avgLoss.toFixed(0)}</span>
           </div>
           <div className="text-[11px] font-mono text-[#848e9c] mt-2">
-            Payoff Ratio: {(stats.avgLoss > 0 ? stats.avgWin / stats.avgLoss : 2.5).toFixed(2)}x
+            Payoff Ratio: {(stats.avgLoss > 0 ? stats.avgWin / stats.avgLoss : 0).toFixed(2)}x
           </div>
         </div>
       </div>
@@ -309,10 +205,10 @@ function TradeHistoryContent() {
           <div>
             <h3 className="font-semibold text-[#eaecef] flex items-center gap-2 text-base">
               <TrendingUp className="w-4 h-4 text-[#f0b90b]" />
-              Strategy Win Rate & Alpha Distribution
+              Master Flow Win Rate & Alpha Distribution
             </h3>
             <p className="text-xs font-mono text-[#848e9c] mt-0.5">
-              Historical win rates across crypto algorithmic volatility strategies
+              Historical win rate across executed Master Strategy positions
             </p>
           </div>
           <span className="px-2.5 py-1 rounded-lg bg-[#f0b90b]/15 text-[#f0b90b] border border-[#f0b90b]/30 text-xs font-mono font-bold">
@@ -320,26 +216,32 @@ function TradeHistoryContent() {
           </span>
         </div>
 
-        <div className="h-60 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <RechartsBarChart data={strategyChartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#23272e" vertical={false} />
-              <XAxis dataKey="strategy" stroke="#5e6673" fontSize={11} tickLine={false} axisLine={false} />
-              <YAxis domain={[0, 100]} stroke="#5e6673" fontSize={11} tickFormatter={(v) => `${v}%`} tickLine={false} axisLine={false} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#181a20",
-                  border: "1px solid #2b313a",
-                  borderRadius: "8px",
-                  fontFamily: "monospace",
-                  fontSize: "12px",
-                }}
-                labelStyle={{ color: "#f0b90b", fontWeight: 700 }}
-              />
-              <Bar dataKey="winRate" name="Win Rate %" fill="#f0b90b" radius={[6, 6, 0, 0]} />
-            </RechartsBarChart>
-          </ResponsiveContainer>
-        </div>
+        {strategyChartData.length === 0 ? (
+          <div className="h-60 w-full flex items-center justify-center text-xs font-mono text-[#848e9c] border border-dashed border-[#2b313a] rounded-xl">
+            No executed trades yet — analytics populate after the first closed position.
+          </div>
+        ) : (
+          <div className="h-60 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <RechartsBarChart data={strategyChartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#23272e" vertical={false} />
+                <XAxis dataKey="strategy" stroke="#5e6673" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis domain={[0, 100]} stroke="#5e6673" fontSize={11} tickFormatter={(v) => `${v}%`} tickLine={false} axisLine={false} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#181a20",
+                    border: "1px solid #2b313a",
+                    borderRadius: "8px",
+                    fontFamily: "monospace",
+                    fontSize: "12px",
+                  }}
+                  labelStyle={{ color: "#f0b90b", fontWeight: 700 }}
+                />
+                <Bar dataKey="winRate" name="Win Rate %" fill="#f0b90b" radius={[6, 6, 0, 0]} />
+              </RechartsBarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </motion.div>
 
       {/* Filter & Trade Table Section */}
@@ -393,6 +295,14 @@ function TradeHistoryContent() {
               </tr>
             </thead>
             <tbody>
+              {filteredTrades.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="py-10 text-center text-[#848e9c]">
+                    No trades match this filter. The ledger fills as soon as the Master Strategy opens a position.
+                  </td>
+                </tr>
+              )}
+
               {filteredTrades.map((t) => {
                 const pnl = t.realized_pnl || 0;
                 const tp = t.take_profit_price || t.proposal?.take_profit;
@@ -406,13 +316,13 @@ function TradeHistoryContent() {
                     </td>
                     <td className="py-3.5 px-3 font-bold text-[#f0b90b]">{t.proposal?.underlying || "BTCUSDT"}</td>
                     <td className="py-3.5 px-3 text-[#eaecef]">
-                      {t.proposal?.strategy_type === "VOL_BREAKOUT" ? (
+                      {t.proposal?.strategy_type === "MASTER_ORDER_FLOW" ? (
                         <span className="inline-flex items-center gap-1.5 font-bold text-[#f0b90b] bg-[#f0b90b]/10 px-2 py-0.5 rounded border border-[#f0b90b]/30">
                           <span className="w-1.5 h-1.5 rounded-full bg-[#f0b90b] animate-pulse" />
-                          Vol Breakout
+                          Master Flow
                         </span>
                       ) : (
-                        t.proposal?.strategy_type?.replace(/_/g, " ") || "SPOT TRADE"
+                        t.proposal?.strategy_type?.replace(/_/g, " ") || "—"
                       )}
                     </td>
                     <td className="py-3.5 px-3 text-[11px]">

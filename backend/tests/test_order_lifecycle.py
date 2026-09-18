@@ -3,35 +3,29 @@ import asyncio
 from backend.models.market import TradeStatus, StrategyType, OrderType
 from backend.models.trade import TradeProposal, TradeRecord
 from backend.store.trade_log import trade_log
-from backend.utils.market_hours import get_market_clock, is_market_open, set_simulation_override
+from backend.utils.market_hours import get_market_clock, is_market_open
 from fastapi.testclient import TestClient
 from backend.main import fastapi_app
 
 client = TestClient(fastapi_app)
 
-def test_market_hours_and_simulation():
+def test_market_clock_reports_continuous_session():
     asyncio.run(trade_log.init_db())
 
-    # Test default clock info (24/7 continuous crypto session)
-    set_simulation_override(False)
+    # Crypto trades 24/7: the clock is informational and never gates execution.
     clock = get_market_clock()
     assert clock["is_open"] is True
     assert "current_time_et" in clock
+    assert clock["market"] == "CRYPTO_24_7"
     assert "24/7" in clock.get("reason", "")
-
-    # Test simulation override
-    set_simulation_override(True)
     assert is_market_open() is True
-    clock_overridden = get_market_clock()
-    assert clock_overridden["is_open"] is True
-    assert clock_overridden["simulation_active"] is True
 
-    # Reset
-    set_simulation_override(False)
+    # No equity-era session override exists any more.
+    assert "simulation_active" not in clock
+    assert "simulation_override" not in clock
 
 def test_order_lifecycle_market_and_limit():
     asyncio.run(trade_log.init_db())
-    set_simulation_override(True)  # Allow trading for test
 
     test_sym = "SOLUSDT"
     lmt_sym = "BNBUSDT"
@@ -115,9 +109,7 @@ def test_order_lifecycle_market_and_limit():
 
 def test_crypto_continuous_session_active():
     asyncio.run(trade_log.init_db())
-    set_simulation_override(False)
 
     clock = get_market_clock()
     assert clock["is_open"] is True
-    assert clock["raw_is_open"] is True
     assert "24/7" in clock.get("reason", "")

@@ -1,10 +1,10 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useMemo } from "react";
 import { useFlowStore } from "@/lib/flow/useFlowStore";
 import { PanelFrame } from "./PanelFrame";
 
 export function LiquidityHeatmap({ symbol }: { symbol: string }) {
   const state = useFlowStore();
-  const heatmapFrames = state.heatmapFrames || [];
+  const heatmapFrames = useMemo(() => state.heatmapFrames || [], [state.heatmapFrames]);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -110,7 +110,7 @@ export function LiquidityHeatmap({ symbol }: { symbol: string }) {
       ctx.stroke();
     }
     
-  }, [state.heatmapFrames, dimensions, state.metrics?.price]);
+  }, [heatmapFrames, dimensions, state.metrics?.price]);
 
   return (
     <PanelFrame title="Liquidity Heatmap" symbol={symbol} health={state.health}>

@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { useFlowSocket } from "@/lib/flow/useFlowSocket";
-import { WorkspaceGrid } from "@/components/flow/WorkspaceGrid";
+import dynamic from "next/dynamic";
+
+const WorkspaceGrid = dynamic(() => import("@/components/flow/WorkspaceGrid").then(mod => mod.WorkspaceGrid), { ssr: false });
 
 export default function TerminalPage() {
   const [symbol, setSymbol] = useState("BTCUSDT");

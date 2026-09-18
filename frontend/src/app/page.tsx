@@ -32,7 +32,6 @@ import {
   cancelAllExchangeOrders,
   fillPendingTrade,
   getMarketStatus,
-  setMarketSimulationOverride,
   getTradeHistory,
   executeBotTrade,
   getOrderFlowAnalytics,
@@ -60,6 +59,10 @@ interface AgentLog {
 }
 
 type DockTab = "positions" | "pending" | "orders" | "debate" | "riskgate" | "history";
+
+// VolHelix trades exactly one strategy: the Master Order Flow confluence gate
+// (order blocks + fair value gaps + gamma walls). Regime changes only scale size.
+const MASTER_STRATEGY = "MASTER_ORDER_FLOW";
 
 interface OrderBookProps {
   quote: ExchangeQuote;
@@ -221,7 +224,6 @@ export default function BybitTradingTerminal() {
   const [orderType, setOrderType] = useState<"market" | "limit">("market");
   const [limitPrice, setLimitPrice] = useState<number>(76500.0);
   const [orderQty, setOrderQty] = useState(0.002);
-  const [selectedStrategy, setSelectedStrategy] = useState("MASTER_ORDER_FLOW");
   const [orderFlow, setOrderFlow] = useState<OrderFlowData | null>(null);
   const [autoTrading, setAutoTrading] = useState<AutoTradingStatus | null>(null);
   const [isTogglingAuto, setIsTogglingAuto] = useState(false);
@@ -463,9 +465,22 @@ export default function BybitTradingTerminal() {
       }
     }, 1500);
 
+    const barsInterval = setInterval(async () => {
+      if (!isMounted) return;
+      try {
+        const b = await getExchangeBars(selectedTicker, chartInterval);
+        if (isMounted && b && b.length > 0) {
+          setBars(b);
+        }
+      } catch {
+        // ignore
+      }
+    }, 5000);
+
     return () => {
       isMounted = false;
       clearInterval(quoteInterval);
+      clearInterval(barsInterval);
     };
   }, [selectedTicker, chartInterval, loadMarketData]);
 
@@ -553,51 +568,13 @@ export default function BybitTradingTerminal() {
     }
   };
 
-  const handleToggleSimulationOverride = async (enable: boolean) => {
-    // 1. Optimistic state update: immediate 0ms visual feedback
-    setMarketClock((prev) =>
-      prev
-        ? {
-            ...prev,
-            simulation_active: enable,
-            simulation_override: enable,
-            is_open: enable ? true : prev.raw_is_open,
-          }
-        : null
-    );
-
-    // 2. Broadcast custom event to Header and listeners
-    window.dispatchEvent(new CustomEvent("volhelix:simulation-override", { detail: { enabled: enable } }));
-
-    try {
-      const res = await setMarketSimulationOverride(enable);
-      if (res && res.success) {
-        showToast(
-          enable
-            ? "Dev Sim Override Enabled: Paper trading unlocked outside market hours"
-            : "Dev Sim Disabled: Strict US market hours enforced"
-        );
-      }
-      await refreshAccountAndPositions();
-    } catch {
-      showToast("Failed to toggle simulation mode");
-      await refreshAccountAndPositions();
-    }
-  };
-
   const midPrice = quote.last || 574.85;
   const tickStep = midPrice > 1000 ? 5.0 : 0.05;
 
-  // Auto Take-Profit and Stop-Loss configuration calibrated by strategy
+  // Master Strategy execution fallbacks. The server anchors the final levels to
+  // order blocks, fair value gaps and gamma walls; these are the pre-trade preview.
   const tpSlConfig = useMemo(() => {
-    const map: Record<string, { tp: number; sl: number }> = {
-      MASTER_ORDER_FLOW: { tp: 0.040, sl: 0.018 },
-      BULL_PUT_SPREAD: { tp: 0.035, sl: 0.020 },
-      BEAR_CALL_SPREAD: { tp: 0.035, sl: 0.020 },
-      IRON_CONDOR: { tp: 0.025, sl: 0.020 },
-      CALENDAR_SPREAD: { tp: 0.040, sl: 0.025 },
-    };
-    const cfg = map[selectedStrategy] || { tp: 0.040, sl: 0.018 };
+    const cfg = { tp: 0.040, sl: 0.018 };
     const tpPrice = midPrice * (1 + cfg.tp);
     const slPrice = midPrice * (1 - cfg.sl);
     return {
@@ -608,21 +585,15 @@ export default function BybitTradingTerminal() {
       tpPrice,
       slPrice,
     };
-  }, [selectedStrategy, midPrice]);
+  }, [midPrice]);
 
   const handleBotTrade = async () => {
-    const isSimActive = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
-    if (!marketClock?.is_open && !isSimActive) {
-      showToast("Market Closed! Trades only executable when US markets are open (09:30-16:00 ET). Enable Dev Sim to test.");
-      return;
-    }
-
     setIsSubmitting(true);
     try {
       const cleanSym = selectedTicker;
       const res = await executeBotTrade(
         cleanSym,
-        selectedStrategy,
+        MASTER_STRATEGY,
         kellyPercent / 100,
         tpSlConfig.tpRatio,
         tpSlConfig.slRatio
@@ -1307,7 +1278,7 @@ export default function BybitTradingTerminal() {
                             const isWin = pnl >= 0;
                             const tradeId = t.trade_id || t.id || `TRD-REC-${idx}`;
                             const symbol = t.symbol || t.proposal?.underlying || "BTCUSDT";
-                            const strategy = t.strategy || t.proposal?.strategy_type || "VOL_BREAKOUT";
+                            const strategy = t.strategy || t.proposal?.strategy_type || MASTER_STRATEGY;
                             const side = t.side || t.proposal?.side || "BUY";
                             const qty = t.qty || t.proposal?.qty || 1;
                             const entryPrice = t.entry_price ?? t.proposal?.net_premium ?? t.proposal?.limit_price ?? 0;
@@ -1386,69 +1357,24 @@ export default function BybitTradingTerminal() {
                 <span className="text-[10px] text-[#20b26c] font-semibold">24/7 Risk Gate Armed</span>
               </div>
 
-              {/* Market Hours Gating & Dev Simulation Toggle */}
-              {(() => {
-                const isSimActive = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
-                const isRawOpen = Boolean(marketClock?.raw_is_open);
-                return (
-                  <div className="flex items-center justify-between p-2.5 rounded bg-[#121214] border border-[#26282f] text-xs">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`w-2.5 h-2.5 rounded-full ${
-                          isRawOpen
-                            ? "bg-[#20b26c] animate-pulse"
-                            : isSimActive
-                            ? "bg-[#f7a600] animate-pulse shadow-[0_0_8px_rgba(247,166,0,0.6)]"
-                            : "bg-[#ef454a]"
-                        }`}
-                      />
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`font-bold text-[11px] block leading-tight ${
-                              isRawOpen
-                                ? "text-[#20b26c]"
-                                : isSimActive
-                                ? "text-[#f7a600]"
-                                : "text-[#ef454a]"
-                            }`}
-                          >
-                            {isRawOpen
-                              ? "MARKET OPEN (09:30-16:00 ET)"
-                              : isSimActive
-                              ? "DEV SIM ACTIVE (HOURS BYPASSED)"
-                              : "MARKET CLOSED"}
-                          </span>
-                          {isSimActive && !isRawOpen && (
-                            <span className="px-1 py-0.2 rounded text-[8px] font-extrabold bg-[#f7a600]/20 text-[#f7a600] border border-[#f7a600]/50 uppercase">
-                              SIM
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[9px] text-[#878996] block mt-0.5">
-                          {isSimActive
-                            ? "Sim Override Active • Paper Execution Unlocked"
-                            : isRawOpen
-                            ? "Regular US Trading Session Active"
-                            : "Execution Gated until 09:30 ET • Enable Dev Sim to test"}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleSimulationOverride(!isSimActive)}
-                      className={`px-3 py-1.5 rounded text-[11px] font-bold border transition-all cursor-pointer select-none active:scale-95 ${
-                        isSimActive
-                          ? "bg-[#f7a600] border-[#f7a600] text-[#121214] font-black shadow-[0_0_12px_rgba(247,166,0,0.35)]"
-                          : "bg-[#1c1d22] border-[#26282f] text-[#878996] hover:text-[#f5f5f5] hover:border-[#383a42]"
-                      }`}
-                      title="Toggle Simulation Override to allow paper trading outside regular US market hours"
-                    >
-                      Dev Sim: {isSimActive ? "ON" : "OFF"}
-                    </button>
+              {/* Session Status — Binance Spot trades 24/7, execution is never gated */}
+              <div className="flex items-center justify-between p-2.5 rounded bg-[#121214] border border-[#26282f] text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#20b26c] animate-pulse" />
+                  <div>
+                    <span className="font-bold text-[11px] block leading-tight text-[#20b26c]">
+                      24/7 CONTINUOUS SESSION
+                    </span>
+                    <span className="text-[9px] text-[#878996] block mt-0.5">
+                      Continuous crypto liquidity • Execution always enabled
+                      {marketClock?.current_time_et ? ` • ${marketClock.current_time_et}` : ""}
+                    </span>
                   </div>
-                );
-              })()}
+                </div>
+                <span className="px-2 py-1 rounded text-[10px] font-bold bg-[#20b26c]/15 text-[#20b26c] border border-[#20b26c]/30">
+                  OPEN
+                </span>
+              </div>
             </div>
 
             {/* Trade Mode Selector */}
@@ -1635,51 +1561,38 @@ export default function BybitTradingTerminal() {
                 </div>
 
                 {/* Submit Manual Order */}
-                {(() => {
-                  const isSimActive = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
-                  const isBlocked = !marketClock?.is_open && !isSimActive;
-                  return (
-                    <button
-                      onClick={handleManualOrder}
-                      disabled={isSubmitting || isBlocked}
-                      className={`w-full py-2.5 rounded font-bold text-xs cursor-pointer transition-all shadow-lg active:scale-95 ${
-                        orderSide === "BUY"
-                          ? "bg-[#20b26c] hover:bg-[#28c97b] text-[#121214]"
-                          : "bg-[#ef454a] hover:bg-[#f35b5f] text-[#f5f5f5]"
-                      } disabled:opacity-50`}
-                    >
-                      {isSubmitting
-                        ? "Submitting..."
-                        : isBlocked
-                        ? "Market Closed (Enable Dev Sim to test)"
-                        : orderType === "market"
-                        ? `Execute Market ${orderSide} @ $${midPrice.toFixed(2)} (Instant Position)`
-                        : `Submit Limit ${orderSide} @ $${limitPrice.toFixed(2)} (To Pending Tab)`}
-                    </button>
-                  );
-                })()}
+                <button
+                  onClick={handleManualOrder}
+                  disabled={isSubmitting}
+                  className={`w-full py-2.5 rounded font-bold text-xs cursor-pointer transition-all shadow-lg active:scale-95 ${
+                    orderSide === "BUY"
+                      ? "bg-[#20b26c] hover:bg-[#28c97b] text-[#121214]"
+                      : "bg-[#ef454a] hover:bg-[#f35b5f] text-[#f5f5f5]"
+                  } disabled:opacity-50`}
+                >
+                  {isSubmitting
+                    ? "Submitting..."
+                    : orderType === "market"
+                    ? `Execute Market ${orderSide} @ $${midPrice.toFixed(2)} (Instant Position)`
+                    : `Submit Limit ${orderSide} @ $${limitPrice.toFixed(2)} (To Pending Tab)`}
+                </button>
               </div>
             ) : (
               <div className="space-y-2">
-                {/* Autonomous Strategy Select */}
+                {/* Active Strategy — VolHelix runs exactly one */}
                 <div className="space-y-0.5">
-                  <label className="text-[#878996] text-[10px] uppercase font-semibold">Autonomous Strategy</label>
-                  <select
-                    value={selectedStrategy}
-                    onChange={(e) => setSelectedStrategy(e.target.value)}
-                    className="w-full px-2 py-1 rounded bg-[#121214] border border-[#26282f] text-[#f7a600] text-xs focus:border-[#f7a600] outline-none font-semibold cursor-pointer"
+                  <label className="text-[#878996] text-[10px] uppercase font-semibold">Active Strategy</label>
+                  <div
+                    className="w-full px-2 py-1.5 rounded bg-[#1c1a14] border border-[#f7a600]/40 text-[#f7a600] text-xs font-semibold flex items-center justify-between"
+                    title="VolHelix executes a single strategy: institutional order block, fair value gap and gamma wall confluence"
                   >
-                    <option value="MASTER_ORDER_FLOW">★ VolHelix Master Flow & Gamma (OB + FVG + GEX)</option>
-                    <option value="BULL_PUT_SPREAD">Bull Put Spread (Credit)</option>
-                    <option value="IRON_CONDOR">Iron Condor (Delta-Neutral)</option>
-                    <option value="BEAR_CALL_SPREAD">Bear Call Spread (Credit)</option>
-                    <option value="CALENDAR_SPREAD">Calendar Spread (Volatility)</option>
-                  </select>
+                    <span>★ VolHelix Master Flow &amp; Gamma</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#f7a600]/20 font-mono">OB + FVG + GEX</span>
+                  </div>
                 </div>
 
                 {/* Institutional Master Flow & Gamma Profile Confluence Card */}
-                {selectedStrategy === "MASTER_ORDER_FLOW" && (
-                  <div className="p-2 rounded bg-[#1c1a14] border border-[#f7a600]/40 space-y-1 text-[11px]">
+                <div className="p-2 rounded bg-[#1c1a14] border border-[#f7a600]/40 space-y-1 text-[11px]">
                     <div className="flex items-center justify-between font-bold text-[#f7a600] text-[10px]">
                       <span className="flex items-center gap-1.5 uppercase">
                         <span className="w-1.5 h-1.5 rounded-full bg-[#f7a600] animate-ping" />
@@ -1711,7 +1624,6 @@ export default function BybitTradingTerminal() {
                       </div>
                     </div>
                   </div>
-                )}
 
                 {/* Kelly Fraction Sizing Slider */}
                 <div className="space-y-0.5">
@@ -1934,23 +1846,13 @@ export default function BybitTradingTerminal() {
                 </div>
 
                 {/* Trigger Bot Order to Binance */}
-                {(() => {
-                  const isSimActive = Boolean(marketClock?.simulation_override || marketClock?.simulation_active);
-                  const isBlocked = !marketClock?.is_open && !isSimActive;
-                  return (
-                    <button
-                      onClick={handleBotTrade}
-                      disabled={isSubmitting || isBlocked}
-                      className="w-full py-2 rounded bg-[#f7a600] hover:bg-[#ffb11a] text-[#121214] font-extrabold text-xs cursor-pointer transition-all shadow-[0_0_10px_rgba(247,166,0,0.3)] disabled:opacity-50 active:scale-95"
-                    >
-                      {isSubmitting
-                        ? "Executing Swarm..."
-                        : isBlocked
-                        ? "Market Closed (Enable Dev Sim to test)"
-                        : "Execute Master Strategy Trade (Binance)"}
-                    </button>
-                  );
-                })()}
+                <button
+                  onClick={handleBotTrade}
+                  disabled={isSubmitting}
+                  className="w-full py-2 rounded bg-[#f7a600] hover:bg-[#ffb11a] text-[#121214] font-extrabold text-xs cursor-pointer transition-all shadow-[0_0_10px_rgba(247,166,0,0.3)] disabled:opacity-50 active:scale-95"
+                >
+                  {isSubmitting ? "Executing Swarm..." : "Execute Master Strategy Trade (Binance)"}
+                </button>
               </div>
             )}
           </div>

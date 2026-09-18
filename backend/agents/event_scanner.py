@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import List, Dict
 from backend.config import settings
 from backend.models.market import RiskFlags
@@ -96,7 +96,7 @@ class EventScanner:
             size_modifier=size_modifier
         )
     
-    def _get_crypto_monthly_expiry(self, today) -> datetime.date:
+    def _get_crypto_monthly_expiry(self, today: date) -> date:
         """Deribit/CME crypto options monthly settlement (last Friday of the month)."""
         import calendar
         year = today.year

@@ -1,25 +1,8 @@
 export type Regime = "LOW_VOL" | "NORMAL" | "ELEVATED" | "SQUEEZE" | "CRISIS";
 export type Trend = "BULLISH" | "BEARISH" | "NEUTRAL";
-export type StrategyType =
-  | "MASTER_ORDER_FLOW"
-  | "SPOT_LONG"
-  | "SPOT_SHORT"
-  | "DCA_BUY"
-  | "BREAKOUT_LONG"
-  | "VOL_BREAKOUT"
-  | "MOMENTUM_EXPANSION"
-  | "SQUEEZE_SCALP"
-  | "VWAP_TREND"
-  | "MEAN_REVERSION"
-  | "MOMENTUM"
-  | "CASH"
-  | "BULL_PUT_SPREAD"
-  | "BEAR_CALL_SPREAD"
-  | "IRON_CONDOR"
-  | "LONG_STRADDLE"
-  | "CALENDAR_SPREAD"
-  | "PROTECTIVE_PUT"
-  | (string & {});
+// VolHelix executes exactly one strategy. CASH is the explicit risk-off state
+// (hold USDT, no order) rather than a competing strategy.
+export type StrategyType = "MASTER_ORDER_FLOW" | "CASH";
 
 export type TradeStatus = "PENDING" | "OPEN" | "CLOSED" | "STOPPED_OUT" | "TAKE_PROFIT" | "CANCELLED" | "FILLED" | string;
 export type OrderType = "MARKET" | "LIMIT";
@@ -115,12 +98,13 @@ export interface TradeRecord {
   timestamp?: string;
 }
 
+// Crypto trades 24/7: this clock is informational and never gates execution.
 export interface MarketClockStatus {
   is_open: boolean;
-  raw_is_open: boolean;
-  simulation_active: boolean;
-  simulation_override?: boolean;
   current_time_et: string;
+  current_time_utc?: string;
+  market?: string;
+  exchange?: string;
   next_open?: string;
   next_close?: string;
   reason: string;

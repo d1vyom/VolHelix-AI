@@ -1,8 +1,9 @@
 import json
 import os
 from datetime import datetime
-from typing import List
+from typing import List, cast
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.runnables import Runnable
 from pydantic import BaseModel, Field
 
 from backend.config import settings
@@ -29,7 +30,10 @@ class PostMortemAgent:
             google_api_key=settings.GOOGLE_API_KEY,
             temperature=0.4
         )
-        self.structured_llm = self.llm.with_structured_output(PostMortemResponse)
+        self.structured_llm = cast(
+            Runnable[str, PostMortemResponse],
+            self.llm.with_structured_output(PostMortemResponse)
+        )
         self._load_effectiveness_scores()
         
     def _load_effectiveness_scores(self):
@@ -87,11 +91,13 @@ class PostMortemAgent:
     def analyze(self, closed_trade: TradeRecord) -> PostMortem:
         logger.info(f"Running post-mortem on closed trade {closed_trade.trade_id}")
         
+        # TradeProposal does not persist the entry regime; default to UNKNOWN.
+        regime_at_entry = getattr(closed_trade.proposal, "regime_at_entry", None)
         prompt = f"""
         Analyze this closed options trade:
         - Underlying: {closed_trade.proposal.underlying}
         - Strategy: {closed_trade.proposal.strategy_type.value}
-        - Regime at Entry: {closed_trade.proposal.regime_at_entry.value if hasattr(closed_trade.proposal, 'regime_at_entry') else 'UNKNOWN'}
+        - Regime at Entry: {regime_at_entry.value if regime_at_entry is not None else 'UNKNOWN'}
         - Original Thesis: {closed_trade.proposal.thesis}
         - Expected Value at Entry: ${closed_trade.proposal.ev:.2f}
         - Actual Realized P&L: ${closed_trade.realized_pnl:.2f}
@@ -104,7 +110,7 @@ class PostMortemAgent:
         """
         
         try:
-            res = self.structured_llm.invoke(prompt)
+            res: PostMortemResponse = self.structured_llm.invoke(prompt)
             pnl_diff = closed_trade.realized_pnl - closed_trade.proposal.ev
             pm = PostMortem(
                 trade_id=closed_trade.trade_id,
@@ -117,7 +123,7 @@ class PostMortemAgent:
             )
             
             # Update effectiveness scores
-            regime = closed_trade.proposal.regime_at_entry.value if hasattr(closed_trade.proposal, 'regime_at_entry') else "UNKNOWN"
+            regime = regime_at_entry.value if regime_at_entry is not None else "UNKNOWN"
             strategy = closed_trade.proposal.strategy_type.value
             self._update_effectiveness(regime, strategy, res.strategy_score, pnl_diff)
             

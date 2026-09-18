@@ -75,14 +75,12 @@ def get_dom(symbol: str, levels: int = 20, tick_group: Optional[float] = None):
     cached = _get_cached(cache_key, ttl=0.25)
     if cached: return cached
     
-    # we need dom_analytics to compute from book
-    # we'll implement the call to dom_analytics engine here
-    from backend.engine.dom_analytics import DomAnalyticsEngine
-    engine = DomAnalyticsEngine(sym, tick_group or state["book"].tick_size)
-    trades_1m = [t for t in state["buffers"].trades if t.ts > time.time() * 1000 - 60000]
-    book_snap = state["book"].get_snapshot(levels) # dummy, we'll need a real snapshot
-    
-    res = engine.compute_analytics(book_snap, trades_1m)
+    analytics = hub.get_dom(sym, levels)
+    if analytics is None:
+        return {"success": False, "error": "Symbol not subscribed", "subscribed": False}
+
+    res = analytics.model_dump()
+    res["server_ts"] = int(time.time() * 1000)
     _set_cached(cache_key, res)
     return res
 
@@ -107,24 +105,88 @@ def get_heatmap(symbol: str, window_sec: Optional[int] = None, tick_group: Optio
     state = hub.get_state(sym)
     if not state:
         return {"success": False, "error": "Symbol not subscribed", "subscribed": False}
-        
-    # We should get this from heatmap_engine
-    return {"success": False, "error": "Not implemented completely yet", "subscribed": True}
+
+    cache_key = f"flow_heatmap_{sym}_{window_sec}_{tick_group}"
+    cached = _get_cached(cache_key, ttl=1.0)
+    if cached: return cached
+
+    snapshot = hub.get_heatmap_snapshot(sym)
+    if snapshot is None:
+        return {"success": False, "error": "Symbol not subscribed", "subscribed": False}
+
+    res = snapshot.model_dump()
+    res["server_ts"] = int(time.time() * 1000)
+    _set_cached(cache_key, res)
+    return res
 
 @router.get("/api/flow/volume-profile")
 def get_volume_profile(symbol: str, mode: str = "SESSION", start_ts: Optional[int] = None, end_ts: Optional[int] = None, tick_group: Optional[float] = None):
     check_flow_enabled()
-    return {"success": False, "error": "Not implemented completely yet"}
+    if mode not in ("SESSION", "VISIBLE", "FIXED_RANGE"):
+        raise HTTPException(status_code=422, detail=f"Invalid mode '{mode}'. Allowed: SESSION, VISIBLE, FIXED_RANGE")
+    sym = _normalize_symbol(symbol)
+    if not hub.get_state(sym):
+        return {"success": False, "error": "Symbol not subscribed", "subscribed": False}
+
+    cache_key = f"flow_profile_{sym}_{mode}_{start_ts}_{end_ts}_{tick_group}"
+    cached = _get_cached(cache_key, ttl=2.0)
+    if cached: return cached
+
+    snapshot = hub.get_volume_profile(sym, mode=mode, start_ts=start_ts, end_ts=end_ts, tick_group=tick_group)
+    if snapshot is None:
+        return {"success": False, "error": "Symbol not subscribed", "subscribed": False}
+
+    res = snapshot.model_dump()
+    res["server_ts"] = int(time.time() * 1000)
+    _set_cached(cache_key, res)
+    return res
 
 @router.get("/api/flow/cvd")
 def get_cvd(symbol: str, interval: str = "1m", limit: int = 240):
     check_flow_enabled()
-    return {"success": False, "error": "Not implemented completely yet"}
+    sym = _normalize_symbol(symbol)
+    state = hub.get_state(sym)
+    if not state:
+        return {"success": False, "error": "Symbol not subscribed", "subscribed": False}
+
+    cache_key = f"flow_cvd_{sym}_{interval}_{limit}"
+    cached = _get_cached(cache_key, ttl=1.0)
+    if cached: return cached
+
+    points = hub.get_cvd(sym, limit=limit)
+    metrics = hub.get_metrics(sym)
+    res = {
+        "symbol": sym,
+        "interval": interval,
+        "points": points,
+        "vwap": metrics.vwap if metrics else 0.0,
+        "vwap_upper_1": metrics.vwap_upper_1 if metrics else 0.0,
+        "vwap_lower_1": metrics.vwap_lower_1 if metrics else 0.0,
+        "server_ts": int(time.time() * 1000)
+    }
+    _set_cached(cache_key, res)
+    return res
 
 @router.get("/api/flow/metrics")
 def get_metrics(symbol: str):
     check_flow_enabled()
-    return {"success": False, "error": "Not implemented completely yet"}
+    sym = _normalize_symbol(symbol)
+    if not hub.get_state(sym):
+        return {"success": False, "error": "Symbol not subscribed", "subscribed": False}
+
+    cache_key = f"flow_metrics_{sym}"
+    cached = _get_cached(cache_key, ttl=1.0)
+    if cached: return cached
+
+    metrics = hub.get_metrics(sym)
+    if metrics is None:
+        return {"success": False, "error": "No metrics available yet", "subscribed": True}
+
+    res = metrics.model_dump()
+    res["success"] = True
+    res["server_ts"] = int(time.time() * 1000)
+    _set_cached(cache_key, res)
+    return res
 
 @router.post("/api/flow/subscribe")
 def subscribe_symbol(req: SubscribeRequest):
@@ -144,12 +206,26 @@ def unsubscribe_symbol(req: UnsubscribeRequest):
 def get_symbol_info(symbol: str):
     check_flow_enabled()
     sym = _normalize_symbol(symbol)
-    # mock values
-    return {
-        "tick_size": 0.01,
-        "step_size": 0.00001,
-        "min_notional": 5.0,
-        "price_precision": 2,
-        "qty_precision": 5,
-        "default_tick_group": 10.0
+    state = hub.get_state(sym)
+    if not state:
+        return {"success": False, "error": "Symbol not subscribed", "subscribed": False}
+
+    cache_key = f"flow_symbol_info_{sym}"
+    cached = _get_cached(cache_key, ttl=86400.0)
+    if cached: return cached
+
+    tick_size = state["book"].tick_size
+    filters = getattr(hub.connector, "symbol_filters", {}).get(sym, {})
+    res = {
+        "success": True,
+        "symbol": sym,
+        "tick_size": tick_size,
+        "step_size": float(filters.get("step_size", 0.0) or 0.0),
+        "min_notional": float(filters.get("min_notional", 0.0) or 0.0),
+        "price_precision": int(filters.get("price_precision", 0) or 0),
+        "qty_precision": int(filters.get("qty_precision", 0) or 0),
+        "default_tick_group": settings.flow_tick_group_base(sym, tick_size),
+        "server_ts": int(time.time() * 1000)
     }
+    _set_cached(cache_key, res)
+    return res

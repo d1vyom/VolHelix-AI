@@ -91,7 +91,10 @@ class BinanceClient:
 
     def get_audit_logs(self, limit: int = 50) -> List[dict]:
         """Return recent Binance MCP/API call logs formatted for audit inspection."""
-        logs = [log.model_dump() if hasattr(log, "model_dump") else log.__dict__ for log in self.call_logs[-limit:]]
+        logs: List[dict] = [
+            log.model_dump() if hasattr(log, "model_dump") else dict(log.__dict__)
+            for log in self.call_logs[-limit:]
+        ]
         return list(reversed(logs))
 
     # ──────────────────────────────────────────────
@@ -690,12 +693,12 @@ class BinanceClient:
         }
 
     def get_clock(self) -> dict:
-        """Crypto markets operate 24/7."""
+        """Crypto markets operate 24/7; the clock is informational, never a gate."""
         return {
             "is_open": True,
-            "raw_is_open": True,
-            "simulation_active": False,
             "current_time_et": datetime.now().isoformat(),
+            "market": "CRYPTO_24_7",
+            "exchange": "BINANCE",
             "reason": "Crypto markets operate 24/7"
         }
 

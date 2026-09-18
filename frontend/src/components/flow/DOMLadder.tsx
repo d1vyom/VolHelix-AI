@@ -145,7 +145,7 @@ export function DOMLadder({ symbol }: { symbol: string }) {
           ) : (
             <div style={{ height: sortedLevels.length * ROW_HEIGHT, position: "relative" }}>
               {sortedLevels.map((level, idx) => (
-                <div key={level.price} style={{ position: "absolute", top: idx * ROW_HEIGHT, left: 0, right: 0 }}>
+                <div key={`${level.price}-${idx}`} style={{ position: "absolute", top: idx * ROW_HEIGHT, left: 0, right: 0 }}>
                   <LadderRow 
                     level={level} 
                     isBestBid={level.price === dom.best_bid}

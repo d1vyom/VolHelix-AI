@@ -316,37 +316,18 @@ export async function fillPendingTrade(tradeId: string, fillPrice?: number): Pro
 }
 
 export async function getMarketStatus(): Promise<MarketClockStatus> {
+  const fallback: MarketClockStatus = {
+    is_open: true,
+    current_time_et: "",
+    market: "CRYPTO_24_7",
+    exchange: "BINANCE",
+    reason: "24/7 Crypto Session Active",
+  };
   try {
     const res = await fetch(`${API_BASE}/api/market-status`);
-    return await safeJson<MarketClockStatus>(res, {
-      is_open: true,
-      raw_is_open: true,
-      simulation_active: false,
-      current_time_et: "",
-      reason: "24/7 Crypto Session Active",
-    });
+    return await safeJson<MarketClockStatus>(res, fallback);
   } catch {
-    return {
-      is_open: true,
-      raw_is_open: true,
-      simulation_active: false,
-      simulation_override: false,
-      current_time_et: "",
-      reason: "24/7 Crypto Session Active",
-    };
-  }
-}
-
-export async function setMarketSimulationOverride(enabled: boolean): Promise<{ success: boolean; simulation_active: boolean; simulation_override: boolean; market_status?: MarketClockStatus }> {
-  try {
-    const res = await fetch(`${API_BASE}/api/market-status/simulation-override`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    });
-    return await safeJson<{ success: boolean; simulation_active: boolean; simulation_override: boolean; market_status?: MarketClockStatus }>(res, { success: true, simulation_active: enabled, simulation_override: enabled });
-  } catch {
-    return { success: false, simulation_active: enabled, simulation_override: enabled };
+    return fallback;
   }
 }
 

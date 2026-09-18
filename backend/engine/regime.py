@@ -6,6 +6,7 @@ try:
     from hmmlearn import hmm
     HMM_AVAILABLE = True
 except ImportError:
+    hmm = None  # type: ignore[assignment]
     HMM_AVAILABLE = False
 
 # Global HMM model for regime detection
@@ -48,7 +49,7 @@ def detect_squeeze(prices: List[float], period: int = 20) -> bool:
 def _train_hmm_regime_model(vol_history: List[float]):
     """Train HMM model on volatility history if available."""
     global _hmm_model, _hmm_fitted
-    if not HMM_AVAILABLE or len(vol_history) < 50:
+    if hmm is None or not HMM_AVAILABLE or len(vol_history) < 50:
         return
     
     try:
@@ -133,31 +134,35 @@ def classify_regime(
 
 def get_strategy_bias(regime: Regime) -> dict:
     """
-    Returns recommended crypto spot strategy types and size modifier for a regime.
+    Returns the recommended strategy and size modifier for a volatility regime.
+
+    VolHelix trades a single strategy (the Master Order Flow confluence setup), so
+    every regime recommends it and only the position-size modifier changes. CRISIS
+    is the sole exception: it stands aside in CASH at 0.25x size.
     """
     bias_map = {
         Regime.LOW_VOL: {
-            "strategies": [StrategyType.MASTER_ORDER_FLOW, StrategyType.SPOT_LONG, StrategyType.DCA_BUY],
+            "strategies": [StrategyType.MASTER_ORDER_FLOW],
             "size_mod": 1.0,
             "dte_range": (0, 0),
         },
         Regime.NORMAL: {
-            "strategies": [StrategyType.MASTER_ORDER_FLOW, StrategyType.SPOT_LONG, StrategyType.MOMENTUM, StrategyType.MEAN_REVERSION],
+            "strategies": [StrategyType.MASTER_ORDER_FLOW],
             "size_mod": 1.0,
             "dte_range": (0, 0),
         },
         Regime.ELEVATED: {
-            "strategies": [StrategyType.MASTER_ORDER_FLOW, StrategyType.MEAN_REVERSION, StrategyType.SPOT_LONG],
+            "strategies": [StrategyType.MASTER_ORDER_FLOW],
             "size_mod": 0.75,
             "dte_range": (0, 0),
         },
         Regime.SQUEEZE: {
-            "strategies": [StrategyType.MASTER_ORDER_FLOW, StrategyType.BREAKOUT_LONG],
+            "strategies": [StrategyType.MASTER_ORDER_FLOW],
             "size_mod": 0.50,
             "dte_range": (0, 0),
         },
         Regime.CRISIS: {
-            "strategies": [StrategyType.CASH, StrategyType.SPOT_SHORT],
+            "strategies": [StrategyType.CASH],
             "size_mod": 0.25,
             "dte_range": (0, 0),
         },

@@ -22,7 +22,7 @@ export function PanelFrame({
   onSettingsClick,
   onCloseClick,
   onMaximizeClick,
-  className = "",
+  className = "h-full w-full",
 }: PanelFrameProps) {
   return (
     <div className={`flex flex-col bg-[#1C1C1E] border border-[#2C2C2E] rounded-md overflow-hidden ${className}`}>

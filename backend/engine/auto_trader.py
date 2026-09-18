@@ -113,7 +113,7 @@ class AutoTrader:
             return
 
         for trade in open_trades:
-            sym = trade.proposal.symbol or trade.proposal.underlying
+            sym = trade.proposal.symbol or trade.proposal.underlying or "BTCUSDT"
             tp_price = trade.take_profit_price or getattr(trade.proposal, "take_profit", None)
             sl_price = trade.stop_loss_price or getattr(trade.proposal, "stop_loss", None)
             entry_price = trade.entry_price or trade.proposal.entry_price or (trade.proposal.breakevens[0] if trade.proposal.breakevens else 0.0)
@@ -190,7 +190,7 @@ class AutoTrader:
         try:
             pending_trades = asyncio.run(trade_log.get_pending_trades())
             for ptrade in pending_trades:
-                sym = ptrade.proposal.symbol or ptrade.proposal.underlying
+                sym = ptrade.proposal.symbol or ptrade.proposal.underlying or "BTCUSDT"
                 limit_p = ptrade.proposal.limit_price or (ptrade.proposal.breakevens[0] if ptrade.proposal.breakevens else None)
                 if not limit_p:
                     continue

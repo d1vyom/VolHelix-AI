@@ -14,7 +14,7 @@ function MetricTile({ label, value, tooltip, colorClass = "text-neutral-200" }: 
   );
 }
 
-export function FlowMetricsStrip({ symbol }: { symbol: string }) {
+export function FlowMetricsStrip() {
   const state = useFlowStore();
   const metrics = state.metrics;
   const health = state.health;

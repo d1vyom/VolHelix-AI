@@ -52,7 +52,7 @@ async def flow_subscribe(sid, data: dict):
         
     sym = symbol.upper()
     hub.subscribe(sym)
-    sio.enter_room(sid, f"flow:{sym}")
+    await sio.enter_room(sid, f"flow:{sym}")
     
     start_broadcaster(sym)
     
@@ -70,7 +70,7 @@ async def flow_unsubscribe(sid, data: dict):
         
     sym = symbol.upper()
     hub.unsubscribe(sym)
-    sio.leave_room(sid, f"flow:{sym}")
+    await sio.leave_room(sid, f"flow:{sym}")
     
     # If room is empty, broadcaster will pause or we can cancel it.
     # For now, broadcaster checks if room is empty.
@@ -96,7 +96,7 @@ async def broadcast_reasoning_event(event_type: str, message: str, agent: str):
 async def _broadcaster_task(sym: str):
     logger.info(f"[{sym}] Broadcaster task started.")
     
-    from backend.engine.dom_analytics import DomAnalyticsEngine
+    from backend.engine.dom_analytics import DomEngine
     
     room = f"flow:{sym}"
     
@@ -153,7 +153,7 @@ async def _broadcaster_task(sym: str):
                 if dom_hash != track["dom_hash"]:
                     track["dom_hash"] = dom_hash
                     # In real implementation we should get tick_group from settings, default to book's tick_size
-                    engine = DomAnalyticsEngine(sym, book.tick_size)
+                    engine = DomEngine(sym, book.tick_size)
                     trades_1m = [t for t in list(buffers.trades) if t.ts > (now - 60) * 1000]
                     try:
                         book_snap = book.get_snapshot(settings.FLOW_DEPTH_LEVELS)
@@ -186,13 +186,11 @@ async def _broadcaster_task(sym: str):
                         track["heatmap_ts"] = latest_hm.ts
                         await sio.emit("flow:heatmap", latest_hm.model_dump(), room=room)
                         
-                # METRICS
-                from backend.engine.flow_confluence import calculate_flow_metrics
-                # Actually, there's no calculate_flow_metrics in flow_confluence maybe?
-                # We need to construct FlowMetrics. Where is the metric compute function?
-                # Let's mock it for now if we don't have it, or see where it's defined.
-                # Just placeholder for now:
-                # await sio.emit("flow:metrics", metrics.model_dump(), room=room)
+                # METRICS — hub builds the live FlowMetrics snapshot
+                metrics = hub.get_metrics(sym)
+                if metrics is not None and metrics.ts > track["metrics_ts"]:
+                    track["metrics_ts"] = metrics.ts
+                    await sio.emit("flow:metrics", metrics.model_dump(), room=room)
                 
                 # HEALTH
                 await sio.emit("flow:health", state["health"].model_dump(), room=room)

@@ -6,8 +6,8 @@ def test_heatmap_engine():
     engine = HeatmapEngine("BTCUSDT", 1.0)
     engine.bin_ms = 1000 # 1s
     
-    bids = [(100.0, 10.0)]
-    asks = [(101.0, 20.0)]
+    bids = [[100.0, 10.0]]
+    asks = [[101.0, 20.0]]
     
     book = BookSnapshot(
         symbol="BTCUSDT",

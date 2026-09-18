@@ -54,10 +54,44 @@ class DeltaEngine:
         while self.trades_1m and self.trades_1m[0].ts < cutoff:
             self.trades_1m.pop(0)
             
-        # Record CVD points every 1 min
-        if trade.ts - self.last_cvd_point_ts >= 60 * 1000:
+        # Record CVD points every 1 min, seeding the first point immediately so the
+        # delta panel has an anchor instead of rendering empty until the next boundary.
+        if not self.cvd_history or trade.ts - self.last_cvd_point_ts >= 60 * 1000:
             self._add_cvd_point(trade.ts, trade.price)
             self.last_cvd_point_ts = trade.ts
+
+    def get_recent_cvd_series(self, buckets: int = 60) -> List[CVDPoint]:
+        """
+        Reconstruct a fine-grained CVD line covering the trailing minute of trades.
+
+        Walks backwards from the live session CVD, unwinding each trade as the bucket
+        boundary moves earlier, then returns the points oldest-first. This gives the
+        delta panel a smooth line immediately without changing the 1-minute points
+        that divergence detection depends on.
+        """
+        trades = self.trades_1m
+        if not trades:
+            return []
+
+        total = max(2, buckets)
+        end_ts = trades[-1].ts
+        step = max(1000, (60 * 1000) // total)
+
+        running = self.session_cvd
+        idx = len(trades) - 1
+        price = trades[-1].price
+        descending: List[CVDPoint] = []
+        for b in range(total):
+            boundary = end_ts - b * step
+            while idx >= 0 and trades[idx].ts > boundary:
+                running -= trades[idx].qty if trades[idx].side == "BUY" else -trades[idx].qty
+                idx -= 1
+            descending.append(CVDPoint(ts=boundary, cvd=running, delta=0.0, price=price, divergence=None))
+
+        series = list(reversed(descending))
+        for i in range(1, len(series)):
+            series[i].delta = series[i].cvd - series[i - 1].cvd
+        return series
 
     def _add_cvd_point(self, ts: int, price: float):
         prev_cvd = self.cvd_history[-1].cvd if self.cvd_history else 0.0
