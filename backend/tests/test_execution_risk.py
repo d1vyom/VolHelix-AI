@@ -167,3 +167,37 @@ def test_auto_trader_scan_approval_cannot_bypass_fresh_gate(exchange_fixture,mon
     monkeypatch.setattr(module.auto_trader,'_get_binance_client',lambda:c)
     with pytest.raises(ValueError): module.auto_trader.trigger_cycle('SOLUSDT')
     c.trading_client.create_order.assert_not_called()
+
+
+def test_market_supplied_price_cannot_understate_adapter_capital(exchange_fixture):
+    exchange_fixture.trading_client.create_order.side_effect = None
+    exchange_fixture.trading_client.create_order.return_value = {'orderId':42,'symbol':'SOLUSDT','side':'BUY','type':'MARKET','status':'NEW','origQty':'100','executedQty':'0'}
+    with pytest.raises(ValueError, match='capital_limit'):
+        exchange_fixture.place_order(symbol='SOLUSDT',side='BUY',quantity=100,order_type='MARKET',price=1)
+    exchange_fixture.trading_client.create_order.assert_not_called()
+
+def test_market_preview_uses_market_price_even_with_limit_field(exchange_fixture,monkeypatch):
+    from backend.main import fastapi_app
+    from fastapi.testclient import TestClient
+    import backend.api.routes as routes
+    monkeypatch.setattr(routes,'_binance_client',exchange_fixture)
+    response=TestClient(fastapi_app).post('/api/market/order/preview',json={'symbol':'SOLUSDT','qty':100,'order_type':'MARKET','limit_price':1})
+    data=response.json()
+    assert data['approved'] is False
+    assert float(data['price'])==150
+    assert float(data['notional'])==15000
+    exchange_fixture.trading_client.create_order.assert_not_called()
+
+def test_limit_http_preview_price_matches_quantity_and_notional(exchange_fixture,monkeypatch):
+    from decimal import Decimal
+    from backend.main import fastapi_app
+    from fastapi.testclient import TestClient
+    import backend.api.routes as routes
+    monkeypatch.setattr(routes,'_binance_client',exchange_fixture)
+    response=TestClient(fastapi_app).post('/api/market/order/preview',json={'symbol':'SOLUSDT','qty':1,'order_type':'LIMIT','limit_price':90})
+    assert response.status_code==200
+    data=response.json()
+    assert data['approved'] is True
+    assert Decimal(data['price'])==90
+    assert Decimal(data['price'])*Decimal(data['quantity'])==Decimal(data['notional'])
+    exchange_fixture.trading_client.create_order.assert_not_called()

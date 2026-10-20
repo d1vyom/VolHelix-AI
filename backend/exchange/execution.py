@@ -33,7 +33,7 @@ def validate_order(request, *, client):
             raise ValueError('Account unavailable')
         balances = account.get('balances', {})
         quantity = Decimal(str(request.qty))
-        notional_price = Decimal(str(request.limit_price)) if request.limit_price else price
+        notional_price = Decimal(str(request.limit_price)) if request.order_type == 'LIMIT' else price
         notional = Decimal(str(request.quote_quantity)) if request.quote_quantity else quantity * notional_price
         if request.quote_quantity:
             quantity = notional / price
@@ -72,7 +72,7 @@ def validate_order(request, *, client):
                 verdict = CryptoRiskGate().evaluate(proposal,snapshot)
                 checks.update({k:v.passed for k,v in verdict.checks.items()})
         approved = all(checks.values())
-        return {'approved':approved,'checks':checks,'reason':'Approved' if approved else 'Failed: '+', '.join(k for k,v in checks.items() if not v),'symbol':request.symbol,'side':request.side,'quantity':str(quantity),'price':str(price),'notional':str(notional),'market':'spot','order_type':request.order_type,'testnet':True,'reduce_only':request.reduce_only,'risk_coverage':account.get('coverage'),'coverage_started_at':account.get('coverage_started_at')}
+        return {'approved':approved,'checks':checks,'reason':'Approved' if approved else 'Failed: '+', '.join(k for k,v in checks.items() if not v),'symbol':request.symbol,'side':request.side,'quantity':str(quantity),'price':str(notional_price),'market_price':str(price),'notional':str(notional),'market':'spot','order_type':request.order_type,'testnet':True,'reduce_only':request.reduce_only,'risk_coverage':account.get('coverage'),'coverage_started_at':account.get('coverage_started_at')}
     except Exception as exc:
         return {'approved':False,'checks':checks,'reason':str(exc)}
 
