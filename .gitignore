@@ -52,3 +52,6 @@ logs/
 Thumbs.db
 .vscode/
 .playwright-mcp/
+
+# Isolated verification artifacts
+/tmp/

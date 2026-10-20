@@ -9,6 +9,42 @@ from backend.main import fastapi_app
 
 client = TestClient(fastapi_app)
 
+
+@pytest.fixture(autouse=True)
+def lifecycle_exchange(monkeypatch, exchange_fixture):
+    """Explicit SDK responses; API handlers, adapter and SQLite stay real."""
+    import backend.api.routes as routes
+    from itertools import count
+    ids = count(1001)
+    sdk = exchange_fixture.trading_client
+    sdk.get_account.side_effect = None
+    sdk.get_account.return_value = {
+        "canTrade": True,
+        "balances": [
+            {"asset": "USDT", "free": "10000", "locked": "0"},
+            {"asset": "SOL", "free": "0.5", "locked": "0"},
+        ],
+    }
+
+    def order_response(**params):
+        qty = str(params.get("quantity", "0"))
+        price = params.get("price", "150.00")
+        market = params["type"] == "MARKET"
+        return {
+            "orderId": next(ids), "symbol": params["symbol"],
+            "side": params["side"], "type": params["type"],
+            "status": "FILLED" if market else "NEW",
+            "price": price, "origQty": qty,
+            "executedQty": qty if market else "0",
+            "cummulativeQuoteQty": str(float(qty) * float(price)) if market else "0",
+            "timeInForce": params.get("timeInForce", "GTC"),
+            "fills": [{"price": price, "qty": qty, "commission": "0", "commissionAsset": "USDT", "tradeId": 1}] if market else [],
+        }
+
+    sdk.create_order.side_effect = order_response
+    monkeypatch.setattr(routes, "_binance_client", exchange_fixture)
+
+
 def test_market_clock_reports_continuous_session():
     asyncio.run(trade_log.init_db())
 
