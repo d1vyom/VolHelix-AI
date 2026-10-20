@@ -82,6 +82,9 @@ class TradeRecord(BaseModel):
     
     # Binance-specific execution metadata
     binance_order_id: Optional[str] = None
+    exchange_status: Optional[str] = None
+    executed_qty: float = 0.0
+    requested_qty: float = 0.0
     commission: float = 0.0
     commission_asset: str = ""
     

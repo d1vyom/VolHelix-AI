@@ -611,174 +611,65 @@ def get_exchange_bars(symbol: str = "BTCUSDT", timeframe: str = "1H", limit: int
         raise HTTPException(status_code=503, detail="Market data unavailable")
 
 
-class OrderSubmission(BaseModel):
-    symbol: str
-    qty: float = 0.001
-    side: str = "buy"
-    order_type: str = "market"
-    limit_price: Optional[float] = None
-    quote_quantity: Optional[float] = None
+from backend.exchange.schemas import OrderRequest
+from backend.exchange.execution import submit_order, OrderExecutionError, MarketDataUnavailable
+
+# Preserve the existing import and route contract.
+OrderSubmission = OrderRequest
 
 
 @router.post("/api/exchange/order")
 @router.post("/api/alpaca/order")
 async def submit_exchange_order(order_req: OrderSubmission):
     clean_sym = _normalize_symbol(order_req.symbol)
-    side_upper = order_req.side.upper()
-    is_limit = order_req.order_type.lower() == "limit"
-    client = _get_binance_client()
+    request = order_req.model_copy(update={"symbol": clean_sym})
+    try:
+        result = await submit_order(request, client=await asyncio.to_thread(_get_binance_client))
+    except MarketDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except OrderExecutionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # Retrieve live mark price
-    quote = client.get_price(clean_sym)
-    current_price = float(quote.get("price", 75000.0))
-
-    if is_limit:
-        limit_p = float(order_req.limit_price) if order_req.limit_price else current_price
-        order_id = f"LMT-{uuid.uuid4().hex[:8].upper()}"
-
-        try:
-            binance_res = client.place_order(
-                symbol=clean_sym,
-                side=side_upper,
-                order_type="LIMIT",
-                quantity=order_req.qty,
-                price=limit_p
-            )
-            order_id = str(binance_res.get("order_id", order_id))
-        except Exception as e:
-            logger.warning(f"Binance limit order dispatch: {e}")
-
-        prop = TradeProposal(
-            id=order_id,
-            symbol=clean_sym,
-            underlying=clean_sym,
-            strategy_type=StrategyType.MASTER_ORDER_FLOW,
-            side=side_upper,
-            order_type="LIMIT",
-            qty=order_req.qty,
-            entry_price=limit_p,
-            limit_price=limit_p,
-            take_profit=round(limit_p * 1.04, 2),
-            stop_loss=round(limit_p * 0.985, 2),
-            thesis=f"Limit Order on Binance Testnet: {side_upper} {order_req.qty} {clean_sym} @ ${limit_p:.2f}"
-        )
-
-        trade_rec = TradeRecord(
-            trade_id=order_id,
-            proposal=prop,
-            status=TradeStatus.PENDING,
-            entry_time=datetime.now().isoformat(),
-            entry_price=limit_p,
-            realized_pnl=0.0,
-            take_profit_price=prop.take_profit,
-            stop_loss_price=prop.stop_loss,
-            current_price=current_price,
-            binance_order_id=order_id
-        )
-        await trade_log.save_trade(trade_rec)
-        _invalidate_cache()
-
-        try:
-            from backend.api.websocket import sio
-            await sio.emit("reasoning_event", {
-                "agent": "RiskGate",
-                "message": f"Limit Order {order_id[:8]} placed for {clean_sym} ({side_upper} {order_req.qty} @ ${limit_p:.2f}). Resting in Pending Tab.",
-                "confidence": 1.0
-            })
-        except Exception:
-            pass
-
-        return {
-            "success": True,
-            "order_id": order_id,
-            "symbol": clean_sym,
-            "status": "PENDING",
-            "order_type": "LIMIT",
-            "limit_price": limit_p,
-            "current_price": current_price,
-            "qty": order_req.qty,
-            "side": side_upper,
-            "message": f"Limit order for {clean_sym} @ ${limit_p:.2f} is resting on Binance Testnet."
-        }
-
-    else:
-        # Market Order
-        order_id = f"MKT-{uuid.uuid4().hex[:8].upper()}"
-        fill_price = current_price
-
-        try:
-            kwargs: Dict[str, Any] = {"symbol": clean_sym, "side": side_upper, "order_type": "MARKET"}
-            if order_req.quote_quantity and order_req.quote_quantity > 0:
-                kwargs["quote_quantity"] = order_req.quote_quantity
-            else:
-                kwargs["quantity"] = order_req.qty
-
-            binance_res = client.place_order(**kwargs)
-            order_id = str(binance_res.get("order_id", order_id))
-        except Exception as e:
-            logger.warning(f"Binance market order dispatch: {e}")
-
-        tp_price = round(fill_price * 1.04, 2)
-        sl_price = round(fill_price * 0.985, 2)
-
-        prop = TradeProposal(
-            id=order_id,
-            symbol=clean_sym,
-            underlying=clean_sym,
-            strategy_type=StrategyType.MASTER_ORDER_FLOW,
-            side=side_upper,
-            order_type="MARKET",
-            qty=order_req.qty,
-            entry_price=fill_price,
-            take_profit=tp_price,
-            stop_loss=sl_price,
-            thesis=f"Market Execution on Binance Testnet: {side_upper} {order_req.qty} {clean_sym} @ ${fill_price:.2f}"
-        )
-
-        trade_rec = TradeRecord(
-            trade_id=order_id,
-            proposal=prop,
-            status=TradeStatus.OPEN,
-            entry_time=datetime.now().isoformat(),
-            entry_price=fill_price,
-            realized_pnl=0.0,
-            take_profit_price=tp_price,
-            stop_loss_price=sl_price,
-            current_price=fill_price,
-            binance_order_id=order_id
-        )
-        await trade_log.save_trade(trade_rec)
-        _invalidate_cache()
-
-        try:
-            from backend.api.websocket import sio
-            await sio.emit("reasoning_event", {
-                "agent": "RiskGate",
-                "message": f"Market Order {order_id[:8]} filled on Binance Testnet at ${fill_price:.2f}. Active in Positions Tab.",
-                "confidence": 1.0
-            })
-            await sio.emit("trade_executed", {
-                "trade_id": order_id,
-                "symbol": clean_sym,
-                "status": "OPEN",
-                "entry_price": fill_price
-            })
-        except Exception:
-            pass
-
-        return {
-            "success": True,
-            "order_id": order_id,
-            "symbol": clean_sym,
-            "status": "OPEN",
-            "order_type": "MARKET",
-            "entry_price": fill_price,
-            "take_profit_price": tp_price,
-            "stop_loss_price": sl_price,
-            "qty": order_req.qty,
-            "side": side_upper,
-            "message": f"Market order executed for {clean_sym} on Binance Testnet @ ${fill_price:.2f}."
-        }
+    filled = result.exchange_status == "FILLED"
+    status = TradeStatus.OPEN if filled else TradeStatus.PENDING
+    # Pending prices are order instructions; entry_price stays zero until executed.
+    reference_price = result.entry_price or request.limit_price or result.current_price
+    tp_price = round(reference_price * 1.04, 2)
+    sl_price = round(reference_price * 0.985, 2)
+    prop = TradeProposal(
+        id=result.order_id, symbol=clean_sym, underlying=clean_sym,
+        strategy_type=StrategyType.MASTER_ORDER_FLOW, side=request.side,
+        order_type=request.order_type, qty=result.executed_qty,
+        quote_qty=request.quote_quantity, limit_price=request.limit_price,
+        entry_price=result.entry_price, take_profit=tp_price, stop_loss=sl_price,
+        thesis=f"Binance Testnet acknowledgement: {result.exchange_status}",
+    )
+    trade = TradeRecord(
+        trade_id=result.order_id, proposal=prop, status=status,
+        entry_time=datetime.now().isoformat(), entry_price=result.entry_price,
+        current_price=result.current_price, take_profit_price=tp_price,
+        stop_loss_price=sl_price, binance_order_id=result.order_id,
+        exchange_status=result.exchange_status, executed_qty=result.executed_qty,
+        requested_qty=result.orig_qty,
+    )
+    await trade_log.save_trade(trade)
+    _invalidate_cache()
+    try:
+        from backend.api.websocket import sio
+        await sio.emit("reasoning_event", {
+            "agent": "Exchange", "message": f"Testnet order {result.order_id}: {result.exchange_status}",
+            "confidence": 1.0,
+        })
+        if filled:
+            await sio.emit("trade_executed", {"trade_id": result.order_id, "symbol": clean_sym,
+                                            "status": status.value, "entry_price": result.entry_price})
+    except Exception:
+        pass
+    return {"success": True, **result.model_dump(), "symbol": clean_sym,
+            "status": status.value, "order_type": request.order_type,
+            "limit_price": request.limit_price, "qty": result.executed_qty,
+            "side": request.side, "take_profit_price": tp_price, "stop_loss_price": sl_price,
+            "message": f"Binance Testnet: {result.exchange_status}"}
 
 
 class FillPendingTradeRequest(BaseModel):

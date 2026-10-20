@@ -243,3 +243,5 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
   - **Operational:** an orphaned server was found holding port 8000 (2.7 GB RSS) from an earlier run; it was terminated. Port 8000 and 3000 were confirmed free afterwards so a fresh `python backend/main.py` binds cleanly.
   - **Verification:** 80/80 backend tests pass; `npm run lint` clean; `npm run build` clean; live probe confirmed all five symbols `LIVE` over Binance WS with book resyncs, all eight `/api/flow/*` endpoints returning 200 with real data, and both `/` and `/terminal` serving HTTP 200.
 
+
+- 2026-10-20 Task 2: validated finite Spot order requests, rejected failed/malformed acknowledgements, persisted actual fills, and moved manual submission REST off the event loop. Isolated pytest: 115 passed. Risk enforcement and pending/partial reconciliation remain next tasks; no live trading.
