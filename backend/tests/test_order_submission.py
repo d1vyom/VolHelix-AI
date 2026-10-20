@@ -86,3 +86,47 @@ def test_inconsistent_acknowledgement_is_not_persisted(orders,status,executed,qu
     assert response.status_code == 502
     assert asyncio.run(trade_log.get_all_trades()) == []
     emit.assert_not_awaited()
+
+@pytest.mark.parametrize('fills', [
+    [{'qty':'0.1','price':'160'}],
+    [{'qty':'0.6','price':'160'}],
+    [{'qty':'0.5','price':'0'}],
+    [{'qty':'0.5','price':'NaN'}],
+    [{'qty':'0.5','price':'Infinity'}],
+    [{'qty':'-0.1','price':'160'}, {'qty':'0.6','price':'160'}],
+])
+def test_invalid_fill_fallback_never_persists(orders, fills):
+    exchange, emit = orders
+    exchange.trading_client.create_order.side_effect = None
+    exchange.trading_client.create_order.return_value = {'orderId':123,'symbol':'SOLUSDT','side':'BUY','type':'MARKET','status':'FILLED','origQty':'0.5','executedQty':'0.5','fills':fills}
+    response = client.post('/api/exchange/order', json={'symbol':'SOLUSDT','qty':0.5})
+    assert response.status_code == 502
+    assert asyncio.run(trade_log.get_all_trades()) == []
+    emit.assert_not_awaited()
+
+@pytest.mark.parametrize('status,executed,original', [
+    ('FILLED','1','0.5'), ('FILLED','0.2','0.5'),
+    ('NEW','0.5','0.5'), ('PENDING_NEW','0.1','0.5'),
+    ('PARTIALLY_FILLED','0','0.5'), ('PARTIALLY_FILLED','0.5','0.5'),
+    ('PARTIALLY_FILLED','0.6','0.5'), ('FILLED','0.5','0'),
+    ('NEW','0','0'), ('FILLED','0.5',None),
+])
+def test_contradictory_execution_never_persists(orders, status, executed, original):
+    exchange, emit = orders
+    exchange.trading_client.create_order.side_effect = None
+    exchange.trading_client.create_order.return_value = {'orderId':123,'symbol':'SOLUSDT','side':'BUY','type':'MARKET','status':status,'origQty':original,'executedQty':executed,'cummulativeQuoteQty':str(float(executed)*160)}
+    response = client.post('/api/exchange/order', json={'symbol':'SOLUSDT','qty':0.5})
+    assert response.status_code == 502
+    assert asyncio.run(trade_log.get_all_trades()) == []
+    emit.assert_not_awaited()
+
+
+def test_complete_fill_fallback_uses_weighted_actual_price(orders):
+    exchange, _ = orders
+    exchange.trading_client.create_order.side_effect = None
+    exchange.trading_client.create_order.return_value = {'orderId':123,'symbol':'SOLUSDT','side':'BUY','type':'MARKET','status':'FILLED','origQty':'0.5','executedQty':'0.5','fills':[{'qty':'0.2','price':'150'},{'qty':'0.3','price':'160'}]}
+    response = client.post('/api/exchange/order', json={'symbol':'SOLUSDT','qty':0.5})
+    assert response.status_code == 200
+    trade = asyncio.run(trade_log.get_trade_by_id('123'))
+    assert trade.entry_price == 156
+    assert trade.executed_qty == 0.5
