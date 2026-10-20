@@ -715,12 +715,12 @@ class ClosePositionRequest(BaseModel):
 async def close_exchange_position(req: ClosePositionRequest):
     clean_sym = _normalize_symbol(req.symbol)
     base_asset = clean_sym.replace("USDT", "")
-    client = _get_binance_client()
+    client = await asyncio.to_thread(_get_binance_client)
 
     # 1. Query asset balance to liquidate
     qty_to_sell = 0.0
     try:
-        acct = client.get_account()
+        acct = await asyncio.to_thread(client.get_account)
         balances = acct.get("balances", {})
         if base_asset in balances:
             qty_to_sell = float(balances[base_asset].get("free", 0.0))
@@ -728,11 +728,12 @@ async def close_exchange_position(req: ClosePositionRequest):
         pass
 
     # 2. Execute SELL order on Binance Testnet
-    exit_price = client.get_price(clean_sym).get("price", 75000.0)
+    exit_price = (await asyncio.to_thread(client.get_price, clean_sym)).get("price", 0.0)
     if qty_to_sell > 0:
         try:
-            client.place_order(
+            await asyncio.to_thread(client.place_order,
                 symbol=clean_sym,
+                reduce_only=True,
                 side="SELL",
                 order_type="MARKET",
                 quantity=round(qty_to_sell, 5)
@@ -793,12 +794,12 @@ class BotExecutionRequest(BaseModel):
 @router.post("/api/bot/execute-trade")
 async def execute_bot_trade(req: BotExecutionRequest):
     clean_sym = _normalize_symbol(req.symbol)
-    client = _get_binance_client()
+    client = await asyncio.to_thread(_get_binance_client)
 
     tp_pct = req.take_profit_pct if req.take_profit_pct is not None else 0.040
     sl_pct = req.stop_loss_pct if req.stop_loss_pct is not None else 0.018
 
-    p_data = client.get_price(clean_sym)
+    p_data = await asyncio.to_thread(client.get_price, clean_sym)
     current_price = float(p_data.get("price", 75000.0))
 
     tp_price = round(current_price * (1.0 + tp_pct), 2)
@@ -812,7 +813,7 @@ async def execute_bot_trade(req: BotExecutionRequest):
     calculated_qty = round(order_quote_qty / current_price, 5) if current_price > 0 else 0.001
 
     try:
-        order_res = client.place_order(
+        order_res = await asyncio.to_thread(client.place_order,
             symbol=clean_sym,
             side="BUY",
             order_type="MARKET",
@@ -820,8 +821,7 @@ async def execute_bot_trade(req: BotExecutionRequest):
         )
         order_id = str(order_res.get("order_id", f"BINANCE-{int(time.time())}"))
     except Exception as e:
-        logger.warning(f"execute_bot_trade place_order fallback: {e}")
-        order_id = f"BINANCE-{uuid.uuid4().hex[:8].upper()}"
+        raise HTTPException(status_code=502, detail=f"Order not acknowledged: {e}") from e
 
     prop = TradeProposal(
         id=order_id,
@@ -954,3 +954,5 @@ def trigger_auto_trading_cycle(req: Optional[TriggerCycleRequest] = None, symbol
     elif symbol:
         target_sym = _normalize_symbol(symbol)
     return auto_trader.trigger_cycle(symbol=target_sym)
+from backend.api.market_routes import router as market_router
+router.include_router(market_router)

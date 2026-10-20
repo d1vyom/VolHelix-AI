@@ -12,6 +12,7 @@ class PortfolioStore:
             timestamp=datetime.now().isoformat(),
             equity=10000.0,
             buying_power=10000.0,
+            daily_risk_available=False,
             daily_pnl=0.0,
             daily_pnl_pct=0.0,
             total_pnl=0.0,
@@ -30,8 +31,8 @@ class PortfolioStore:
         
     def update_from_exchange(self, account_data: dict, positions_data: List[dict], current_regime: Regime):
         """Sync the portfolio state from Binance."""
-        equity = float(account_data.get('equity', self.initial_capital))
-        buying_power = float(account_data.get('buying_power', self.initial_capital))
+        equity = float(account_data.get('equity', 0.0))
+        buying_power = float(account_data.get('buying_power', 0.0))
         total_pnl = round(equity - self.initial_capital, 2)
         total_pnl_pct = round((total_pnl / self.initial_capital) * 100, 2) if self.initial_capital > 0 else 0.0
 
@@ -53,8 +54,9 @@ class PortfolioStore:
             timestamp=datetime.now().isoformat(),
             equity=equity,
             buying_power=buying_power,
-            daily_pnl=0.0,
-            daily_pnl_pct=0.0,
+            daily_risk_available='daily_pnl' in account_data,
+            daily_pnl=float(account_data.get('daily_pnl', 0.0)),
+            daily_pnl_pct=(float(account_data.get('daily_pnl', 0.0)) / equity * 100) if equity > 0 else 0.0,
             total_pnl=total_pnl,
             total_pnl_pct=total_pnl_pct,
             open_positions=len(positions_data),

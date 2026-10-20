@@ -410,6 +410,40 @@ class BinanceClient:
     # TRADING (Testnet Paper Trading)
     # ──────────────────────────────────────────────
 
+    def get_execution_context(self, symbol: str) -> dict:
+        """Server analysis and freshly valued testnet account; never client approval."""
+        import hashlib
+        from backend.engine.order_flow import analyze_order_flow, evaluate_master_strategy_setup
+        from backend.exchange.daily_risk import observe_equity
+        from backend.store.trade_log import DB_PATH
+        from backend.config import settings
+        account = self.get_account()
+        if account.get('error') or not account.get('can_trade', False):
+            raise ValueError('Verified account unavailable')
+        equity = 0.0
+        for asset, balance in account['balances'].items():
+            price = 1.0 if asset == 'USDT' else float(self.get_price(asset+'USDT').get('price', 0))
+            if price <= 0:
+                raise ValueError('Account asset valuation unavailable')
+            balance['value_usdt'] = balance['total'] * price
+            equity += balance['value_usdt']
+        account['equity'] = equity
+        identity = 'spot-testnet:' + hashlib.sha256(settings.BINANCE_API_KEY.encode()).hexdigest()
+        account.update(observe_equity(DB_PATH,identity,equity))
+        bars = self.get_klines(symbol, interval='1h', limit=100)
+        if not bars:
+            return {'account':account,'score':0,'is_valid':False}
+        current = float(self.get_price(symbol).get('price',0))
+        analysis = analyze_order_flow(symbol,bars)
+        setup = evaluate_master_strategy_setup(symbol,current,analysis)
+        levels = setup.get('levels', {})
+        return dict(setup,account=account,stop_loss=levels.get('stop_loss_price'),take_profit=levels.get('take_profit_price'))
+
+    def get_order_by_client_id(self, symbol: str, client_order_id: str) -> dict:
+        order = self.trading_client.get_order(symbol=symbol,origClientOrderId=client_order_id)
+        return {'order_id':order['orderId'],'status':order['status'],'orig_qty':order['origQty'],
+                'executed_qty':order['executedQty'],'cummulative_quote_qty':order.get('cummulativeQuoteQty',0),'fills':order.get('fills',[])}
+
     def place_order(
         self,
         symbol: str,
@@ -419,14 +453,25 @@ class BinanceClient:
         quote_quantity: Optional[float] = None,
         price: Optional[float] = None,
         time_in_force: str = "GTC",
+        client_order_id: Optional[str] = None,
+        reduce_only: bool = False,
     ) -> dict:
         """Place an order on Binance Spot Testnet."""
+        from backend.exchange.execution import validate_order
+        from backend.exchange.schemas import OrderRequest
+        import uuid
+        request = OrderRequest(symbol=symbol,side=side,order_type=order_type,qty=quantity or 0.001,quote_quantity=quote_quantity,limit_price=price,reduce_only=reduce_only)
+        verdict = validate_order(request,client=self)
+        if not verdict['approved']:
+            raise ValueError(verdict['reason'])
+        client_order_id = client_order_id or ('vh-' + uuid.uuid4().hex)
         start = datetime.now()
         try:
             params: Dict[str, Any] = {
                 "symbol": symbol.upper(),
                 "side": side.upper(),
                 "type": order_type.upper(),
+                "newClientOrderId": client_order_id,
             }
 
             if order_type.upper() == "MARKET":
@@ -459,26 +504,13 @@ class BinanceClient:
                 "time_in_force": order.get("timeInForce", ""),
                 "fills": order.get("fills", []),
             }
-        except BinanceAPIException as e:
-            if e.code == -1021:
-                self._sync_time()
-                try:
-                    return self.place_order(
-                        symbol=symbol,
-                        side=side,
-                        order_type=order_type,
-                        quantity=quantity,
-                        quote_quantity=quote_quantity,
-                        price=price,
-                        time_in_force=time_in_force
-                    )
-                except Exception:
-                    pass
-            logger.error(f"place_order API error: {e}")
-            res = {"error": str(e), "status": "REJECTED", "code": e.code}
         except Exception as e:
-            logger.error(f"place_order error: {e}")
-            res = {"error": str(e), "status": "ERROR"}
+            # Never retry create_order: an acknowledgement may have been lost.
+            try:
+                res = self.get_order_by_client_id(symbol, client_order_id)
+            except Exception:
+                from backend.exchange.execution import OrderOutcomeUnknown
+                raise OrderOutcomeUnknown(f'UNKNOWN order outcome; reconcile client ID {client_order_id}') from e
 
         self._log_call(
             "place_order",

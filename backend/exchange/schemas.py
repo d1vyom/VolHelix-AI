@@ -6,6 +6,8 @@ class OrderRequest(BaseModel):
     """Spot testnet submission with finite positive sizing."""
     model_config = ConfigDict(allow_inf_nan=False)
     symbol: str = Field(min_length=1)
+    reduce_only: bool = False
+    client_order_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,36}$')
     qty: float = Field(default=0.001, gt=0)
     side: Literal['BUY', 'SELL'] = 'BUY'
     order_type: Literal['MARKET', 'LIMIT'] = 'MARKET'
@@ -26,8 +28,21 @@ class OrderRequest(BaseModel):
 class OrderResult(BaseModel):
     """Actual exchange acknowledgement; zero execution is not a fill."""
     order_id: str
+    client_order_id: str | None = None
     exchange_status: Literal['NEW', 'PARTIALLY_FILLED', 'FILLED', 'PENDING_NEW']
     executed_qty: float = Field(ge=0, allow_inf_nan=False)
     orig_qty: float = Field(ge=0, allow_inf_nan=False)
     entry_price: float = Field(ge=0, allow_inf_nan=False)
     current_price: float = Field(gt=0, allow_inf_nan=False)
+
+
+class OrderPreview(BaseModel):
+    """Fresh server verdict for confirmation; it is never an execution permit."""
+    model_config = ConfigDict(extra='allow')
+    approved: bool
+    reason: str
+    checks: dict[str, bool]
+    market: str = 'spot'
+    testnet: bool = True
+    coverage_started_at: str | None = None
+    risk_coverage: str | None = None

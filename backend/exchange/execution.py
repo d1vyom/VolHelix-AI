@@ -1,14 +1,83 @@
 """Nonblocking Spot testnet dispatch and acknowledgement validation."""
 import asyncio
 import math
+import uuid
 from decimal import Decimal
 from backend.exchange.schemas import OrderRequest, OrderResult
 
 class OrderExecutionError(Exception):
     """Exchange failed or returned an unusable acknowledgement."""
 
+class OrderOutcomeUnknown(OrderExecutionError):
+    """A single reconciliation has already failed; retain the client order ID."""
+
 class MarketDataUnavailable(OrderExecutionError):
     """A finite positive production quote could not be obtained."""
+
+def validate_order(request, *, client):
+    """Fresh server inputs only. Preview verdicts never authorize dispatch."""
+    from backend.models.trade import TradeProposal
+    from backend.models.portfolio import PortfolioSnapshot
+    from backend.risk.risk_gate import CryptoRiskGate
+    checks = {}
+    try:
+        price = Decimal(str(client.get_price(request.symbol)['price']))
+        if not price.is_finite() or price <= 0:
+            raise ValueError('Market price unavailable')
+        info = client.get_exchange_info(request.symbol)
+        if info.get('error') or info.get('status') != 'TRADING':
+            raise ValueError('Exchange symbol unavailable')
+        context = {} if request.reduce_only else client.get_execution_context(request.symbol)
+        account = client.get_account() if request.reduce_only else context['account']
+        if account.get('error') or account.get('can_trade') is False:
+            raise ValueError('Account unavailable')
+        balances = account.get('balances', {})
+        quantity = Decimal(str(request.qty))
+        notional_price = Decimal(str(request.limit_price)) if request.limit_price else price
+        notional = Decimal(str(request.quote_quantity)) if request.quote_quantity else quantity * notional_price
+        if request.quote_quantity:
+            quantity = notional / price
+        free_base = Decimal(str(balances.get(info['base_asset'], {}).get('free', 0)))
+        checks['inventory'] = request.side != 'SELL' or (not request.quote_quantity and quantity <= free_base)
+        checks['reduce_only'] = not request.reduce_only or (request.side == 'SELL' and not request.quote_quantity and quantity <= free_base)
+        checks['funds'] = request.side != 'BUY' or notional <= Decimal(str(account.get('buying_power', 0)))
+        filters = info.get('filters', [])
+        checks['exchange_filters'] = bool(filters)
+        for f in filters:
+            kind = f['filterType']
+            if kind in ('LOT_SIZE', 'MARKET_LOT_SIZE') and (kind != 'MARKET_LOT_SIZE' or request.order_type == 'MARKET'):
+                for key, passes in [('minQty', lambda n: quantity >= n), ('maxQty', lambda n: quantity <= n), ('stepSize', lambda n: request.quote_quantity is not None or quantity % n == 0)]:
+                    value = Decimal(str(f.get(key, 0)))
+                    if value > 0 and not passes(value): checks['exchange_filters'] = False
+            if kind in ('MIN_NOTIONAL','NOTIONAL'):
+                if notional < Decimal(str(f.get('minNotional', 0))): checks['exchange_filters'] = False
+                maximum = Decimal(str(f.get('maxNotional', 0)))
+                if maximum > 0 and notional > maximum: checks['exchange_filters'] = False
+            if kind == 'PRICE_FILTER' and request.order_type == 'LIMIT':
+                tick = Decimal(str(f.get('tickSize', 0)))
+                minimum = Decimal(str(f.get('minPrice', 0)))
+                maximum = Decimal(str(f.get('maxPrice', 0)))
+                if (tick > 0 and notional_price % tick != 0) or notional_price < minimum or (maximum > 0 and notional_price > maximum): checks['exchange_filters'] = False
+        if not request.reduce_only:
+            nav = float(account.get('equity', 0))
+            pnl = account.get('daily_pnl')
+            checks['account_risk_known'] = math.isfinite(nav) and nav > 0 and pnl is not None and math.isfinite(float(pnl))
+            score = float(context.get('score', 0))
+            checks['confluence'] = math.isfinite(score) and score >= .70 and context.get('is_valid') is True and context.get('side') == request.side
+            baseline = float(account.get('baseline_equity', nav))
+            checks['observed_drawdown'] = checks['account_risk_known'] and math.isfinite(baseline) and baseline > 0 and max(0, -float(pnl)) / min(nav, baseline) < CryptoRiskGate.MAX_DAILY_DRAWDOWN
+            if checks['account_risk_known']:
+                snapshot = PortfolioSnapshot(equity=nav,buying_power=account.get('buying_power',0),daily_pnl=min(float(pnl),0),balances={asset:dict(data, asset=asset) for asset,data in balances.items()})
+                proposal = TradeProposal(id='execution-risk',symbol=request.symbol,side=request.side,qty=float(quantity),entry_price=float(notional_price),stop_loss=context.get('stop_loss'),take_profit=context.get('take_profit'))
+                verdict = CryptoRiskGate().evaluate(proposal,snapshot)
+                checks.update({k:v.passed for k,v in verdict.checks.items()})
+        approved = all(checks.values())
+        return {'approved':approved,'checks':checks,'reason':'Approved' if approved else 'Failed: '+', '.join(k for k,v in checks.items() if not v),'symbol':request.symbol,'side':request.side,'quantity':str(quantity),'price':str(price),'notional':str(notional),'market':'spot','order_type':request.order_type,'testnet':True,'reduce_only':request.reduce_only,'risk_coverage':account.get('coverage'),'coverage_started_at':account.get('coverage_started_at')}
+    except Exception as exc:
+        return {'approved':False,'checks':checks,'reason':str(exc)}
+
+async def preview_order(request: OrderRequest, *, client):
+    return await asyncio.to_thread(validate_order, request, client=client)
 
 async def submit_order(request: OrderRequest, *, client) -> OrderResult:
     """Dispatch once, preserving failures and actual executed base quantity."""
@@ -19,7 +88,11 @@ async def submit_order(request: OrderRequest, *, client) -> OrderResult:
             raise ValueError('Invalid quote')
     except Exception as exc:
         raise MarketDataUnavailable('Market price unavailable') from exc
-    kwargs = dict(symbol=request.symbol, side=request.side, order_type=request.order_type)
+    verdict = await preview_order(request, client=client)
+    if not verdict['approved']:
+        raise OrderExecutionError(verdict['reason'])
+    client_id = request.client_order_id or ('vh-' + uuid.uuid4().hex)
+    kwargs = dict(symbol=request.symbol, side=request.side, order_type=request.order_type, client_order_id=client_id, reduce_only=request.reduce_only)
     if request.quote_quantity is not None:
         kwargs['quote_quantity'] = request.quote_quantity
     else:
@@ -27,7 +100,14 @@ async def submit_order(request: OrderRequest, *, client) -> OrderResult:
     if request.order_type == 'LIMIT':
         kwargs['price'] = request.limit_price
     try:
-        response = await asyncio.to_thread(client.place_order, **kwargs)
+        try:
+            response = await asyncio.to_thread(client.place_order, **kwargs)
+            if response.get('status') == 'UNKNOWN':
+                raise TimeoutError('Uncertain submission')
+        except OrderOutcomeUnknown:
+            raise
+        except Exception:
+            response = await asyncio.to_thread(client.get_order_by_client_id, request.symbol, client_id)
         if response.get('error') or not response.get('order_id'):
             raise ValueError('Exchange rejected or did not acknowledge order')
         executed = Decimal(str(response.get('executed_qty', 0)))
@@ -59,12 +139,14 @@ async def submit_order(request: OrderRequest, *, client) -> OrderResult:
             if filled_qty != executed:
                 raise ValueError('Fill list does not cover executed quantity')
         price = quote_qty / executed if executed > 0 else 0
-        result = OrderResult(order_id=str(response['order_id']), exchange_status=response['status'],
+        result = OrderResult(order_id=str(response['order_id']), client_order_id=client_id, exchange_status=response['status'],
                              executed_qty=executed, orig_qty=response.get('orig_qty', 0),
                              entry_price=price, current_price=current_price)
         if (executed > 0 and price <= 0) or (result.exchange_status == 'FILLED' and executed <= 0):
             raise ValueError('Filled acknowledgement lacks actual execution')
         return result
+    except OrderOutcomeUnknown:
+        raise
     except Exception as exc:
         # Do not retry uncertain submissions: reconciliation must establish outcome.
-        raise OrderExecutionError('Order failed or acknowledgement unavailable; reconcile before retrying') from exc
+        raise OrderExecutionError(f'Order failed or acknowledgement unavailable; reconcile client ID {client_id} before retrying') from exc

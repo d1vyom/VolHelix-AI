@@ -1,4 +1,5 @@
 from datetime import datetime
+import math
 from typing import Optional, Dict
 from backend.models.trade import TradeProposal
 from backend.models.portfolio import PortfolioSnapshot
@@ -67,7 +68,9 @@ class CryptoRiskGate:
         Evaluate proposal against the 10 deterministic crypto safety rules.
         """
         checks: Dict[str, CheckResult] = {}
-        nav = portfolio.equity if portfolio.equity > 0 else 10000.0
+        nav = portfolio.equity
+        if not portfolio.daily_risk_available or not math.isfinite(nav) or nav <= 0 or not math.isfinite(portfolio.daily_pnl):
+            return RiskGateResult(approved=False, reason='Verified account equity and daily PnL required', checks={'account_data': CheckResult(passed=False,detail='Account risk unavailable')}, timestamp=datetime.now().isoformat())
         current_regime = regime or getattr(portfolio, "current_regime", Regime.NORMAL)
 
         # Calculate position value (price * quantity)
@@ -107,7 +110,7 @@ class CryptoRiskGate:
         )
 
         # 4. Daily Drawdown Circuit Breaker
-        daily_dd = abs(portfolio.daily_pnl) / nav if nav > 0 else 0.0
+        daily_dd = max(0.0, -portfolio.daily_pnl) / nav if nav > 0 else 0.0
         dd_passed = daily_dd < self.MAX_DAILY_DRAWDOWN
         checks["drawdown_circuit_breaker"] = CheckResult(
             passed=dd_passed,

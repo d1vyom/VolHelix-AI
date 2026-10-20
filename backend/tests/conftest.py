@@ -288,8 +288,18 @@ def isolated_runtime(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def exchange_fixture():
+def exchange_fixture(monkeypatch):
     client = exchange_module.BinanceClient()
     client.market_client.get_symbol_ticker.side_effect = None
     client.market_client.get_symbol_ticker.return_value = {"symbol": "SOLUSDT", "price": "150.00"}
+    client.market_client.get_symbol_info.side_effect = None
+    client.market_client.get_symbol_info.return_value = {'symbol':'SOLUSDT','baseAsset':'SOL','quoteAsset':'USDT','status':'TRADING','filters':[{'filterType':'LOT_SIZE','minQty':'0.00001','maxQty':'10000','stepSize':'0.00001'},{'filterType':'MIN_NOTIONAL','minNotional':'10'}]}
+    client.trading_client.get_order.side_effect = RuntimeError('Order not found in explicit fixture')
+    client.trading_client.get_account.side_effect = None
+    client.trading_client.get_account.return_value = {'canTrade':True,'balances':[{'asset':'USDT','free':'10000','locked':'0'}]}
+    def server_context(symbol):
+        account=client.get_account()
+        account['daily_pnl']=0
+        return {'account':account,'score':.70,'is_valid':True,'side':'BUY','stop_loss':98,'take_profit':200}
+    monkeypatch.setattr(client,'get_execution_context',server_context)
     return client

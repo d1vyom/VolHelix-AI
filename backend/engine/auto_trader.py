@@ -235,6 +235,7 @@ class AutoTrader:
             # 2. Sell held quantity on testnet
             if qty > 0:
                 client.place_order(
+                    reduce_only=True,
                     symbol=symbol,
                     side="SELL",
                     order_type="MARKET",

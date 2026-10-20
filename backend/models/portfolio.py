@@ -9,6 +9,7 @@ class PortfolioSnapshot(BaseModel):
     # Account totals (in USDT)
     equity: float = 10000.0               # Total portfolio value in USDT
     buying_power: float = 10000.0         # Available USDT for trading
+    daily_risk_available: bool = True
     daily_pnl: float = 0.0
     daily_pnl_pct: float = 0.0
     total_pnl: float = 0.0
