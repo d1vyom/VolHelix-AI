@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import aiosqlite
 from datetime import datetime
@@ -105,13 +106,25 @@ class TradeLog:
             await db.commit()
             return trade
 
-    async def set_exit_intent(self, trade_id, client_id):
+    async def prepare_exit(self, trade_id):
+        """Atomically choose one durable attempt for all concurrent close callers."""
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('BEGIN IMMEDIATE')
             row=await (await db.execute('SELECT data FROM trades WHERE trade_id=?',(trade_id,))).fetchone()
             trade=TradeRecord.model_validate_json(row[0])
-            trade.exit_client_order_id=client_id
-            await self._write_record(db,trade)
+            if trade.proposal.qty>0 and not trade.exit_client_order_id:
+                identity=f'{trade.trade_id}:{trade.closed_qty}:{trade.exit_attempt}'
+                trade.exit_client_order_id='vhx-'+hashlib.sha256(identity.encode()).hexdigest()[:32]
+                await self._write_record(db,trade)
+            await db.commit()
+            return trade
+
+    async def save_trade_if_absent(self, record):
+        """Initial audit insertion must never replace an existing lifecycle state."""
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('INSERT OR IGNORE INTO trades VALUES (?,?,?,?,?,?)',
+                (record.trade_id,record.status.value,record.proposal.underlying,
+                 record.proposal.strategy_type.value,record.realized_pnl,record.model_dump_json()))
             await db.commit()
 
     async def apply_exit(self, trade_id, result, exit_type=TradeStatus.CLOSED):
@@ -120,6 +133,9 @@ class TradeLog:
             row=await (await db.execute('SELECT data FROM trades WHERE trade_id=?',(trade_id,))).fetchone()
             trade=TradeRecord.model_validate_json(row[0])
             trade.executed_qty=trade.executed_qty or trade.proposal.qty+trade.closed_qty
+            terminal_key=result.client_order_id+':terminal'
+            if trade.exit_executions.get(terminal_key):
+                return trade
             previous=trade.exit_executions.get(result.client_order_id,0)
             delta=result.executed_qty-previous
             if delta<0 or delta>trade.proposal.qty+1e-10:
@@ -135,7 +151,13 @@ class TradeLog:
             trade.exit_executions[result.client_order_id]=result.executed_qty
             trade.exit_executions[quote_key]=quote
             terminal=result.exchange_status in ('FILLED','CANCELED','EXPIRED','EXPIRED_IN_MATCH','REJECTED')
-            trade.exit_client_order_id=None if terminal else result.client_order_id
+            if terminal:
+                trade.exit_executions[terminal_key]=1
+                trade.exit_attempt+=1
+                if trade.exit_client_order_id==result.client_order_id:
+                    trade.exit_client_order_id=None
+            elif trade.exit_client_order_id is None:
+                trade.exit_client_order_id=result.client_order_id
             if delta>0:
                 trade.exit_price=result.entry_price
             if trade.proposal.qty<1e-10 and result.executed_qty>0:

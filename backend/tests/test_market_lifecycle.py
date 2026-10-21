@@ -113,6 +113,7 @@ def test_partial_exit_only_realizes_confirmed_quantity_once():
     t=record(); run(trade_log.save_trade(t))
     c=Client(); c.account['balances']['SOL']={'free':1,'total':1,'value_usdt':100}
     c.place_order=Mock(return_value=ack('PARTIALLY_FILLED',1,.4,110))
+    c.get_order_by_client_id=Mock(return_value=ack('PARTIALLY_FILLED',1,.4,110))
     first=run(close_trade_position(t,client=c))
     second=run(close_trade_position(first,client=c))
     assert second.proposal.qty==.6 and second.realized_pnl==4
@@ -395,3 +396,133 @@ def test_uncertain_cancel_all_does_not_report_success(monkeypatch):
         run(submit_order(OrderRequest(symbol='SOLUSDT',qty=1,client_order_id='cancel-unknown'),client=c))
     result=api.post('/api/exchange/cancel-all?market=spot').json()
     assert result['success'] is False and result['errors']
+
+
+@pytest.mark.parametrize('terminal',['CANCELED','EXPIRED','REJECTED'])
+def test_terminal_zero_fill_exit_advances_attempt_for_retry(terminal):
+    from backend.exchange.lifecycle import close_trade_position
+    t=record();run(trade_log.save_trade(t))
+    c=Client();c.account['balances']['SOL']={'free':1,'total':1,'value_usdt':100}
+    c.place_order=Mock(return_value=ack(terminal,1,0))
+    try: run(close_trade_position(t,client=c))
+    except OrderExecutionError: pass
+    first_id=c.place_order.call_args.kwargs['client_order_id']
+    c.place_order.return_value=ack()
+    updated=run(close_trade_position(t,client=c))
+    assert c.place_order.call_count==2 and updated.status==TradeStatus.CLOSED
+    assert c.place_order.call_args.kwargs['client_order_id']!=first_id
+
+
+def test_unknown_close_retains_original_attempt_and_payload():
+    from backend.exchange.lifecycle import close_trade_position
+    t=record();run(trade_log.save_trade(t))
+    c=Client();c.account['balances']['SOL']={'free':1,'total':1,'value_usdt':100}
+    c.place_order=Mock(side_effect=TimeoutError());c.get_order_by_client_id=Mock(side_effect=TimeoutError())
+    with pytest.raises(OrderExecutionError): run(close_trade_position(t,client=c))
+    first_id=c.place_order.call_args.kwargs['client_order_id']
+    c.get_order_by_client_id=Mock(return_value=ack())
+    updated=run(close_trade_position(t,client=c))
+    assert updated.status==TradeStatus.CLOSED and c.place_order.call_count==1
+    c.get_order_by_client_id.assert_called_once_with('SOLUSDT',first_id)
+
+
+@pytest.mark.parametrize('first_status',['NEW','UNKNOWN','FILLED'])
+def test_futures_claim_rejects_opposite_reserved_entry(first_status):
+    from backend.store import order_intents
+    import time
+    c=Client();c.market='futures';c.account.update(can_trade=True,positions=[])
+    c.validate_account_mode=Mock()
+    c.get_execution_info=Mock(return_value=dict(status='TRADING',quote_asset='USDT',margin_asset='USDT',contract_type='PERPETUAL',filters=[dict(filterType='LOT_SIZE',minQty='.01',stepSize='.01')]))
+    c.get_execution_context=Mock(return_value=dict(account=c.account,score=.7,is_valid=True,side='BUY',stop_loss=98,take_profit=104))
+    if first_status=='UNKNOWN':
+        c.place_order=Mock(side_effect=TimeoutError());c.get_order_by_client_id=Mock(side_effect=TimeoutError())
+    else:
+        c.place_order=Mock(return_value=ack(first_status,1,1 if first_status=='FILLED' else 0))
+    snapshot_started=time.time()
+    try: run(submit_order(OrderRequest(market='futures',symbol='SOLUSDT',qty=1,client_order_id='reserved-long'),client=c))
+    except OrderExecutionError: pass
+    opposite=OrderRequest(market='futures',symbol='SOLUSDT',side='SELL',qty=1,client_order_id='reserved-short')
+    with pytest.raises(ValueError,match='direction'):
+        order_intents.claim(opposite,{'quantity':'1','notional':'100'},c.account,snapshot_started)
+
+
+def test_orchestrator_does_not_rewrite_already_persisted_entry(monkeypatch):
+    from types import SimpleNamespace
+    import threading
+    from backend.agents.orchestrator import TradingOrchestrator,portfolio_store
+    from backend.exchange.lifecycle import execute_entry,close_trade_position
+    c=Client();c.account['balances']['SOL']={'free':1,'total':1,'value_usdt':100}
+    c.place_order=Mock(return_value=ack(oid='entry'))
+    _,t=run(execute_entry(OrderRequest(symbol='SOLUSDT',qty=1,client_order_id='orchestrator'),client=c))
+    orchestrator=object.__new__(TradingOrchestrator)
+    orchestrator.executor=SimpleNamespace(execute=lambda *args:t)
+    queued=[]
+    class DeferredThread:
+        def __init__(self,target,**kw): queued.append(target)
+        def start(self): pass
+    monkeypatch.setattr(portfolio_store,'add_position',Mock())
+    with monkeypatch.context() as context:
+        context.setattr(threading,'Thread',DeferredThread)
+        orchestrator._node_execute(dict(underlying='SOLUSDT',debate_result=SimpleNamespace(winning_proposal_id=t.proposal.id),proposals=[t.proposal],risk_result=None))
+    c.place_order.return_value=ack(oid='exit',price=110)
+    run(close_trade_position(t,client=c))
+    for target in queued: target()
+    stored=run(trade_log.get_trade_by_id(t.trade_id))
+    assert stored.status==TradeStatus.CLOSED and stored.closed_qty==1 and stored.realized_pnl==10
+
+
+def test_orchestrator_records_undispatched_rejection_without_position(monkeypatch):
+    from types import SimpleNamespace
+    from backend.agents.orchestrator import TradingOrchestrator,portfolio_store
+    rejected=record();rejected.status=TradeStatus.CANCELLED;rejected.exchange_status='NOT_DISPATCHED'
+    orchestrator=object.__new__(TradingOrchestrator)
+    orchestrator.executor=SimpleNamespace(execute=lambda *args:rejected)
+    add=Mock();monkeypatch.setattr(portfolio_store,'add_position',add)
+    orchestrator._node_execute(dict(underlying='SOLUSDT',debate_result=SimpleNamespace(winning_proposal_id=rejected.proposal.id),proposals=[rejected.proposal],risk_result=None))
+    stored=run(trade_log.get_trade_by_id(rejected.trade_id))
+    assert stored is not None and stored.status==TradeStatus.CANCELLED
+    add.assert_not_called()
+
+
+def test_concurrent_close_callers_share_one_attempt():
+    from backend.exchange.lifecycle import close_trade_position
+    t=record();run(trade_log.save_trade(t))
+    c=Client();c.account['balances']['SOL']={'free':1,'total':1,'value_usdt':100}
+    c.place_order=Mock(return_value=ack());c.get_order_by_client_id=Mock(return_value=ack())
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results=list(executor.map(lambda _:run(close_trade_position(t,client=c)),range(2)))
+    assert c.place_order.call_count==1
+    stored=run(trade_log.get_trade_by_id(t.trade_id))
+    assert stored.status==TradeStatus.CLOSED and stored.exit_attempt==1
+
+
+def test_reapplying_terminal_exit_cannot_clear_a_new_attempt():
+    from backend.exchange.lifecycle import close_trade_position
+    from backend.exchange.schemas import OrderResult
+    from backend.store import order_intents
+    t=record();run(trade_log.save_trade(t))
+    c=Client();c.account['balances']['SOL']={'free':1,'total':1,'value_usdt':100}
+    c.place_order=Mock(return_value=ack('CANCELED',1,0))
+    run(close_trade_position(t,client=c))
+    old_id=c.place_order.call_args.kwargs['client_order_id']
+    old=OrderResult.model_validate_json(order_intents.lookup('spot',old_id)['result'])
+    prepared=run(trade_log.prepare_exit(t.trade_id))
+    reapplied=run(trade_log.apply_exit(t.trade_id,old))
+    assert reapplied.exit_client_order_id==prepared.exit_client_order_id!=old_id
+    assert reapplied.exit_attempt==1
+
+
+def test_opposite_futures_concurrent_claims_cannot_both_reserve():
+    from backend.store import order_intents
+    import time
+    account={'equity':10000,'buying_power':10000,'positions':[]}
+    started=time.time()
+    def claim(side):
+        request=OrderRequest(market='futures',symbol='SOLUSDT',side=side,qty=1,client_order_id=side)
+        try:
+            order_intents.claim(request,{'quantity':'1','notional':'100'},account,started)
+            return True
+        except ValueError: return False
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results=list(executor.map(claim,['BUY','SELL']))
+    assert sum(results)==1

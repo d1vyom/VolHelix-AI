@@ -1,9 +1,8 @@
 """Narrow market-aware hooks shared by manual, agent, bot and guardian paths."""
 import asyncio
-import hashlib
 from datetime import datetime
 
-from backend.exchange.schemas import OrderRequest
+from backend.exchange.schemas import OrderRequest, OrderResult
 from backend.exchange.execution import submit_order, parse_acknowledgement, OrderExecutionError
 from backend.models.trade import TradeRecord, TradeProposal
 from backend.models.market import TradeStatus
@@ -88,36 +87,41 @@ async def close_trade_position(trade, *, client, exit_type=TradeStatus.CLOSED):
         trade=await cancel_trade_order(trade,client=client)
         if trade.exchange_status not in TERMINAL:
             raise OrderExecutionError('Entry cancellation unconfirmed; position retained')
+    trade=await trade_log.prepare_exit(trade.trade_id)
     if trade.proposal.qty<=0:
-        raise OrderExecutionError('No confirmed exposure to close')
-    # Reuse the same durable exit intent until a terminal acknowledgement permits
-    # another close for a residual. Concurrent callers select the same client ID.
-    client_id=trade.exit_client_order_id or 'vhx-'+hashlib.sha256(f'{trade.trade_id}:{trade.closed_qty}'.encode()).hexdigest()[:32]
-    # Persist the original close payload; partial fills change the local residual.
-    if trade.exit_client_order_id:
-        intent=await asyncio.to_thread(order_intents.lookup,trade.market,client_id)
-        if intent:
-            request=OrderRequest.model_validate_json(intent['payload'])
-            if intent['status'] in TERMINAL:
-                result=await submit_order(request,client=client)
+        return trade
+    client_id=trade.exit_client_order_id
+    await asyncio.to_thread(order_intents.bind_account,client,trade.market)
+    intent=await asyncio.to_thread(order_intents.lookup,trade.market,client_id)
+    if intent:
+        request=OrderRequest.model_validate_json(intent['payload'])
+        if intent['status'] in TERMINAL:
+            result=OrderResult.model_validate_json(intent['result'])
+        else:
+            try:
+                raw=await asyncio.to_thread(client.get_order_by_client_id,request.symbol,client_id)
+                result=parse_acknowledgement(raw,request,trade.current_price or trade.entry_price)
+                result=await asyncio.to_thread(order_intents.finish,request,result)
+            except Exception as exc:
+                raise OrderExecutionError('Exit reconciliation unavailable; retained exposure') from exc
+    else:
+        request=OrderRequest(market=trade.market,symbol=trade.proposal.symbol,
+            side='SELL' if trade.proposal.side=='BUY' else 'BUY',qty=trade.proposal.qty,
+            reduce_only=True,client_order_id=client_id)
+        try:
+            result=await submit_order(request,client=client)
+        except OrderExecutionError:
+            # A confirmed rejection is terminal too. Apply it before propagating
+            # failure so the next close can choose a new durable generation.
+            intent=await asyncio.to_thread(order_intents.lookup,trade.market,client_id)
+            if intent and intent['status'] in TERMINAL and intent['result']:
+                result=OrderResult.model_validate_json(intent['result'])
             else:
-                try:
-                    await asyncio.to_thread(order_intents.bind_account,client,trade.market)
-                    raw=await asyncio.to_thread(client.get_order_by_client_id,request.symbol,client_id)
-                    result=parse_acknowledgement(raw,request,trade.current_price or trade.entry_price)
-                    result=await asyncio.to_thread(order_intents.finish,request,result)
-                except AttributeError:
-                    result=await submit_order(request,client=client)
-                except Exception as exc:
-                    raise OrderExecutionError('Exit reconciliation unavailable; retained exposure') from exc
-            return await trade_log.apply_exit(trade.trade_id,result,exit_type)
-    request=OrderRequest(market=trade.market,symbol=trade.proposal.symbol,
-        side='SELL' if trade.proposal.side=='BUY' else 'BUY',qty=trade.proposal.qty,
-        reduce_only=True,client_order_id=client_id)
-    await trade_log.set_exit_intent(trade.trade_id,client_id)
-    # Spot closes sell only this recorded exposure, validated against free inventory.
-    result=await submit_order(request,client=client)
-    return await trade_log.apply_exit(trade.trade_id,result,exit_type)
+                raise
+    updated=await trade_log.apply_exit(trade.trade_id,result,exit_type)
+    if result.exchange_status=='REJECTED':
+        raise OrderExecutionError('Exchange rejected exit; position retained')
+    return updated
 
 
 async def recover_entries():

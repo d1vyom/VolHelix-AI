@@ -93,6 +93,13 @@ def claim(request, verdict, account, snapshot_started):
                 if quantity+inventory_reserved>abs(signed):
                     raise ValueError('Exit reservation exceeds position')
         else:
+            if request.market=='futures':
+                signed=sum(float(p['qty']) for p in account.get('positions',[]) if p['symbol']==request.symbol)
+                if (signed>0 and request.side=='SELL') or (signed<0 and request.side=='BUY'):
+                    raise ValueError('Futures entry direction conflicts with actual position')
+                if any(row['symbol']==request.symbol and not p['reduce_only'] and p['side']!=request.side
+                       for row,p,q in active):
+                    raise ValueError('Futures entry direction conflicts with reserved entry')
             exposure={}
             if request.market=='futures':
                 exposure={p['symbol']:float(p['market_value']) for p in account.get('positions',[]) if float(p['qty'])!=0}

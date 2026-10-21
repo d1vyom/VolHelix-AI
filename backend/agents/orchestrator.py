@@ -17,7 +17,7 @@ from backend.risk.risk_gate import RiskGate
 from backend.agents.regime_engine import RegimeEngine
 from backend.agents.post_mortem import PostMortemAgent
 
-from backend.models.market import MarketSignal, RiskFlags, Regime
+from backend.models.market import MarketSignal, RiskFlags, Regime, TradeStatus
 from backend.models.trade import TradeProposal, TradeRecord
 from backend.models.debate import AgentVote, DebateResult, PostMortem
 from backend.store.postmortem_store import postmortem_store
@@ -190,16 +190,13 @@ class TradingOrchestrator:
         
         record = self.executor.execute(winning_prop, state["risk_result"])
         
-        # Fire-and-forget persistence in a background thread (works in sync context)
-        import threading
-        def _save():
-            import asyncio as _asyncio
-            _asyncio.run(trade_log.save_trade(record))
-        threading.Thread(target=_save, daemon=True).start()
-        
-        # Update portfolio store in memory
-        portfolio_store.add_position(record) # Note: add_position needs implementing in portfolio_store
-        
+        # Acknowledged executions are already persisted by execute_entry.
+        # Rejected/undispatched proposals need only an insert-only audit row.
+        if record.exchange_status=='NOT_DISPATCHED':
+            asyncio.run(trade_log.save_trade_if_absent(record))
+        elif record.status in (TradeStatus.OPEN,TradeStatus.PENDING) and record.proposal.qty>0:
+            portfolio_store.add_position(record)
+
         return {"trade_record": record}
         
     def run_cycle(self, underlying: str):

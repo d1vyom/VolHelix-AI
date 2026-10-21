@@ -91,6 +91,7 @@ class TradeRecord(BaseModel):
     client_order_id: Optional[str] = None
     closed_qty: float = 0.0
     exit_client_order_id: Optional[str] = None
+    exit_attempt: int = Field(default=0, ge=0)
     exit_executions: dict[str, float] = Field(default_factory=dict)
     commission: float = 0.0
     commission_asset: str = ""
