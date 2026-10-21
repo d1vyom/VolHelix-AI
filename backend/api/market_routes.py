@@ -9,7 +9,10 @@ router = APIRouter()
 
 async def _read(market, method, *args, **kwargs):
     def fetch():
-        return getattr(registry.get_exchange_client(market),method)(*args,**kwargs)
+        # Legacy Spot list reads use [] on errors; common reads must distinguish
+        # an unavailable upstream from a verified empty result.
+        params = dict(kwargs, strict=True) if market=='spot' and method in ('get_klines','get_positions') else kwargs
+        return getattr(registry.get_exchange_client(market),method)(*args,**params)
     try:
         result = await asyncio.to_thread(fetch)
         if isinstance(result,dict) and result.get('error'):

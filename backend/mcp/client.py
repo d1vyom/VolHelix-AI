@@ -182,7 +182,7 @@ class BinanceClient:
         self._log_call("get_wallet_balances", {}, res, start)
         return res
 
-    def get_positions(self) -> List[dict]:
+    def get_positions(self, *, strict: bool = False) -> List[dict]:
         """
         Get crypto spot holdings as positions.
         Returns all valid non-USDT assets with positive balance and current USDT value.
@@ -191,8 +191,15 @@ class BinanceClient:
         positions = []
         try:
             acct = self.get_account()
+            if strict and acct.get('error'):
+                raise ValueError(acct['error'])
             balances = acct.get("balances", {})
-            tickers_map = {t["symbol"]: t["price"] for t in self.get_all_tickers()}
+            if strict:
+                needs_valuation = any(asset != 'USDT' and amounts['total'] > 0 for asset, amounts in balances.items())
+                tickers = self.get_all_tickers(strict=True) if needs_valuation else []
+            else:
+                tickers = self.get_all_tickers()
+            tickers_map = {t["symbol"]: t["price"] for t in tickers}
 
             for asset, amounts in balances.items():
                 if asset != "USDT" and amounts["total"] > 0:
@@ -213,6 +220,8 @@ class BinanceClient:
                             })
         except Exception as e:
             logger.error(f"get_positions error: {e}")
+            if strict:
+                raise
         self._log_call("get_positions", {}, positions, start)
         return positions
 
@@ -277,7 +286,7 @@ class BinanceClient:
 
     get_ticker_24hr = get_24hr_ticker
 
-    def get_all_tickers(self) -> List[dict]:
+    def get_all_tickers(self, *, strict: bool = False) -> List[dict]:
         """Get prices for all active symbols (Production)."""
         cache_key = "all_tickers"
         cached = _get_client_cache(cache_key, ttl_seconds=5.0)
@@ -294,11 +303,13 @@ class BinanceClient:
             _set_client_cache(cache_key, res)
         except Exception as e:
             logger.error(f"get_all_tickers error: {e}")
+            if strict:
+                raise
             res = []
         self._log_call("get_all_tickers", {}, res, start)
         return res
 
-    def get_klines(self, symbol: str, interval: str = "1h", limit: int = 100) -> List[dict]:
+    def get_klines(self, symbol: str, interval: str = "1h", limit: int = 100, *, strict: bool = False) -> List[dict]:
         """
         Get candlestick/kline bars (Production).
         Intervals: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
@@ -333,6 +344,8 @@ class BinanceClient:
             _set_client_cache(cache_key, res)
         except Exception as e:
             logger.error(f"get_klines error for {symbol}: {e}")
+            if strict:
+                raise
             res = []
         self._log_call("get_klines", {"symbol": symbol, "interval": interval, "limit": limit}, res, start)
         return res
