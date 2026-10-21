@@ -46,10 +46,11 @@ async def _release(sid: str, market: str, symbol: str) -> None:
     if _room_refs[room] <= 0:
         _room_refs.pop(room, None)
         task = broadcasters.pop(room, None)
+        # Detach this generation before yielding; a new SID can replace it below.
+        last_emit_state.pop(room, None)
         if task:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        last_emit_state.pop(room, None)
     await _selected_hub(market).unsubscribe(symbol)
     await sio.leave_room(sid, room)
 

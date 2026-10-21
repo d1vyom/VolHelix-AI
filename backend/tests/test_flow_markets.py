@@ -45,7 +45,7 @@ def test_futures_book_bridges_snapshot_inclusively_and_checks_pu():
     assert book.last_update_id == 16
 
 
-def test_spot_ignores_stale_events_but_preserves_first_sequence_rule():
+def test_spot_accepts_overlap_ignores_stale_events_and_rejects_forward_gaps():
     book = LocalOrderBook("BTCUSDT", .01)
     book.process_diff(delta(9, 10))
     assert not book.process_snapshot(snapshot())
@@ -53,7 +53,21 @@ def test_spot_ignores_stale_events_but_preserves_first_sequence_rule():
     assert book.process_snapshot(snapshot())
     assert book.process_diff(delta(10, 12))
     assert book.last_update_id == 12
-    assert not book.process_diff(delta(14, 15))
+    assert book.process_diff(delta(12, 14))  # range contains next required ID13
+    assert book.last_update_id == 14
+    assert book.process_diff(delta(10, 13).model_copy(update={"bids": [[100, 99]]}))
+    assert book.bids[100] == 2  # stale update must not change quantities
+    assert not book.process_diff(delta(16, 17))  # true gap at ID15
+    assert not book.is_synced
+
+
+def test_spot_replays_buffered_overlap_after_snapshot():
+    book = LocalOrderBook("BTCUSDT", .01)
+    book.process_diff(delta(9, 12))
+    book.process_diff(delta(12, 14).model_copy(update={"bids": [[100, 3]]}))
+    assert book.process_snapshot(snapshot())
+    assert book.is_synced and book.last_update_id == 14
+    assert book.bids[100] == 3
 
 
 def test_futures_connector_routes_and_parses_independent_stream_groups():
@@ -444,6 +458,73 @@ async def test_startup_failure_is_retryable_and_disconnect_during_initialization
         assert not futures.dynamic_subs and not futures.books
         assert not ws.broadcasters
     finally:
+        await ws.stop_broadcasters()
+        await spot.stop()
+        await futures.stop()
+
+
+@pytest.mark.anyio
+async def test_new_sid_replaces_cancelling_last_viewer_and_keeps_emitting(hubs, monkeypatch):
+    ws = importlib.import_module("backend.api.websocket")
+    spot, futures = hubs
+    monkeypatch.setattr(ws, "hub", spot)
+    monkeypatch.setattr(ws.sio, "enter_room", AsyncMock())
+    monkeypatch.setattr(ws.sio, "leave_room", AsyncMock())
+    old_started, cancelling, finish_cancel, tape_received = (asyncio.Event() for _ in range(4))
+    original_broadcaster = ws._broadcaster_task
+    frames = []
+    initial_task = True
+
+    async def delayed_old_broadcaster(symbol, market):
+        nonlocal initial_task
+        if not initial_task:
+            return await original_broadcaster(symbol, market)
+        initial_task = False
+        old_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelling.set()
+            await finish_cancel.wait()
+
+    async def emit(event, payload, **kwargs):
+        frames.append((event, payload, kwargs))
+        if event == "flow:tape":
+            tape_received.set()
+
+    monkeypatch.setattr(ws, "_broadcaster_task", delayed_old_broadcaster)
+    monkeypatch.setattr(ws.sio, "emit", emit)
+    selection = {"market": "futures", "symbol": "ETHUSDT"}
+    room = "flow:futures:ETHUSDT"
+    releasing = None
+    try:
+        assert (await ws.flow_subscribe("old", selection))["success"]
+        await asyncio.wait_for(old_started.wait(), 1)
+        old_task = ws.broadcasters[room]
+        releasing = asyncio.create_task(ws.flow_unsubscribe("old", selection))
+        await asyncio.wait_for(cancelling.wait(), 1)
+        assert (await ws.flow_subscribe("new", selection))["success"]
+        replacement = ws.broadcasters[room]
+        assert replacement is not old_task
+        replacement_state = ws.last_emit_state[room]
+        finish_cancel.set()
+        await asyncio.wait_for(releasing, 1)
+        assert ws.last_emit_state.get(room) is replacement_state
+        assert ws.broadcasters[room] is replacement
+        assert futures.dynamic_subs == {"ETHUSDT": 1}
+        assert ws._room_refs[room] == 1
+        futures._on_message(trade("200", "ETHUSDT"))
+        await asyncio.wait_for(tape_received.wait(), 1)
+        tape = next(payload for event, payload, _ in frames if event == "flow:tape")
+        assert tape["market"] == "futures" and tape["entries"][0]["price"] == 200
+        await ws.flow_unsubscribe("new", selection)
+        assert replacement.done()
+        assert room not in ws.broadcasters and room not in ws.last_emit_state
+        assert not futures.dynamic_subs and not futures.books
+    finally:
+        finish_cancel.set()
+        if releasing:
+            await releasing
         await ws.stop_broadcasters()
         await spot.stop()
         await futures.stop()

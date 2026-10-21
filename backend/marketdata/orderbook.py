@@ -49,7 +49,7 @@ class LocalOrderBook:
             return True
         contiguous = (delta.previous_final_update_id == self.last_update_id
                       if self.market == "futures"
-                      else delta.first_update_id == self.last_update_id + 1)
+                      else delta.first_update_id <= self.last_update_id + 1 <= delta.final_update_id)
         if not contiguous:
             self.is_synced = False
             self._event_buffer.append(delta)
