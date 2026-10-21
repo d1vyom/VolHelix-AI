@@ -79,7 +79,7 @@ def test_order_lifecycle_market_and_limit():
     assert data["status"] == "OPEN"
     assert data["order_type"] == "MARKET"
     assert data["qty"] == 0.5
-    market_order_id = data["order_id"]
+    market_order_id = data["trade_id"]
 
     # Verify market order appears in open positions
     open_trades = asyncio.run(trade_log.get_open_trades())
@@ -100,7 +100,7 @@ def test_order_lifecycle_market_and_limit():
     assert lmt_data["status"] == "PENDING"
     assert lmt_data["order_type"] == "LIMIT"
     assert lmt_data["limit_price"] == 550.00
-    limit_order_id = lmt_data["order_id"]
+    limit_order_id = lmt_data["trade_id"]
 
     # Verify limit order appears in pending trades, NOT open trades
     pending_trades = asyncio.run(trade_log.get_pending_trades())
@@ -111,9 +111,14 @@ def test_order_lifecycle_market_and_limit():
     assert limit_order_id not in [t.trade_id for t in open_trades_after]
 
     # 3. Test Fill Pending Limit Order via API
-    fill_res = client.post(f"/api/trades/{limit_order_id}/fill", json={
-        "fill_price": 549.50
-    })
+    # Manual fill prices cannot authorize executions. Supply a real SDK status
+    # response and reconcile without a synthetic fill instruction.
+    exchange = __import__('backend.api.routes',fromlist=['_binance_client'])._binance_client
+    exchange.trading_client.get_order.side_effect = None
+    exchange.trading_client.get_order.return_value = {
+        'orderId':lmt_data['order_id'],'status':'FILLED','origQty':'0.1',
+        'executedQty':'0.1','cummulativeQuoteQty':'54.95'}
+    fill_res = client.post(f"/api/trades/{limit_order_id}/fill", json={})
     assert fill_res.status_code == 200
     fill_data = fill_res.json()
     assert fill_data["success"] is True

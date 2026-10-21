@@ -54,4 +54,8 @@ async def account(market: Market = 'spot'):
 
 @router.get('/api/market/positions')
 async def positions(market: Market = 'spot'):
-    return {'market':market,'testnet':True,'positions':await _read(market,'get_positions')}
+    from backend.exchange.lifecycle import position_snapshot
+    result=await position_snapshot(market)
+    if not result['available'] and not result['positions']:
+        raise HTTPException(status_code=503,detail=f'{market} positions unavailable')
+    return result

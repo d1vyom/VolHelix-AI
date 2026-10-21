@@ -457,6 +457,11 @@ class BinanceClient:
         levels = setup.get('levels', {})
         return dict(setup,account=account,stop_loss=levels.get('stop_loss_price'),take_profit=levels.get('take_profit_price'))
 
+    def get_order(self, symbol: str, order_id: str) -> dict:
+        raw=self.trading_client.get_order(symbol=symbol,orderId=order_id)
+        return {'order_id':raw['orderId'],'status':raw['status'],'orig_qty':raw['origQty'],
+                'executed_qty':raw['executedQty'],'cummulative_quote_qty':raw.get('cummulativeQuoteQty',0),'fills':raw.get('fills',[])}
+
     def get_order_by_client_id(self, symbol: str, client_order_id: str) -> dict:
         order = self.trading_client.get_order(symbol=symbol,origClientOrderId=client_order_id)
         return {'order_id':order['orderId'],'status':order['status'],'orig_qty':order['origQty'],

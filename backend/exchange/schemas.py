@@ -33,7 +33,7 @@ class OrderResult(BaseModel):
     """Actual exchange acknowledgement; zero execution is not a fill."""
     order_id: str
     client_order_id: str | None = None
-    exchange_status: Literal['NEW', 'PARTIALLY_FILLED', 'FILLED', 'PENDING_NEW']
+    exchange_status: Literal['NEW', 'PARTIALLY_FILLED', 'FILLED', 'PENDING_NEW', 'CANCELED', 'EXPIRED', 'EXPIRED_IN_MATCH', 'REJECTED']
     executed_qty: float = Field(ge=0, allow_inf_nan=False)
     orig_qty: float = Field(ge=0, allow_inf_nan=False)
     entry_price: float = Field(ge=0, allow_inf_nan=False)

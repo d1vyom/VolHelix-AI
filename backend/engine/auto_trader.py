@@ -1,4 +1,5 @@
 import time
+import math
 import threading
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -10,6 +11,9 @@ from backend.models.market import StrategyType, TradeStatus
 from backend.models.trade import TradeProposal, TradeRecord
 from backend.store.trade_log import trade_log
 from backend.mcp.client import BinanceClient
+from backend.exchange import registry
+from backend.exchange.lifecycle import reconcile_trade, close_trade_position, execute_entry, recover_entries
+from backend.exchange.schemas import OrderRequest
 from backend.engine.order_flow import (
     analyze_order_flow,
     calculate_master_strategy_tp_sl,
@@ -98,164 +102,46 @@ class AutoTrader:
         Monitors active positions, evaluates dynamic TP and SL thresholds,
         and automatically closes positions when TP or SL is reached.
         """
-        client = self._get_binance_client()
-        try:
-            positions = client.get_positions()
-            pos_by_sym = {p["symbol"]: p for p in positions}
-        except Exception as e:
-            logger.debug(f"Position Guardian failed to query Binance positions: {e}")
-            return
-
-        try:
-            open_trades = asyncio.run(trade_log.get_open_trades())
-        except Exception as e:
-            logger.debug(f"Position Guardian failed to fetch open trades from DB: {e}")
-            return
-
-        for trade in open_trades:
-            sym = trade.proposal.symbol or trade.proposal.underlying or "BTCUSDT"
-            tp_price = trade.take_profit_price or getattr(trade.proposal, "take_profit", None)
-            sl_price = trade.stop_loss_price or getattr(trade.proposal, "stop_loss", None)
-            entry_price = trade.entry_price or trade.proposal.entry_price or (trade.proposal.breakevens[0] if trade.proposal.breakevens else 0.0)
-
-            # Get current price
-            current_price = 0.0
-            if sym in pos_by_sym:
-                current_price = pos_by_sym[sym]["current_price"]
-                qty = pos_by_sym[sym]["qty"]
-            else:
-                p_data = client.get_price(sym)
-                current_price = p_data.get("price", entry_price)
-                qty = trade.proposal.qty or 0.001
-
-            if current_price <= 0:
-                current_price = entry_price
-
-            # Case A: Position is active on Binance
-            if sym in pos_by_sym:
-                # Check Take Profit
-                if tp_price and tp_price > 0 and current_price >= tp_price:
-                    logger.info(f"Target reached for {sym}! Current: ${current_price:.2f} >= TP: ${tp_price:.2f}. Executing Take Profit.")
-                    self._close_position_and_finalize_trade(
-                        client=client,
-                        trade=trade,
-                        symbol=sym,
-                        exit_price=current_price,
-                        entry_price=entry_price,
-                        qty=qty,
-                        exit_type="TAKE_PROFIT",
-                        reason=f"Take Profit Target Reached: Current ${current_price:.2f} >= TP ${tp_price:.2f}"
-                    )
+        asyncio.run(recover_entries())
+        # Each order/market is isolated: unavailable Spot data cannot stop Futures.
+        for trade in asyncio.run(trade_log.get_pending_trades()):
+            try:
+                client=registry.get_exchange_client(trade.market)
+                asyncio.run(reconcile_trade(trade,client=client))
+            except Exception as exc:
+                logger.warning(f'Pending reconciliation retained {trade.trade_id}: {exc}')
+        for trade in asyncio.run(trade_log.get_open_trades()):
+            try:
+                client=registry.get_exchange_client(trade.market)
+                if trade.exit_client_order_id:
+                    asyncio.run(close_trade_position(trade,client=client))
                     continue
-
-                # Check Stop Loss
-                if sl_price and sl_price > 0 and current_price <= sl_price:
-                    logger.info(f"Stop breached for {sym}! Current: ${current_price:.2f} <= SL: ${sl_price:.2f}. Executing Stop Loss.")
-                    self._close_position_and_finalize_trade(
-                        client=client,
-                        trade=trade,
-                        symbol=sym,
-                        exit_price=current_price,
-                        entry_price=entry_price,
-                        qty=qty,
-                        exit_type="STOP_LOSS",
-                        reason=f"Stop Loss Protection Triggered: Current ${current_price:.2f} <= SL ${sl_price:.2f}"
-                    )
+                price=float(client.get_price(trade.proposal.symbol)['price'])
+                if not math.isfinite(price) or price<=0:
                     continue
+                long=trade.proposal.side=='BUY'
+                tp=trade.take_profit_price or trade.proposal.take_profit
+                sl=trade.stop_loss_price or trade.proposal.stop_loss
+                hit_tp=tp and (price>=tp if long else price<=tp)
+                hit_sl=sl and (price<=sl if long else price>=sl)
+                if hit_tp or hit_sl:
+                    self._close_position_and_finalize_trade(client=client,trade=trade,
+                        symbol=trade.proposal.symbol,exit_price=price,entry_price=trade.entry_price,
+                        qty=trade.proposal.qty,exit_type='TAKE_PROFIT' if hit_tp else 'STOP_LOSS',
+                        reason='Confirmed market price crossed protective threshold')
+            except Exception as exc:
+                logger.warning(f'Guardian retained {trade.trade_id}: {exc}')
 
-            else:
-                # Case B: Trade recorded in DB but position not in wallet (e.g. manually sold or stopped)
-                entry_time_str = trade.entry_time or ""
-                time_elapsed = 999
-                if entry_time_str:
-                    try:
-                        time_elapsed = (datetime.now() - datetime.fromisoformat(entry_time_str)).total_seconds()
-                    except Exception:
-                        time_elapsed = 999
+    def _close_position_and_finalize_trade(self,client,trade,symbol,exit_price,entry_price,qty,exit_type,reason):
+        status=TradeStatus.TAKE_PROFIT if exit_type=='TAKE_PROFIT' else TradeStatus.STOPPED_OUT
+        updated=asyncio.run(close_trade_position(trade,client=client,exit_type=status))
+        if updated.exit_price is not None:
+            self._emit_guardian_event(exit_type,symbol,updated.exit_price,updated.realized_pnl,
+                f'{trade.market} {symbol}: {updated.status.value}; remaining {updated.proposal.qty}. {reason}',
+                market=updated.market,trade_id=updated.trade_id,status=updated.status.value,qty=updated.proposal.qty)
 
-                if time_elapsed > 30:
-                    realized_pnl = round((current_price - entry_price) * qty, 2)
-                    exit_type = "TAKE_PROFIT" if (tp_price and current_price >= tp_price * 0.99) else "STOP_LOSS"
-                    trade.status = TradeStatus.CLOSED
-                    trade.realized_pnl = realized_pnl
-                    trade.exit_time = datetime.now().isoformat()
-                    trade.exit_price = current_price
-                    asyncio.run(trade_log.save_trade(trade))
-
-                    msg = f"Position {sym} synchronized with wallet. Exit: ${current_price:.2f} | Realized PnL: ${realized_pnl:+.2f}"
-                    logger.info(msg)
-                    self._emit_guardian_event(exit_type, sym, current_price, realized_pnl, msg)
-
-        # Check and fill pending limit orders when market price reaches limit
-        try:
-            pending_trades = asyncio.run(trade_log.get_pending_trades())
-            for ptrade in pending_trades:
-                sym = ptrade.proposal.symbol or ptrade.proposal.underlying or "BTCUSDT"
-                limit_p = ptrade.proposal.limit_price or (ptrade.proposal.breakevens[0] if ptrade.proposal.breakevens else None)
-                if not limit_p:
-                    continue
-
-                p_info = client.get_price(sym)
-                cur_price = p_info.get("price", 0.0)
-                if cur_price <= 0:
-                    continue
-
-                side = (ptrade.proposal.side or "BUY").upper()
-                should_fill = False
-                if side == "BUY" and cur_price <= limit_p:
-                    should_fill = True
-                elif side == "SELL" and cur_price >= limit_p:
-                    should_fill = True
-
-                if should_fill:
-                    asyncio.run(trade_log.fill_pending_trade(ptrade.trade_id, fill_price=cur_price))
-                    msg = f"LIMIT FILLED: {sym} limit order {ptrade.trade_id[:8]} filled at ${cur_price:.2f} (Limit: ${limit_p:.2f}). Moved to Positions Tab."
-                    logger.info(msg)
-                    self._emit_fill_event(ptrade.trade_id, sym, cur_price, msg)
-        except Exception as e:
-            logger.debug(f"Position Guardian pending limit check error: {e}")
-
-    def _close_position_and_finalize_trade(
-        self,
-        client: BinanceClient,
-        trade: TradeRecord,
-        symbol: str,
-        exit_price: float,
-        entry_price: float,
-        qty: float,
-        exit_type: str,
-        reason: str
-    ):
-        """Closes crypto spot position by selling held asset on testnet and updates DB."""
-        try:
-            # 1. Cancel open orders for this pair
-            client.cancel_all_orders(symbol)
-            time.sleep(0.3)
-
-            # 2. Sell held quantity on testnet
-            if qty > 0:
-                client.place_order(
-                    reduce_only=True,
-                    symbol=symbol,
-                    side="SELL",
-                    order_type="MARKET",
-                    quantity=qty
-                )
-        except Exception as e:
-            logger.warning(f"Error executing position close for {symbol}: {e}")
-
-        realized_pnl = round((exit_price - entry_price) * qty, 2)
-        trade.status = TradeStatus.CLOSED
-        trade.realized_pnl = realized_pnl
-        trade.exit_time = datetime.now().isoformat()
-        trade.exit_price = exit_price
-        asyncio.run(trade_log.save_trade(trade))
-
-        msg = f"AUTO-EXIT [{exit_type}]: {symbol} closed at ${exit_price:.2f}. Realized PnL: ${realized_pnl:+.2f}. {reason}"
-        logger.info(msg)
-        self._emit_guardian_event(exit_type, symbol, exit_price, realized_pnl, msg)
-
-    def _emit_guardian_event(self, exit_type: str, symbol: str, price: float, pnl: float, message: str):
+    def _emit_guardian_event(self, exit_type: str, symbol: str, price: float, pnl: float, message: str,
+                             *, market='spot', trade_id=None, status='CLOSED', qty=0):
         try:
             from backend.api.websocket import sio
             async def _emit():
@@ -265,8 +151,11 @@ class AutoTrader:
                     "confidence": 1.0
                 })
                 await sio.emit("trade_executed", {
-                    "trade_id": symbol,
-                    "status": "CLOSED",
+                    "trade_id": trade_id,
+                    "market": market,
+                    "symbol": symbol,
+                    "status": status,
+                    "qty": qty,
                     "realized_pnl": pnl,
                     "exit_price": price
                 })
@@ -538,59 +427,26 @@ class AutoTrader:
         tp_price = levels["take_profit_price"]
         sl_price = levels["stop_loss_price"]
 
-        # 5. Place Paper Order on Binance Spot Testnet
-        # Size position safely at 2.0% of NAV (~$200 USDT)
-        order_quote_qty = 200.0
-        calculated_qty = round(order_quote_qty / current_price, 5) if current_price > 0 else 0.001
-
-        order_res = client.place_order(
-            symbol=chosen_symbol,
-            side="BUY",
-            order_type="MARKET",
-            quote_quantity=order_quote_qty
-        )
-        order_id = str(order_res.get("order_id", f"BINANCE-{int(time.time())}"))
-        order_type = "SPOT_MARKET"
-
-        # 6. Build and persist TradeRecord to SQLite ledger
-        proposal = TradeProposal(
-            id=order_id,
-            symbol=chosen_symbol,
-            underlying=chosen_symbol,
-            strategy_type=StrategyType.MASTER_ORDER_FLOW,
-            side="BUY",
-            order_type="MARKET",
-            qty=calculated_qty,
-            quote_qty=order_quote_qty,
-            entry_price=current_price,
-            take_profit=tp_price,
-            stop_loss=sl_price,
-            max_profit=round(current_price * (levels["take_profit_pct"] / 100) * calculated_qty, 2),
-            max_loss=round(current_price * (levels["stop_loss_pct"] / 100) * calculated_qty, 2),
-            breakevens=[round(current_price, 2)],
-            thesis=f"Master Strategy Execution ({eval_data['status_label']}, Score {eval_data['score']}): TP ${tp_price} ({levels['tp_reason']}) | SL ${sl_price} ({levels['sl_reason']}) [R:R {levels['risk_reward_ratio']}:1]"
-        )
-
-        trade_rec = TradeRecord(
-            trade_id=order_id,
-            proposal=proposal,
-            status=TradeStatus.OPEN,
-            entry_time=datetime.now().isoformat(),
-            entry_price=current_price,
-            realized_pnl=0.0,
-            take_profit_price=tp_price,
-            stop_loss_price=sl_price,
-            binance_order_id=order_id
-        )
-
-        def _save():
-            asyncio.run(trade_log.save_trade(trade_rec))
-        threading.Thread(target=_save, daemon=True).start()
+        # The shared dispatch path rechecks fresh risk and persists intent first.
+        try:
+            request=OrderRequest(symbol=chosen_symbol,side=eval_data.get('side','BUY'),quote_quantity=200)
+            order_result,trade_rec=asyncio.run(execute_entry(request,client=client))
+        except Exception as exc:
+            return {'success':False,'executed':False,'symbol':chosen_symbol,'reason':str(exc),
+                    'scanner_diagnostics':self.scanner_diagnostics}
+        order_id=trade_rec.trade_id
+        order_type='SPOT_MARKET'
+        current_price=trade_rec.entry_price
+        tp_price=trade_rec.take_profit_price
+        sl_price=trade_rec.stop_loss_price
 
         self.total_automated_trades += 1
         result = {
             "success": True,
-            "executed": True,
+            "executed": order_result.executed_qty>0,
+            "exchange_status":order_result.exchange_status,
+            "status":trade_rec.status.value,
+            "qty":order_result.executed_qty,
             "trade_id": order_id,
             "symbol": chosen_symbol,
             "strategy": "MASTER_ORDER_FLOW",

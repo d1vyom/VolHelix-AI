@@ -66,6 +66,6 @@ def validate_futures_order(request, *, client):
                 'market':'futures','testnet':True,'symbol':request.symbol,'side':request.side,
                 'quantity':str(quantity),'price':str(price),'market_price':str(current),'notional':str(notional),
                 'order_type':request.order_type,'reduce_only':request.reduce_only,
-                'risk_coverage':account.get('coverage'),'coverage_started_at':account.get('coverage_started_at')}
+                'risk_coverage':account.get('coverage'),'coverage_started_at':account.get('coverage_started_at'),'_reservation_account':account}
     except Exception as exc:
         return {'approved':False,'checks':checks,'reason':str(exc),'market':'futures','testnet':True}

@@ -88,6 +88,10 @@ class TradeRecord(BaseModel):
     exchange_status: Optional[str] = None
     executed_qty: float = 0.0
     requested_qty: float = 0.0
+    client_order_id: Optional[str] = None
+    closed_qty: float = 0.0
+    exit_client_order_id: Optional[str] = None
+    exit_executions: dict[str, float] = Field(default_factory=dict)
     commission: float = 0.0
     commission_asset: str = ""
     

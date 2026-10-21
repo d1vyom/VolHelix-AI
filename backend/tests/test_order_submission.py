@@ -53,7 +53,7 @@ def test_acknowledgement_uses_actual_fills(orders, status, executed, quote, expe
     assert data['status'] == expected
     assert data['exchange_status'] == status
     assert data['executed_qty'] == float(executed)
-    trade = asyncio.run(trade_log.get_trade_by_id('123'))
+    trade = asyncio.run(trade_log.get_trade_by_id('spot:SOLUSDT:123'))
     assert trade.proposal.qty == float(executed)
     assert trade.entry_price == (160 if float(executed) else 0)
     assert trade.exchange_status == status
@@ -127,6 +127,6 @@ def test_complete_fill_fallback_uses_weighted_actual_price(orders):
     exchange.trading_client.create_order.return_value = {'orderId':123,'symbol':'SOLUSDT','side':'BUY','type':'MARKET','status':'FILLED','origQty':'0.5','executedQty':'0.5','fills':[{'qty':'0.2','price':'150'},{'qty':'0.3','price':'160'}]}
     response = client.post('/api/exchange/order', json={'symbol':'SOLUSDT','qty':0.5})
     assert response.status_code == 200
-    trade = asyncio.run(trade_log.get_trade_by_id('123'))
+    trade = asyncio.run(trade_log.get_trade_by_id('spot:SOLUSDT:123'))
     assert trade.entry_price == 156
     assert trade.executed_qty == 0.5

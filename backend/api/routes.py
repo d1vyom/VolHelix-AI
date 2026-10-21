@@ -16,6 +16,9 @@ except Exception:
 from backend.config import settings
 from backend.models.trade import TradeRecord, TradeProposal
 from backend.models.market import OptionLeg, StrategyType, TradeStatus
+from backend.exchange.models import Market
+from backend.exchange.registry import get_exchange_client
+from backend.exchange.lifecycle import execute_entry, reconcile_trade, cancel_trade_order, close_trade_position
 from backend.store.portfolio_store import portfolio_store
 from backend.store.trade_log import trade_log
 from backend.store.postmortem_store import postmortem_store
@@ -115,88 +118,29 @@ def get_portfolio():
 
 
 @router.get("/api/trades")
-async def get_trades():
-    trades = await trade_log.get_all_trades()
-    trade_ids = {t.trade_id for t in trades}
-
-    # Synchronize with live Binance Testnet orders so execution ledger is 100% complete
-    try:
-        client = _get_binance_client()
-        # get_all_orders requires a symbol; merge recent orders across the watched list
-        orders: List[dict] = []
-        for watch_sym in settings.WATCHED_SYMBOLS:
-            orders.extend(client.get_all_orders(watch_sym))
-        for o in orders:
-            oid = str(o.get("order_id") or o.get("orderId", ""))
-            if oid and oid not in trade_ids:
-                sym = o.get("symbol", "BTCUSDT")
-                fill_p = float(o.get("price") or 0.0)
-                qty = float(o.get("executed_qty") or o.get("orig_qty") or 0.001)
-                side_str = str(o.get("side", "BUY")).upper()
-                stat_str = str(o.get("status", "NEW")).upper()
-
-                if stat_str == "FILLED" and side_str == "SELL":
-                    t_status = TradeStatus.CLOSED
-                    pnl = round(fill_p * 0.02 * qty, 2)
-                elif stat_str == "FILLED":
-                    t_status = TradeStatus.OPEN
-                    pnl = 0.0
-                elif stat_str in ["CANCELED", "CANCELLED", "EXPIRED", "REJECTED"]:
-                    t_status = TradeStatus.CANCELLED
-                    pnl = 0.0
-                else:
-                    t_status = TradeStatus.PENDING
-                    pnl = 0.0
-
-                prop = TradeProposal(
-                    id=oid,
-                    symbol=sym,
-                    underlying=sym,
-                    strategy_type=StrategyType.MASTER_ORDER_FLOW,
-                    side=side_str,
-                    order_type=str(o.get("type", "MARKET")),
-                    qty=qty,
-                    entry_price=fill_p,
-                    thesis=f"Binance Spot Order {oid[:8]} ({side_str} {qty} {sym} @ ${fill_p:.2f})",
-                    take_profit=round(fill_p * 1.04, 2) if fill_p > 0 else 0.0,
-                    stop_loss=round(fill_p * 0.985, 2) if fill_p > 0 else 0.0
-                )
-                rec = TradeRecord(
-                    trade_id=oid,
-                    proposal=prop,
-                    status=t_status,
-                    entry_time=datetime.fromtimestamp(o.get("time", time.time() * 1000) / 1000).isoformat(),
-                    entry_price=fill_p,
-                    realized_pnl=pnl,
-                    take_profit_price=prop.take_profit,
-                    stop_loss_price=prop.stop_loss,
-                    binance_order_id=oid
-                )
-                trades.append(rec)
-    except Exception as e:
-        logger.debug(f"get_trades sync error: {e}")
-
-    trades.sort(key=lambda t: t.entry_time or "", reverse=True)
-    return [t.model_dump() for t in trades]
+async def get_trades(market: Market = 'spot'):
+    # The ledger records acknowledgements. Reading history must not invent fills
+    # or infer realized PnL from unrelated exchange SELL orders.
+    return [t.model_dump() for t in await trade_log.get_all_trades() if t.market==market]
 
 
 @router.get("/api/positions")
-async def get_positions():
+async def get_positions(market: Market = 'spot'):
     trades = await trade_log.get_open_trades()
-    return [t.model_dump() for t in trades]
+    return [t.model_dump() for t in trades if t.market==market]
 
 
 @router.get("/api/trades/history")
-async def get_trade_history():
+async def get_trade_history(market: Market = 'spot'):
     trades = await trade_log.get_all_trades()
-    closed = [t.model_dump() for t in trades if t.status in (TradeStatus.CLOSED, TradeStatus.STOPPED_OUT, TradeStatus.CANCELLED)]
+    closed = [t.model_dump() for t in trades if t.market==market and t.status in (TradeStatus.CLOSED, TradeStatus.STOPPED_OUT, TradeStatus.TAKE_PROFIT, TradeStatus.CANCELLED)]
     return closed
 
 
 @router.get("/api/trades/pending")
-async def get_pending_trades():
+async def get_pending_trades(market: Market = 'spot'):
     trades = await trade_log.get_pending_trades()
-    return [t.model_dump() for t in trades]
+    return [t.model_dump() for t in trades if t.market==market]
 
 
 @router.get("/api/market-status")
@@ -325,190 +269,49 @@ def get_exchange_account():
 
 @router.get("/api/exchange/positions")
 @router.get("/api/alpaca/positions")
-async def get_exchange_positions():
-    cached = _get_cached("positions", ttl=1.5)
-    if cached is not None:
-        return cached
-
-    positions_map = {}
-    client = _get_binance_client()
-
-    # 1. Query Binance spot wallet positions
-    try:
-        pos_list = client.get_positions()
-        for p in pos_list:
-            sym = p["symbol"]
-            qty = float(p.get("qty", 0.0))
-            cur_p = float(p.get("current_price", 0.0))
-            mkt_val = float(p.get("market_value", cur_p * qty))
-
-            positions_map[sym] = {
-                "id": f"POS-{sym}",
-                "symbol": sym,
-                "qty": qty,
-                "side": "LONG",
-                "current_price": cur_p,
-                "avg_entry_price": cur_p,
-                "market_value": round(mkt_val, 2),
-                "cost_basis": round(mkt_val, 2),
-                "unrealized_pl": 0.0,
-                "unrealized_plpc": 0.0,
-                "take_profit_price": round(cur_p * 1.04, 2),
-                "stop_loss_price": round(cur_p * 0.985, 2),
-                "strategy": "MASTER_ORDER_FLOW",
-                "order_type": "MARKET"
-            }
-    except Exception as e:
-        logger.debug(f"get_positions exchange query error: {e}")
-
-    # 2. Enrich with local active trades from trade_log (exact entry prices & TP/SL)
-    try:
-        open_trades = await trade_log.get_open_trades()
-        for t in open_trades:
-            sym = t.proposal.symbol or t.proposal.underlying
-            entry_p = float(t.entry_price or t.proposal.entry_price or (t.proposal.breakevens[0] if t.proposal.breakevens else 0.0))
-            qty = float(t.proposal.qty or 0.001)
-            side = getattr(t.proposal, "side", "BUY").upper()
-
-            cached_quote = _get_cached(f"quote_{sym}")
-            cur_p = float(cached_quote["last"]) if (cached_quote and cached_quote.get("last")) else entry_p
-
-            unrealized = (cur_p - entry_p) * qty
-            unrealized_pc = ((cur_p - entry_p) / entry_p * 100) if entry_p > 0 else 0.0
-
-            tp_p = t.take_profit_price or t.proposal.take_profit or round(entry_p * 1.04, 2)
-            sl_p = t.stop_loss_price or t.proposal.stop_loss or round(entry_p * 0.985, 2)
-            strat_val = t.proposal.strategy_type.value if hasattr(t.proposal.strategy_type, "value") else str(t.proposal.strategy_type)
-
-            positions_map[sym] = {
-                "id": t.trade_id,
-                "trade_id": t.trade_id,
-                "symbol": sym,
-                "qty": qty,
-                "side": "LONG" if side == "BUY" else "SHORT",
-                "current_price": round(cur_p, 2),
-                "avg_entry_price": round(entry_p, 2),
-                "market_value": round(cur_p * qty, 2),
-                "cost_basis": round(entry_p * qty, 2),
-                "unrealized_pl": round(unrealized, 2),
-                "unrealized_plpc": round(unrealized_pc, 2),
-                "take_profit_price": tp_p,
-                "stop_loss_price": sl_p,
-                "strategy": strat_val,
-                "order_type": getattr(t.proposal, "order_type", "MARKET")
-            }
-    except Exception as e:
-        logger.debug(f"get_positions trade_log merge error: {e}")
-
-    res = list(positions_map.values())
-    _set_cached("positions", res)
-    return res
+async def get_exchange_positions(market: Market = 'spot'):
+    from backend.exchange.lifecycle import position_snapshot
+    return (await position_snapshot(market))['positions']
 
 
 @router.get("/api/exchange/orders")
 @router.get("/api/alpaca/orders")
-async def get_exchange_orders(limit: int = 50):
-    cache_key = f"orders_{limit}"
-    cached = _get_cached(cache_key, ttl=1.5)
-    if cached is not None:
-        return cached
-
-    res = []
-    seen_ids = set()
-    client = _get_binance_client()
-
-    try:
-        raw_orders: List[dict] = []
-        for watch_sym in settings.WATCHED_SYMBOLS:
-            raw_orders.extend(client.get_all_orders(watch_sym))
-        for o in raw_orders[-limit:]:
-            oid = str(o.get("order_id") or o.get("orderId"))
-            seen_ids.add(oid)
-            res.append({
-                "id": oid,
-                "symbol": o.get("symbol"),
-                "qty": float(o.get("orig_qty") or o.get("executed_qty") or 0.0),
-                "side": str(o.get("side", "BUY")).upper(),
-                "type": str(o.get("type", "MARKET")).upper(),
-                "status": str(o.get("status", "NEW")).upper(),
-                "filled_avg_price": float(o.get("price") or 0.0) if float(o.get("price") or 0.0) > 0 else None,
-                "limit_price": float(o.get("price") or 0.0) if o.get("type") == "LIMIT" else None,
-                "stop_price": None,
-                "order_class": "SPOT",
-                "time_in_force": str(o.get("time_in_force", "GTC")),
-                "created_at": datetime.fromtimestamp(o.get("time", time.time() * 1000) / 1000).isoformat(),
-            })
-    except Exception as e:
-        logger.debug(f"get_orders exchange query error: {e}")
-
-    try:
-        pending_trades = await trade_log.get_pending_trades()
-        for p in pending_trades:
-            if p.trade_id not in seen_ids:
-                seen_ids.add(p.trade_id)
-                res.append({
-                    "id": p.trade_id,
-                    "symbol": p.proposal.symbol or p.proposal.underlying,
-                    "qty": float(getattr(p.proposal, "qty", 0.001) or 0.001),
-                    "side": getattr(p.proposal, "side", "BUY"),
-                    "type": "LIMIT",
-                    "status": "pending_limit",
-                    "filled_avg_price": None,
-                    "limit_price": float(p.proposal.limit_price or 0.0) if p.proposal.limit_price else None,
-                    "stop_price": None,
-                    "order_class": "LIMIT",
-                    "time_in_force": "GTC",
-                    "created_at": p.entry_time or "",
-                })
-    except Exception:
-        pass
-
-    res.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-    _set_cached(cache_key, res)
-    return res
+async def get_exchange_orders(limit: int = 50, market: Market = 'spot'):
+    from backend.exchange.lifecycle import order_snapshot
+    return (await order_snapshot(market))[:max(1,min(limit,200))]
 
 
 @router.delete("/api/exchange/orders/{order_id}")
 @router.delete("/api/alpaca/orders/{order_id}")
-async def cancel_exchange_order(order_id: str, symbol: Optional[str] = None):
-    client = _get_binance_client()
-    clean_sym = _normalize_symbol(symbol) if symbol else "BTCUSDT"
+async def cancel_exchange_order(order_id: str, symbol: Optional[str] = None, market: Market = 'spot'):
+    trade=await trade_log.find_trade(order_id,market,symbol)
+    if not trade:
+        raise HTTPException(status_code=404,detail='Recorded order not found in selected market')
     try:
-        client.cancel_order(clean_sym, int(order_id))
-    except Exception as e:
-        logger.debug(f"cancel_order error: {e}")
-
-    try:
-        await trade_log.cancel_trade(order_id)
-    except Exception:
-        pass
-
+        client=await asyncio.to_thread(get_exchange_client,market)
+        trade=await cancel_trade_order(trade,client=client)
+    except Exception as exc:
+        raise HTTPException(status_code=502,detail=str(exc)) from exc
     _invalidate_cache()
-    return {"success": True, "order_id": order_id}
+    return {'success':True,'order_id':order_id,'trade_id':trade.trade_id,'market':market,
+            'status':trade.status.value,'exchange_status':trade.exchange_status,'qty':trade.proposal.qty}
 
 
 @router.post("/api/exchange/cancel-all")
 @router.post("/api/alpaca/cancel-all")
-async def cancel_all_exchange_orders():
-    client = _get_binance_client()
-    cancelled_count = 0
-    for sym in settings.WATCHED_SYMBOLS:
+async def cancel_all_exchange_orders(market: Market = 'spot'):
+    pending=[t for t in await trade_log.get_pending_trades() if t.market==market]
+    results=[]; errors=[]
+    for trade in pending:
         try:
-            result = client.cancel_all_orders(sym)
-            cancelled_count += len(result.get("cancelled_order_ids", []))
-        except Exception:
-            pass
-
-    try:
-        pending = await trade_log.get_pending_trades()
-        for p in pending:
-            await trade_log.cancel_trade(p.trade_id)
-            cancelled_count += 1
-    except Exception:
-        pass
-
-    _invalidate_cache()
-    return {"success": True, "cancelled": cancelled_count}
+            results.append(await cancel_exchange_order(trade.trade_id,trade.proposal.symbol,market))
+        except HTTPException as exc:
+            errors.append({'trade_id':trade.trade_id,'error':exc.detail})
+    from backend.store import order_intents
+    for intent in await asyncio.to_thread(order_intents.pending,market):
+        if intent['status'] in ('UNKNOWN','DISPATCHING'):
+            errors.append({'intent_id':intent['identity'],'error':'Exchange outcome unresolved; reservation retained'})
+    return {'success':not errors,'cancelled':len(results),'errors':errors,'market':market}
 
 
 @router.get("/api/exchange/quote")
@@ -624,36 +427,15 @@ async def submit_exchange_order(order_req: OrderSubmission):
     clean_sym = _normalize_symbol(order_req.symbol)
     request = order_req.model_copy(update={"symbol": clean_sym})
     try:
-        from backend.exchange.registry import get_exchange_client
-        result = await submit_order(request, client=await asyncio.to_thread(get_exchange_client,request.market))
+        result,trade = await execute_entry(request,client=await asyncio.to_thread(get_exchange_client,request.market))
     except MarketDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except OrderExecutionError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    filled = result.exchange_status == "FILLED"
-    status = TradeStatus.OPEN if filled else TradeStatus.PENDING
-    # Pending prices are order instructions; entry_price stays zero until executed.
-    reference_price = result.entry_price or request.limit_price or result.current_price
-    tp_price = round(reference_price * 1.04, 2)
-    sl_price = round(reference_price * 0.985, 2)
-    prop = TradeProposal(
-        id=result.order_id, market=request.market, symbol=clean_sym, underlying=clean_sym,
-        strategy_type=StrategyType.MASTER_ORDER_FLOW, side=request.side,
-        order_type=request.order_type, qty=result.executed_qty,
-        quote_qty=request.quote_quantity, limit_price=request.limit_price,
-        entry_price=result.entry_price, take_profit=tp_price, stop_loss=sl_price,
-        thesis=f"Binance Testnet acknowledgement: {result.exchange_status}",
-    )
-    trade = TradeRecord(
-        trade_id=result.order_id, market=request.market, proposal=prop, status=status,
-        entry_time=datetime.now().isoformat(), entry_price=result.entry_price,
-        current_price=result.current_price, take_profit_price=tp_price,
-        stop_loss_price=sl_price, binance_order_id=result.order_id,
-        exchange_status=result.exchange_status, executed_qty=result.executed_qty,
-        requested_qty=result.orig_qty,
-    )
-    await trade_log.save_trade(trade)
+        raise HTTPException(status_code=409 if 'conflict' in str(exc) else 502, detail=str(exc)) from exc
+    status=trade.status
+    filled=result.exchange_status=='FILLED'
+    tp_price=trade.take_profit_price
+    sl_price=trade.stop_loss_price
     _invalidate_cache()
     try:
         from backend.api.websocket import sio
@@ -662,11 +444,11 @@ async def submit_exchange_order(order_req: OrderSubmission):
             "confidence": 1.0,
         })
         if filled:
-            await sio.emit("trade_executed", {"trade_id": result.order_id, "symbol": clean_sym,
+            await sio.emit("trade_executed", {"trade_id": trade.trade_id, "market":request.market, "symbol": clean_sym,
                                             "status": status.value, "entry_price": result.entry_price})
     except Exception:
         pass
-    return {"success": True, **result.model_dump(), "symbol": clean_sym, "market":request.market,
+    return {"success": True, **result.model_dump(), "trade_id":trade.trade_id, "symbol": clean_sym, "market":request.market,
             "status": status.value, "order_type": request.order_type,
             "limit_price": request.limit_price, "qty": result.executed_qty,
             "side": request.side, "take_profit_price": tp_price, "stop_loss_price": sl_price,
@@ -677,115 +459,53 @@ class FillPendingTradeRequest(BaseModel):
     fill_price: Optional[float] = None
 
 @router.post("/api/trades/{trade_id}/fill")
-async def fill_pending_trade_endpoint(trade_id: str, req: Optional[FillPendingTradeRequest] = None):
-    trade = await trade_log.get_trade_by_id(trade_id)
+async def fill_pending_trade_endpoint(trade_id: str, req: Optional[FillPendingTradeRequest] = None, market: Market = 'spot'):
+    trade=await trade_log.find_trade(trade_id,market)
     if not trade:
-        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
-    if trade.status != TradeStatus.PENDING:
-        raise HTTPException(status_code=400, detail=f"Trade is already {trade.status.value}")
-
-    fill_price = req.fill_price if (req and req.fill_price) else (trade.proposal.limit_price or trade.proposal.entry_price or 75000.0)
-    await trade_log.fill_pending_trade(trade_id, fill_price=fill_price)
-    _invalidate_cache()
-
+        raise HTTPException(status_code=404,detail='Trade not found in selected market')
+    if req and req.fill_price is not None:
+        raise HTTPException(status_code=400,detail='Manual fills are forbidden; reconcile exchange state without fill_price')
     try:
-        from backend.api.websocket import sio
-        await sio.emit("trade_filled", {
-            "trade_id": trade_id,
-            "symbol": trade.proposal.symbol or trade.proposal.underlying,
-            "fill_price": fill_price,
-            "status": "OPEN"
-        })
-    except Exception:
-        pass
-
-    return {
-        "success": True,
-        "trade_id": trade_id,
-        "status": "OPEN",
-        "fill_price": fill_price,
-        "message": f"Order {trade_id[:8]} filled at ${fill_price:.2f}. Moved to Positions Tab."
-    }
+        client=await asyncio.to_thread(get_exchange_client,market)
+        trade=await reconcile_trade(trade,client=client)
+    except OrderExecutionError as exc:
+        raise HTTPException(status_code=502,detail=str(exc)) from exc
+    _invalidate_cache()
+    return {'success':True,'trade_id':trade.trade_id,'market':market,'status':trade.status.value,
+            'exchange_status':trade.exchange_status,'fill_price':trade.entry_price,'qty':trade.proposal.qty}
 
 
 class ClosePositionRequest(BaseModel):
     symbol: str
+    market: Market = 'spot'
+    trade_id: Optional[str] = None
+
 
 @router.post("/api/exchange/close-position")
 @router.post("/api/alpaca/close-position")
 async def close_exchange_position(req: ClosePositionRequest):
-    clean_sym = _normalize_symbol(req.symbol)
-    base_asset = clean_sym.replace("USDT", "")
-    client = await asyncio.to_thread(_get_binance_client)
-
-    # 1. Query asset balance to liquidate
-    qty_to_sell = 0.0
+    symbol=_normalize_symbol(req.symbol)
+    trades=[t for t in await trade_log.get_open_trades() if t.market==req.market and t.proposal.symbol==symbol and (not req.trade_id or t.trade_id==req.trade_id)]
+    if not trades:
+        raise HTTPException(status_code=404,detail='No recorded exposure in selected market')
     try:
-        acct = await asyncio.to_thread(client.get_account)
-        balances = acct.get("balances", {})
-        if base_asset in balances:
-            qty_to_sell = float(balances[base_asset].get("free", 0.0))
-    except Exception:
-        pass
-
-    # 2. Execute SELL order on Binance Testnet
-    exit_price = (await asyncio.to_thread(client.get_price, clean_sym)).get("price", 0.0)
-    if qty_to_sell > 0:
-        try:
-            await asyncio.to_thread(client.place_order,
-                symbol=clean_sym,
-                reduce_only=True,
-                side="SELL",
-                order_type="MARKET",
-                quantity=round(qty_to_sell, 5)
-            )
-        except Exception as e:
-            logger.warning(f"Failed to submit SELL market order on Binance: {e}")
-
-    # 3. Mark trade CLOSED in trade_log
-    open_trades = await trade_log.get_open_trades()
-    matching_trade = next((t for t in open_trades if (t.proposal.symbol or t.proposal.underlying) == clean_sym), None)
-    
-    realized_pnl = 0.0
-    if matching_trade:
-        closed_trade = await trade_log.close_trade(
-            matching_trade.trade_id,
-            exit_price=exit_price,
-            exit_type=TradeStatus.CLOSED,
-            reason="Manual Operator Close"
-        )
-        if closed_trade:
-            realized_pnl = closed_trade.realized_pnl
-
+        client=await asyncio.to_thread(get_exchange_client,req.market)
+        closed=[]
+        for trade in trades:
+            closed.append(await close_trade_position(trade,client=client))
+    except Exception as exc:
+        raise HTTPException(status_code=502,detail=str(exc)) from exc
     _invalidate_cache()
-
-    try:
-        from backend.api.websocket import sio
-        await sio.emit("trade_executed", {
-            "trade_id": clean_sym,
-            "status": "CLOSED",
-            "realized_pnl": realized_pnl,
-            "exit_price": exit_price
-        })
-        await sio.emit("reasoning_event", {
-            "agent": "RiskGate",
-            "message": f"Position {clean_sym} closed at ${exit_price:.2f}. Realized PnL: ${realized_pnl:+.2f}. Moved to History Tab.",
-            "confidence": 1.0
-        })
-    except Exception:
-        pass
-
-    return {
-        "success": True,
-        "symbol": clean_sym,
-        "status": "CLOSED",
-        "exit_price": exit_price,
-        "realized_pnl": realized_pnl,
-        "message": f"Position {clean_sym} closed at ${exit_price:.2f}. Archived to History Tab."
-    }
+    return {'success':True,'market':req.market,'symbol':symbol,
+            'status':'CLOSED' if all(t.status==TradeStatus.CLOSED for t in closed) else 'OPEN',
+            'qty':sum(t.proposal.qty for t in closed),'exit_price':closed[-1].exit_price,
+            'realized_pnl':sum(t.realized_pnl for t in closed),'trades':[t.model_dump() for t in closed]}
 
 
 class BotExecutionRequest(BaseModel):
+    market: Market = 'spot'
+    qty: float = 0.001
+    client_order_id: Optional[str] = None
     symbol: str = "BTCUSDT"
     strategy: str = "MASTER_ORDER_FLOW"
     risk_fraction: float = 0.8
@@ -794,89 +514,12 @@ class BotExecutionRequest(BaseModel):
 
 @router.post("/api/bot/execute-trade")
 async def execute_bot_trade(req: BotExecutionRequest):
-    clean_sym = _normalize_symbol(req.symbol)
-    client = await asyncio.to_thread(_get_binance_client)
-
-    tp_pct = req.take_profit_pct if req.take_profit_pct is not None else 0.040
-    sl_pct = req.stop_loss_pct if req.stop_loss_pct is not None else 0.018
-
-    p_data = await asyncio.to_thread(client.get_price, clean_sym)
-    current_price = float(p_data.get("price", 75000.0))
-
-    tp_price = round(current_price * (1.0 + tp_pct), 2)
-    sl_price = round(current_price * (1.0 - sl_pct), 2)
-    eval_score = 0.85
-    eval_status = "CONFLUENCE CONFIRMED"
-    eval_reasons = ["Order Block Retest Confirmed", "24/7 Spot Confluence Established"]
-
-    # Place spot market order for $200 USDT
-    order_quote_qty = 200.0
-    calculated_qty = round(order_quote_qty / current_price, 5) if current_price > 0 else 0.001
-
-    try:
-        order_res = await asyncio.to_thread(client.place_order,
-            symbol=clean_sym,
-            side="BUY",
-            order_type="MARKET",
-            quote_quantity=order_quote_qty
-        )
-        order_id = str(order_res.get("order_id", f"BINANCE-{int(time.time())}"))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Order not acknowledged: {e}") from e
-
-    prop = TradeProposal(
-        id=order_id,
-        symbol=clean_sym,
-        underlying=clean_sym,
-        strategy_type=StrategyType.MASTER_ORDER_FLOW,
-        side="BUY",
-        order_type="MARKET",
-        qty=calculated_qty,
-        quote_qty=order_quote_qty,
-        entry_price=current_price,
-        take_profit=tp_price,
-        stop_loss=sl_price,
-        max_profit=round(current_price * tp_pct * calculated_qty, 2),
-        max_loss=round(current_price * sl_pct * calculated_qty, 2),
-        breakevens=[round(current_price, 2)],
-        thesis=f"Master Order Flow Spot Execution: TP ${tp_price} | SL ${sl_price}"
-    )
-
-    trade_rec = TradeRecord(
-        trade_id=order_id,
-        proposal=prop,
-        status=TradeStatus.OPEN,
-        entry_time=datetime.now().isoformat(),
-        entry_price=current_price,
-        realized_pnl=0.0,
-        take_profit_price=tp_price,
-        stop_loss_price=sl_price,
-        binance_order_id=order_id
-    )
-
-    def _save():
-        asyncio.run(trade_log.save_trade(trade_rec))
-    threading.Thread(target=_save, daemon=True).start()
-
-    _invalidate_cache()
-
-    return {
-        "success": True,
-        "symbol": clean_sym,
-        "strategy": req.strategy,
-        "decision": "APPROVED",
-        "consensus_score": eval_score,
-        "score": eval_score,
-        "status_label": eval_status,
-        "reasons": eval_reasons,
-        "binance_order_id": order_id,
-        "entry_price": current_price,
-        "take_profit_price": tp_price,
-        "stop_loss_price": sl_price,
-        "take_profit_pct": round(tp_pct * 100, 1),
-        "stop_loss_pct": round(sl_pct * 100, 1),
-        "order_type": "SPOT_MARKET"
-    }
+    # The shared server risk gate supplies fresh confluence and account checks.
+    result=await submit_exchange_order(OrderRequest(market=req.market,symbol=req.symbol,
+        quote_quantity=200 if req.market=='spot' else None,qty=req.qty,
+        client_order_id=req.client_order_id))
+    return {**result,'strategy':req.strategy,'decision':'ACKNOWLEDGED',
+            'binance_order_id':result['order_id']}
 
 
 @router.get("/api/analytics/order-flow")

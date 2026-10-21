@@ -166,7 +166,8 @@ def test_auto_trader_scan_approval_cannot_bypass_fresh_gate(exchange_fixture,mon
     monkeypatch.setattr(module,'analyze_order_flow',lambda *a:SimpleNamespace(current_price=150))
     monkeypatch.setattr(module,'evaluate_master_strategy_setup',lambda **kw:{'is_valid':True,'score':.9,'levels':{'take_profit_price':170,'stop_loss_price':140}})
     monkeypatch.setattr(module.auto_trader,'_get_binance_client',lambda:c)
-    with pytest.raises(ValueError): module.auto_trader.trigger_cycle('SOLUSDT')
+    result=module.auto_trader.trigger_cycle('SOLUSDT')
+    assert result['success'] is False and result['executed'] is False
     c.trading_client.create_order.assert_not_called()
 
 

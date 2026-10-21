@@ -112,7 +112,7 @@ def test_futures_preview_and_submit_routes_dispatch_market(futures,exchange_fixt
     assert result.status_code==200 and result.json()['market']=='futures' and result.json()['exchange_status']=='NEW'
     exchange_fixture.trading_client.create_order.assert_not_called()
     from backend.store.trade_log import trade_log
-    saved=asyncio.run(trade_log.get_trade_by_id('81'))
+    saved=asyncio.run(trade_log.get_trade_by_id(result.json()['trade_id']))
     assert saved.market=='futures' and saved.proposal.market=='futures'
 
 def test_read_routes_use_market_and_report_upstream_failure(futures,monkeypatch):
