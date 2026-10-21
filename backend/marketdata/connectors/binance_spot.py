@@ -12,6 +12,7 @@ from backend.config import settings
 class BinanceSpotConnector:
     """Binance Spot implementation of ExchangeConnector."""
     name: str = "Binance Spot"
+    rest_base: str = "https://api.binance.com/api/v3"
 
     def __init__(self):
         # Cached exchangeInfo filters per symbol (tick/step size, min notional, precision)
@@ -28,6 +29,10 @@ class BinanceSpotConnector:
             f"{sym}@depth20@100ms",
             f"{sym}@kline_1m"
         ]
+
+    def stream_groups(self, symbol: str) -> dict[str, list[str]]:
+        """Group streams by their network route."""
+        return {settings.FLOW_WS_BASE_URL: self.stream_names(symbol)}
 
     def parse(self, raw: dict[str, Any]) -> Trade | BookDelta | Any:
         """Parse raw stream payload based on stream name or event type."""
@@ -52,7 +57,7 @@ class BinanceSpotConnector:
 
     async def depth_snapshot(self, symbol: str, limit: int = 1000) -> BookSnapshot:
         """Fetch REST depth snapshot asynchronously."""
-        url = "https://api.binance.com/api/v3/depth"
+        url = f"{self.rest_base}/depth"
         # We use the public URL for market data as per instructions (not testnet)
         params = {"symbol": symbol.upper(), "limit": limit}
         async with httpx.AsyncClient() as client:
@@ -73,7 +78,7 @@ class BinanceSpotConnector:
         if cached:
             return float(cached["tick_size"])
 
-        url = "https://api.binance.com/api/v3/exchangeInfo"
+        url = f"{self.rest_base}/exchangeInfo"
         params = {"symbol": upper}
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, params=params, timeout=10.0)
@@ -90,9 +95,9 @@ class BinanceSpotConnector:
                     elif ftype == "LOT_SIZE":
                         filters["step_size"] = float(f["stepSize"])
                     elif ftype in ("NOTIONAL", "MIN_NOTIONAL"):
-                        filters["min_notional"] = float(f.get("minNotional", 0.0) or 0.0)
-                filters["price_precision"] = float(s.get("quotePrecision", 0) or 0)
-                filters["qty_precision"] = float(s.get("baseAssetPrecision", 0) or 0)
+                        filters["min_notional"] = float(f.get("minNotional", f.get("notional", 0.0)) or 0.0)
+                filters["price_precision"] = float(s.get("pricePrecision", s.get("quotePrecision", 0)) or 0)
+                filters["qty_precision"] = float(s.get("quantityPrecision", s.get("baseAssetPrecision", 0)) or 0)
                 self.symbol_filters[upper] = filters
                 if "tick_size" in filters:
                     return float(filters["tick_size"])

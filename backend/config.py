@@ -82,6 +82,8 @@ class Settings(BaseSettings):
     FLOW_BROADCAST_HZ: float = 4.0
     FLOW_TAPE_BROADCAST_HZ: float = 10.0
     FLOW_MAX_RECONNECT_BACKOFF_SEC: int = 60
+    FLOW_MAX_ACTIVE_SYMBOLS: int = Field(default=10, ge=1, le=100)
+    FLOW_STALE_AFTER_MS: int = Field(default=15000, ge=1000)
     FLOW_CONFLUENCE_ENABLED: bool = True
     FLOW_CONFLUENCE_WEIGHT: float = 0.25
     FLOW_PERSIST_BARS: bool = False

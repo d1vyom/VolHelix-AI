@@ -1,15 +1,15 @@
 import asyncio
 import json
-import time
 import random
-from typing import Callable, Any, Dict, List, Set
+from typing import Callable, Any, Dict, List
 from loguru import logger
 import websockets
 from websockets.asyncio.client import ClientConnection
 from backend.config import settings
 
 class ConnectionChunk:
-    def __init__(self, chunk_id: str, streams: List[str], callback: Callable[[dict[str, Any]], None], trigger_resync: Callable[[str], None]):
+    def __init__(self, chunk_id: str, streams: List[str], callback: Callable[[dict[str, Any]], None], trigger_resync: Callable[[str], None], base_url: str | None = None):
+        self.base_url = base_url or settings.FLOW_WS_BASE_URL
         self.chunk_id = chunk_id
         self.streams = streams
         self.callback = callback
@@ -36,7 +36,7 @@ class ConnectionChunk:
 
     async def _run_loop(self):
         stream_str = "/".join(self.streams)
-        url = f"{settings.FLOW_WS_BASE_URL}/stream?streams={stream_str}"
+        url = f"{self.base_url}/stream?streams={stream_str}"
         backoff = 1
 
         while self.running:
@@ -48,7 +48,7 @@ class ConnectionChunk:
                     backoff = 1  # Reset backoff on successful connect
                     
                     # Trigger book resync for all symbols in this chunk
-                    symbols = set(s.split('@')[0].upper() for s in self.streams)
+                    symbols = set(s.split('@')[0].upper() for s in self.streams if '@depth' in s)
                     for sym in symbols:
                         self.trigger_resync(sym)
 
@@ -63,6 +63,7 @@ class ConnectionChunk:
                             self.callback(data)
                     finally:
                         rotation_task.cancel()
+                        await asyncio.gather(rotation_task, return_exceptions=True)
                         
             except asyncio.CancelledError:
                 break
@@ -92,19 +93,30 @@ class StreamManager:
         self.active_chunks: Dict[str, ConnectionChunk] = {}
         self.running = False
 
-    async def start(self, streams: List[str]):
-        """Starts connections for the given streams."""
+    async def start(self, streams: List[str] | dict[str, list[str]]):
+        """Start each routed stream group independently."""
         self.running = True
-        
-        # Chunking: max 200 streams per connection, and group by ~5 symbols
-        # A symbol has 4 streams, so 5 symbols = 20 streams. We'll just chunk every 20 streams.
-        chunk_size = 20
-        for i in range(0, len(streams), chunk_size):
-            chunk_streams = streams[i:i+chunk_size]
-            chunk_id = f"chunk_{i//chunk_size}"
-            chunk = ConnectionChunk(chunk_id, chunk_streams, self.callback, self.trigger_resync)
-            self.active_chunks[chunk_id] = chunk
-            await chunk.start()
+        await self.update_streams(streams)
+
+    async def update_streams(self, streams: List[str] | dict[str, list[str]]):
+        """Replace changed chunks; retain identical connections on demand changes."""
+        groups = streams if isinstance(streams, dict) else {settings.FLOW_WS_BASE_URL: streams}
+        desired = {}
+        for base_url, names in groups.items():
+            # Keep symbol streams together, so additions do not rotate existing books.
+            by_symbol = {}
+            for name in names:
+                by_symbol.setdefault(name.split('@')[0], []).append(name)
+            for symbol, chunk_streams in by_symbol.items():
+                desired[f"{base_url}:{symbol}"] = (base_url, chunk_streams)
+        for key in list(self.active_chunks):
+            if key not in desired or self.active_chunks[key].streams != desired[key][1]:
+                await self.active_chunks.pop(key).stop()
+        for key, (base_url, names) in desired.items():
+            if key not in self.active_chunks:
+                chunk = ConnectionChunk(key, names, self.callback, self.trigger_resync, base_url)
+                self.active_chunks[key] = chunk
+                await chunk.start()
 
     async def stop(self):
         """Stops all connections."""

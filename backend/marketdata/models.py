@@ -22,6 +22,7 @@ class BookDelta(BaseModel):
     symbol: str = Field(description="Uppercase trading pair symbol")
     first_update_id: int = Field(description="First update ID in event ('U')")
     final_update_id: int = Field(description="Final update ID in event ('u')")
+    previous_final_update_id: int | None = Field(default=None, description="Futures previous event final ID ('pu')")
     bids: list[list[float]] = Field(description="List of [price, qty] bid updates. qty==0 removes level")
     asks: list[list[float]] = Field(description="List of [price, qty] ask updates. qty==0 removes level")
     event_ts: int = Field(description="Binance event timestamp in milliseconds ('E')")
@@ -52,6 +53,7 @@ class LadderLevel(BaseModel):
 class StreamHealth(BaseModel):
     """Operational health metrics for symbol websocket stream."""
     symbol: str = Field(description="Uppercase trading pair symbol")
+    market: Literal["spot", "futures"] = Field(default="spot", description="Independent exchange market")
     connected: bool = Field(description="True if underlying socket connection is active")
     streams: list[str] = Field(default_factory=list, description="List of active stream names subscribed")
     last_trade_ts: int = Field(default=0, description="Epoch ms of latest received trade")
@@ -61,7 +63,7 @@ class StreamHealth(BaseModel):
     book_resyncs: int = Field(default=0, description="Cumulative order book resynchronizations")
     gap_events: int = Field(default=0, description="Detected trade or depth sequence gap events")
     lag_ms: int = Field(default=0, description="Ingestion latency in ms (current_time - event_time)")
-    status: Literal["LIVE", "DEGRADED", "DISCONNECTED", "DISABLED"] = Field(
+    status: Literal["LIVE", "WAITING", "STALE", "DEGRADED", "DISCONNECTED", "DISABLED"] = Field(
         default="DISCONNECTED",
         description="High level status indicator"
     )

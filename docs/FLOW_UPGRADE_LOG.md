@@ -245,3 +245,5 @@ Companion log to `Upgrade_Plan.md` and `ANTIGRAVITY_SETUP.md`. Updated phase-by-
 
 
 - 2026-10-20 Task 2: validated finite Spot order requests, rejected failed/malformed acknowledgements, persisted actual fills, and moved manual submission REST off the event loop. Isolated pytest: 115 passed. Risk enforcement and pending/partial reconciliation remain next tasks; no live trading.
+
+- 2026-10-22 Task 6: isolated Spot/Futures flow state, public Futures REST and routed depth/public + aggTrade/market sockets, distinct Futures pu synchronization, market-scoped REST/cache/rooms, bounded on-demand subscriptions (default10 plus configured Spot pins), per-SID duplicate/disconnect cleanup, awaited broadcast/ingestion shutdown, real tape/forming-cell snapshots, and bounded footprint display rows. Verified 264 isolated backend tests passed (two existing SDK websocket deprecation warnings), focused RED/GREEN fixtures and read-only public Futures LIVE stream smoke. No live orders, credentials, autonomous trading startup, deployment or frontend changes. Frontend integration contract: docs/FLOW_MARKETS.md; Task7 remains.

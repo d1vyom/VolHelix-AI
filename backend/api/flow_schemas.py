@@ -1,9 +1,10 @@
-from typing import List, Optional
-from pydantic import BaseModel
+from typing import List, Optional, Literal
+from pydantic import BaseModel, Field
 from backend.marketdata.models import StreamHealth
 from backend.engine.flow_models import FootprintBar, TapeEntry, HeatmapSnapshot, VolumeProfileSnapshot, CVDPoint, FlowMetrics, DomAnalytics
 
 class StatusResponse(BaseModel):
+    market: Literal["spot", "futures"] = "spot"
     enabled: bool
     symbols: List[str] = []
     health: dict[str, StreamHealth] = {}
@@ -26,7 +27,8 @@ class CVDSnapshotResponse(BaseModel):
     bands: dict[str, float]
 
 class SubscribeRequest(BaseModel):
-    symbol: str
+    symbol: str = Field(min_length=1, max_length=30, pattern=r"^[A-Za-z0-9]+$")
+    market: Literal["spot", "futures"] = "spot"
 
 class SubscribeResponse(BaseModel):
     success: bool
@@ -34,8 +36,8 @@ class SubscribeResponse(BaseModel):
     status: str
     error: Optional[str] = None
 
-class UnsubscribeRequest(BaseModel):
-    symbol: str
+class UnsubscribeRequest(SubscribeRequest):
+    pass
 
 class UnsubscribeResponse(BaseModel):
     success: bool

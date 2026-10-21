@@ -39,6 +39,7 @@ def normalize_depth_update(raw: dict[str, Any]) -> BookDelta:
         symbol=str(data["s"]).upper(),
         first_update_id=int(data["U"]),
         final_update_id=int(data["u"]),
+        previous_final_update_id=int(data["pu"]) if "pu" in data else None,
         bids=[[float(p), float(q)] for p, q in data.get("b", [])],
         asks=[[float(p), float(q)] for p, q in data.get("a", [])],
         event_ts=int(data.get("E", 0))

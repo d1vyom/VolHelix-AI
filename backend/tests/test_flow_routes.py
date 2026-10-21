@@ -60,6 +60,7 @@ def mock_hub_state():
             "buffers": MockBuffers(),
             "health": None
         }
+        mock_hub.get_footprint_bars.return_value = list(MockBuffers().bars["1m"])
         
         yield mock_hub
 

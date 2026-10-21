@@ -11,6 +11,10 @@ class ExchangeConnector(Protocol):
     def stream_names(self, symbol: str) -> list[str]:
         ...
 
+    def stream_groups(self, symbol: str) -> dict[str, list[str]]:
+        """Map network route bases to their supported streams."""
+        ...
+
     def parse(self, raw: dict[str, Any]) -> Trade | BookDelta | Any:
         ...
 

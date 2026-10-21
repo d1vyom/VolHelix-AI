@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes import router
 from backend.api.flow_routes import router as flow_router
-from backend.api.websocket import socket_app
+from backend.api.websocket import socket_app, stop_broadcasters
 from backend.store.trade_log import trade_log
 from backend.store.postmortem_store import postmortem_store
 # VolHelixScheduler is imported but deliberately not started here.
@@ -16,7 +16,7 @@ import socketio
 from backend.engine.auto_trader import auto_trader
 from contextlib import asynccontextmanager
 
-from backend.marketdata.hub import hub
+from backend.marketdata.hub import hub, stop_hubs
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,7 +34,8 @@ async def lifespan(app: FastAPI):
     yield
     
     try:
-        await hub.stop()
+        await stop_broadcasters()
+        await stop_hubs()
     except Exception as e:
         print(f"Failed to stop MarketDataHub: {e}")
 

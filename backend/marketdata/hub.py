@@ -1,4 +1,5 @@
 import asyncio
+import math
 import time
 from typing import Dict, Callable, Any, Optional, Literal
 from loguru import logger
@@ -12,26 +13,25 @@ from backend.engine.delta_engine import DeltaEngine
 from backend.engine.volume_profile import VolumeProfileEngine
 from backend.engine.heatmap import HeatmapEngine
 from backend.engine.dom_analytics import DomEngine
+from backend.engine.tape_analytics import TapeEngine
 from backend.engine.flow_models import FlowMetrics
 from backend.marketdata.stream_manager import StreamManager
 from backend.marketdata.connectors.binance_spot import BinanceSpotConnector
+from backend.marketdata.connectors.binance_futures import BinanceFuturesConnector
 from backend.store.flow_store import FlowStore
 
 class MarketDataHub:
-    """Singleton registry and pub/sub hub for all market data."""
-    _instance = None
-    
-    def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            cls._instance = super(MarketDataHub, cls).__new__(cls)
-        return cls._instance
+    """Market-owned orderflow state; the module keeps one hub per market."""
 
-    def __init__(self):
-        if hasattr(self, '_initialized') and self._initialized:
-            return
-        self._initialized = True
-        
-        self.connector = BinanceSpotConnector()
+    def __init__(self, market: str = "spot"):
+        if market not in ("spot", "futures"):
+            raise ValueError("market must be spot or futures")
+        self.market = market
+        self.connector = BinanceSpotConnector() if market == "spot" else BinanceFuturesConnector()
+        self._subscription_lock = asyncio.Lock()
+        self.cache_generation = 0
+        self.pinned_symbols: set[str] = set()
+        self._resync_by_symbol: dict[str, asyncio.Task] = {}
         self.stream_manager = StreamManager(callback=self._on_message, trigger_resync=self._trigger_resync)
         
         self.buffers: Dict[str, SymbolBuffers] = {}
@@ -41,6 +41,7 @@ class MarketDataHub:
         self.profile_engines: Dict[str, VolumeProfileEngine] = {}
         self.heatmap_engines: Dict[str, HeatmapEngine] = {}
         self.dom_engines: Dict[str, DomEngine] = {}
+        self.tape_engines: Dict[str, TapeEngine] = {}
         self.health_state: Dict[str, StreamHealth] = {}
         
         self.listeners: list[Callable[[str, Any], None]] = []
@@ -55,25 +56,29 @@ class MarketDataHub:
         
     async def start(self):
         """Starts the hub and websocket ingestion."""
-        if not settings.FLOW_ENABLED:
-            logger.info("MarketDataHub is disabled by configuration.")
+        if not settings.FLOW_ENABLED or self._running:
             return
             
         self._running = True
         logger.info("MarketDataHub starting...")
         
         # Init state for static symbols
-        for sym in settings.FLOW_SYMBOLS:
-            await self._init_symbol_state(sym)
+        self.pinned_symbols = set(settings.FLOW_SYMBOLS) if self.market == "spot" else set()
+        for sym in self.pinned_symbols:
+            try:
+                await self._init_symbol_state(sym)
+            except Exception as exc:
+                logger.warning(f"[{self.market}:{sym}] Flow startup unavailable: {exc}")
             
-        # build streams
-        streams = []
-        for sym in self.books.keys():
-            streams.extend(self.connector.stream_names(sym))
-            
-        await self.flow_store.start()
-        await self.stream_manager.start(streams)
-        
+        try:
+            await self.flow_store.start()
+            await self.stream_manager.start(self._stream_groups())
+        except BaseException:
+            self._running = False
+            await self.stream_manager.stop()
+            await self.flow_store.stop()
+            raise
+
         self._msg_rate_task = asyncio.create_task(self._msg_rate_loop())
 
         if getattr(settings, "FLOW_PERSIST_BARS", False):
@@ -95,7 +100,9 @@ class MarketDataHub:
         last_saved: Dict[str, set] = {} # symbol_interval -> set(open_times)
         while self._running:
             await asyncio.sleep(10)
-            for sym, buffers in self.buffers.items():
+            active_keys = {f"{sym}_{interval}" for sym in self.buffers for interval in settings.FLOW_FOOTPRINT_INTERVALS}
+            last_saved = {key: saved for key, saved in last_saved.items() if key in active_keys}
+            for sym, buffers in list(self.buffers.items()):
                 for interval, bars in buffers.bars.items():
                     key = f"{sym}_{interval}"
                     if key not in last_saved:
@@ -103,7 +110,7 @@ class MarketDataHub:
                     
                     for b in list(bars):
                         if b.is_closed and b.open_time not in last_saved[key]:
-                            await self.flow_store.save_bar(sym, interval, b.model_dump())
+                            await self.flow_store.save_bar(sym if self.market == "spot" else f"{self.market}:{sym}", interval, b.model_dump())
                             last_saved[key].add(b.open_time)
                     
                     # Cleanup old saved open_times to avoid memory leak
@@ -115,23 +122,30 @@ class MarketDataHub:
         """Stops ingestion and cleans up."""
         self._running = False
         await self.stream_manager.stop()
-        await self.flow_store.stop()
-        for task in self._resync_tasks:
+        tasks = list(self._resync_tasks)
+        tasks.extend(t for t in (self._persistence_task, self._msg_rate_task) if t is not None)
+        for task in tasks:
             task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await self.flow_store.stop()
         self._resync_tasks.clear()
-        if self._persistence_task:
-            self._persistence_task.cancel()
-        if self._msg_rate_task:
-            self._msg_rate_task.cancel()
+        self._resync_by_symbol.clear()
+        self._persistence_task = self._msg_rate_task = None
+        self.dynamic_subs.clear()
+        for sym in list(self.books):
+            self._drop_symbol(sym)
 
     async def _init_symbol_state(self, symbol: str):
         sym = self.connector.normalize_symbol(symbol)
         if sym not in self.books:
             tick_size = await self.connector.tick_size(sym)
-            self.books[sym] = LocalOrderBook(sym, tick_size)
+            self.cache_generation += 1
+            self.books[sym] = LocalOrderBook(sym, tick_size, market=self.market)
             self.buffers[sym] = SymbolBuffers(sym)
             self.health_state[sym] = StreamHealth(
                 symbol=sym,
+                market=self.market,
                 connected=False,
                 streams=self.connector.stream_names(sym),
                 status="DISCONNECTED"
@@ -152,19 +166,66 @@ class MarketDataHub:
             # The ladder needs a far finer grouping than the footprint: at the footprint
             # increment BTC's top-of-book would collapse into a couple of rows.
             self.dom_engines[sym] = DomEngine(sym, max(tick_size, base_group / 100.0))
+            self.tape_engines[sym] = TapeEngine()
 
-    def subscribe(self, symbol: str):
-        sym = self.connector.normalize_symbol(symbol)
-        self.dynamic_subs[sym] = self.dynamic_subs.get(sym, 0) + 1
-        # TODO: if not in books, init state and subscribe dynamically via stream_manager
+    def _stream_groups(self) -> dict[str, list[str]]:
+        groups: dict[str, list[str]] = {}
+        for sym in self.books:
+            for base_url, streams in self.connector.stream_groups(sym).items():
+                groups.setdefault(base_url, []).extend(streams)
+        return groups
 
-    def unsubscribe(self, symbol: str):
+    def _drop_symbol(self, sym: str) -> None:
+        for registry in (self.books, self.buffers, self.health_state, self.footprint_engines,
+                         self.delta_engines, self.profile_engines, self.heatmap_engines,
+                         self.dom_engines, self.tape_engines, self._msg_counters):
+            registry.pop(sym, None)
+        self.connector.symbol_filters.pop(sym, None)
+
+    async def subscribe(self, symbol: str) -> None:
+        """Reserve bounded demand, initialize the symbol, and begin real ingestion."""
         sym = self.connector.normalize_symbol(symbol)
-        if sym in self.dynamic_subs:
-            self.dynamic_subs[sym] -= 1
-            if self.dynamic_subs[sym] <= 0:
-                del self.dynamic_subs[sym]
-                # TODO: unsubscribe from stream_manager if not in FLOW_SYMBOLS
+        if not sym.isalnum() or len(sym) > 30:
+            raise ValueError("Invalid symbol")
+        async with self._subscription_lock:
+            if not settings.FLOW_ENABLED:
+                raise ValueError("Order flow is disabled")
+            pinned = sym in self.pinned_symbols or (self.market == "spot" and sym in settings.FLOW_SYMBOLS)
+            if sym not in self.dynamic_subs and not pinned:
+                active = sum(sum(s not in h.pinned_symbols for s in h.dynamic_subs) for h in _hubs.values())
+                if active >= settings.FLOW_MAX_ACTIVE_SYMBOLS:
+                    raise ValueError("Active order-flow symbol limit reached")
+            self.dynamic_subs[sym] = self.dynamic_subs.get(sym, 0) + 1
+            try:
+                await self.start()
+                if sym not in self.books:
+                    await self._init_symbol_state(sym)
+                    await self.stream_manager.update_streams(self._stream_groups())
+            except BaseException:
+                self.dynamic_subs[sym] -= 1
+                if self.dynamic_subs[sym] <= 0:
+                    self.dynamic_subs.pop(sym, None)
+                    if sym not in self.pinned_symbols:
+                        self._drop_symbol(sym)
+                raise
+
+    async def unsubscribe(self, symbol: str) -> None:
+        """Release one demand owner and discard idle non-pinned stream state."""
+        sym = self.connector.normalize_symbol(symbol)
+        async with self._subscription_lock:
+            count = self.dynamic_subs.get(sym, 0)
+            if count > 1:
+                self.dynamic_subs[sym] = count - 1
+                return
+            self.dynamic_subs.pop(sym, None)
+            if sym in self.pinned_symbols or sym not in self.books:
+                return
+            task = self._resync_by_symbol.pop(sym, None)
+            if task:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            self._drop_symbol(sym)
+            await self.stream_manager.update_streams(self._stream_groups())
 
     def get_state(self, symbol: str) -> Optional[dict]:
         sym = self.connector.normalize_symbol(symbol)
@@ -173,7 +234,7 @@ class MarketDataHub:
         return {
             "book": self.books[sym],
             "buffers": self.buffers[sym],
-            "health": self.health_state[sym]
+            "health": self.health()[sym]
         }
         
     def _sample_heatmap(self, sym: str, event_time: int):
@@ -258,7 +319,7 @@ class MarketDataHub:
         if sym not in self.health_state:
             return None
 
-        health = self.health_state[sym]
+        health = self.health()[sym]
         now_ms = int(time.time() * 1000)
         delta = self.delta_engines.get(sym)
         profile = self.profile_engines.get(sym)
@@ -268,7 +329,7 @@ class MarketDataHub:
         vwap, vwap_up, vwap_dn = delta.get_vwap() if delta else (0.0, 0.0, 0.0)
 
         intervals = settings.FLOW_FOOTPRINT_INTERVALS
-        bars = self.get_footprint_bars(sym, intervals[0]) if intervals else []
+        bars = self.get_footprint_bars(sym, intervals[0], limit=1) if intervals else []
         bar = bars[-1] if bars else None
 
         poc = vah = val = 0.0
@@ -342,27 +403,73 @@ class MarketDataHub:
             health=health
         )
         
-    def get_footprint_bars(self, symbol: str, interval: str = "1m"):
+    def get_footprint_bars(self, symbol: str, interval: str = "1m", limit: int = 240):
         """Helper for auto_trader to fetch footprint bars."""
         sym = self.connector.normalize_symbol(symbol)
         if sym not in self.buffers:
             return []
         bars_deque = self.buffers[sym].bars.get(interval, [])
-        return list(bars_deque)
+        bars = list(bars_deque)[-max(1, min(limit, 240)):]
+        engine = self.footprint_engines.get(sym, {}).get(interval)
+        if bars and engine and engine.current_bar is bars[-1]:
+            # Materialize forming cells only when a fixed-rate reader requests them.
+            bars[-1] = bars[-1].model_copy(update={"cells": sorted(engine.cells_dict.values(), key=lambda c: c.price)})
+        return [self._bounded_footprint(bar) for bar in bars]
+
+    def _bounded_footprint(self, bar):
+        """Coarsen real volume for at most 512 displayed rows, preserving OHLC."""
+        if bar.high - bar.low <= 512 * bar.tick_group:
+            return bar
+        group = math.ceil((bar.high - bar.low) / (512 * bar.tick_group)) * bar.tick_group
+        cells = {}
+        for cell in bar.cells:
+            price = round(math.floor(cell.price / group) * group, 8)
+            if price not in cells:
+                cells[price] = cell.model_copy(update={"price": price})
+                continue
+            target = cells[price]
+            for field in ("buy_volume", "sell_volume", "total_volume", "delta", "trades"):
+                setattr(target, field, getattr(target, field) + getattr(cell, field))
+            target.buy_imbalance |= cell.buy_imbalance
+            target.sell_imbalance |= cell.sell_imbalance
+        return bar.model_copy(update={"tick_group": group, "cells": sorted(cells.values(), key=lambda c: c.price)})
 
     def register_listener(self, callback: Callable[[str, Any], None]):
         self.listeners.append(callback)
 
     def health(self) -> Dict[str, StreamHealth]:
+        """Derive freshness from both actual trade receipt and synchronized depth."""
+        now = int(time.time() * 1000)
+        for sym, health in self.health_state.items():
+            if health.status == "DEGRADED" and not self.books[sym].is_synced:
+                continue
+            if not health.last_trade_ts or not health.last_book_ts:
+                health.status = "WAITING" if health.connected else "DISCONNECTED"
+            elif now - min(health.last_trade_ts, health.last_book_ts) > settings.FLOW_STALE_AFTER_MS:
+                health.status = "STALE"
+                health.connected = False
+            elif not self.books[sym].is_synced:
+                health.status = "WAITING"
+            else:
+                health.status = "LIVE"
         return self.health_state
 
-    def _trigger_resync(self, symbol: str):
+    def _trigger_resync(self, symbol: str) -> None:
+        """Schedule at most one bounded snapshot task per symbol."""
         sym = self.connector.normalize_symbol(symbol)
-        if sym in self.books:
-            # We must not block the event loop with a REST request, so we create a task
+        if sym in self.books and sym not in self._resync_by_symbol:
+            book = self.books[sym]
+            if book.is_synced:
+                book._event_buffer.clear()
+            book.is_synced = False
             task = asyncio.create_task(self._do_resync(sym))
             self._resync_tasks.add(task)
-            task.add_done_callback(self._resync_tasks.discard)
+            self._resync_by_symbol[sym] = task
+            def finished(done: asyncio.Task) -> None:
+                self._resync_tasks.discard(done)
+                if self._resync_by_symbol.get(sym) is done:
+                    self._resync_by_symbol.pop(sym, None)
+            task.add_done_callback(finished)
 
     async def _do_resync(self, sym: str):
         book = self.books[sym]
@@ -381,7 +488,7 @@ class MarketDataHub:
             success = book.process_snapshot(snapshot)
             if success:
                 health.book_resyncs += 1
-                health.status = "LIVE"
+                self.health()
                 logger.info(f"[{sym}] Order book resynced successfully.")
             else:
                 logger.warning(f"[{sym}] Resync snapshot could not be applied against event buffer.")
@@ -434,7 +541,15 @@ class MarketDataHub:
             from backend.marketdata.models import Trade, BookDelta
             
             if isinstance(parsed, Trade):
+                if not self.buffers[sym].trades and sym not in settings.FLOW_TICK_GROUP_DEFAULTS:
+                    # Derive a readable increment from a real first print, never a fake price.
+                    tick = self.books[sym].tick_size
+                    base = max(tick, math.ceil(parsed.price * .0001 / tick) * tick)
+                    for engine in [*self.footprint_engines[sym].values(), self.profile_engines[sym], self.heatmap_engines[sym]]:
+                        engine.tick_group = base * settings.FLOW_TICK_GROUP_MULTIPLIER
+                    self.dom_engines[sym].tick_group = max(tick, base / 100) * settings.FLOW_TICK_GROUP_MULTIPLIER
                 self.buffers[sym].add_trade(parsed)
+                self.buffers[sym].tape.append(self.tape_engines[sym].process_trade(parsed))
                 if sym in self.delta_engines:
                     self.delta_engines[sym].process_trade(parsed)
                 if sym in self.profile_engines:
@@ -464,7 +579,8 @@ class MarketDataHub:
                     health.gap_events += 1
                     self._trigger_resync(sym)
                 health.last_book_ts = parsed.event_ts
-                self._sample_heatmap(sym, event_time)
+                if self.books[sym].is_synced:
+                    self._sample_heatmap(sym, event_time)
             elif isinstance(parsed, dict):
                 if 'k' in parsed and 'x' in parsed['k']:
                     # Kline
@@ -482,3 +598,18 @@ class MarketDataHub:
             logger.error(f"Error processing websocket message: {e}")
 
 hub = MarketDataHub()
+_hubs: dict[str, MarketDataHub] = {"spot": hub}
+
+
+def get_hub(market: str = "spot") -> MarketDataHub:
+    """Resolve one isolated market hub, preserving the existing Spot default."""
+    if market not in ("spot", "futures"):
+        raise ValueError("market must be spot or futures")
+    if market not in _hubs:
+        _hubs[market] = MarketDataHub(market)
+    return _hubs[market]
+
+
+async def stop_hubs() -> None:
+    """Await every market's tasks at application shutdown."""
+    await asyncio.gather(*(h.stop() for h in _hubs.values()))

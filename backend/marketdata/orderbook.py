@@ -7,7 +7,8 @@ from backend.config import settings
 
 class LocalOrderBook:
     """Maintains a local L2 order book using diff-depth updates and snapshots."""
-    def __init__(self, symbol: str, tick_size: float):
+    def __init__(self, symbol: str, tick_size: float, market: str = "spot"):
+        self.market = market
         self.symbol = symbol.upper()
         self.tick_size = tick_size
         
@@ -44,8 +45,14 @@ class LocalOrderBook:
         if self.last_update_id is None:
             return False
             
-        if delta.first_update_id != self.last_update_id + 1:
+        if delta.final_update_id <= self.last_update_id:
+            return True
+        contiguous = (delta.previous_final_update_id == self.last_update_id
+                      if self.market == "futures"
+                      else delta.first_update_id == self.last_update_id + 1)
+        if not contiguous:
             self.is_synced = False
+            self._event_buffer.append(delta)
             return False
 
         self._apply_updates(delta.bids, delta.asks)
@@ -60,14 +67,15 @@ class LocalOrderBook:
         self.is_syncing = False
         
         # Drop older events
-        while self._event_buffer and self._event_buffer[0].final_update_id <= snapshot.last_update_id:
+        bridge_id = snapshot.last_update_id + (0 if self.market == "futures" else 1)
+        while self._event_buffer and self._event_buffer[0].final_update_id < bridge_id:
             self._event_buffer.popleft()
             
         if not self._event_buffer:
             return False
             
         first_event = self._event_buffer[0]
-        if not (first_event.first_update_id <= snapshot.last_update_id + 1 <= first_event.final_update_id):
+        if not (first_event.first_update_id <= bridge_id <= first_event.final_update_id):
             return False
             
         # Clear book and apply snapshot
