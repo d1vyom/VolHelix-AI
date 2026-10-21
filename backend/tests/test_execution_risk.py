@@ -15,6 +15,7 @@ class Client:
         return {'account':self.account,'score':self.score,'is_valid':True,'side':'BUY','stop_loss':98,'take_profit':104}
     def get_exchange_info(self, symbol):
         return {'status':'TRADING','base_asset':'SOL','quote_asset':'USDT','filters':[{'filterType':'LOT_SIZE','minQty':'0.01','maxQty':'100','stepSize':'0.01'},{'filterType':'MIN_NOTIONAL','minNotional':'10'}]}
+    get_execution_info = get_exchange_info
     def place_order(self, **kw):
         self.calls += 1
         return {'order_id':12,'status':'NEW','orig_qty':kw.get('quantity',1),'executed_qty':0}
@@ -75,7 +76,7 @@ def test_daily_observation_survives_restart_and_deposit(tmp_path):
 
 
 def test_legacy_dispatch_cannot_bypass_gate(exchange_fixture):
-    exchange_fixture.get_exchange_info=Mock(return_value={'error':'unavailable'})
+    exchange_fixture.get_execution_info=Mock(return_value={'error':'unavailable'})
     with pytest.raises(ValueError):
         exchange_fixture.place_order(symbol='SOLUSDT',side='BUY',quantity=100)
     exchange_fixture.trading_client.create_order.assert_not_called()

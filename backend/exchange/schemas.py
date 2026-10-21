@@ -1,10 +1,12 @@
 """Validated order contracts shared by API and execution paths."""
 from typing import Literal
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+from backend.exchange.models import Market
 
 class OrderRequest(BaseModel):
-    """Spot testnet submission with finite positive sizing."""
+    """Market-aware testnet submission with finite positive sizing."""
     model_config = ConfigDict(allow_inf_nan=False)
+    market: Market = 'spot'
     symbol: str = Field(min_length=1)
     reduce_only: bool = False
     client_order_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,36}$')
@@ -21,6 +23,8 @@ class OrderRequest(BaseModel):
 
     @model_validator(mode='after')
     def limit_requires_price(self) -> 'OrderRequest':
+        if self.market == 'futures' and self.quote_quantity is not None:
+            raise ValueError('Futures requires base qty, without quote_quantity')
         if self.order_type == 'LIMIT' and (self.limit_price is None or self.quote_quantity is not None):
             raise ValueError('LIMIT requires limit_price and base qty, without quote_quantity')
         return self

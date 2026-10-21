@@ -1,4 +1,4 @@
-"""Nonblocking Spot testnet dispatch and acknowledgement validation."""
+"""Nonblocking market-aware testnet dispatch and acknowledgement validation."""
 import asyncio
 import math
 import uuid
@@ -16,6 +16,9 @@ class MarketDataUnavailable(OrderExecutionError):
 
 def validate_order(request, *, client):
     """Fresh server inputs only. Preview verdicts never authorize dispatch."""
+    if request.market == 'futures':
+        from backend.exchange.futures_risk import validate_futures_order
+        return validate_futures_order(request,client=client)
     from backend.models.trade import TradeProposal
     from backend.models.portfolio import PortfolioSnapshot
     from backend.risk.risk_gate import CryptoRiskGate
@@ -24,7 +27,7 @@ def validate_order(request, *, client):
         price = Decimal(str(client.get_price(request.symbol)['price']))
         if not price.is_finite() or price <= 0:
             raise ValueError('Market price unavailable')
-        info = client.get_exchange_info(request.symbol)
+        info = client.get_execution_info(request.symbol)
         if info.get('error') or info.get('status') != 'TRADING':
             raise ValueError('Exchange symbol unavailable')
         context = {} if request.reduce_only else client.get_execution_context(request.symbol)
@@ -41,23 +44,7 @@ def validate_order(request, *, client):
         checks['inventory'] = request.side != 'SELL' or (not request.quote_quantity and quantity <= free_base)
         checks['reduce_only'] = not request.reduce_only or (request.side == 'SELL' and not request.quote_quantity and quantity <= free_base)
         checks['funds'] = request.side != 'BUY' or notional <= Decimal(str(account.get('buying_power', 0)))
-        filters = info.get('filters', [])
-        checks['exchange_filters'] = bool(filters)
-        for f in filters:
-            kind = f['filterType']
-            if kind in ('LOT_SIZE', 'MARKET_LOT_SIZE') and (kind != 'MARKET_LOT_SIZE' or request.order_type == 'MARKET'):
-                for key, passes in [('minQty', lambda n: quantity >= n), ('maxQty', lambda n: quantity <= n), ('stepSize', lambda n: request.quote_quantity is not None or quantity % n == 0)]:
-                    value = Decimal(str(f.get(key, 0)))
-                    if value > 0 and not passes(value): checks['exchange_filters'] = False
-            if kind in ('MIN_NOTIONAL','NOTIONAL'):
-                if notional < Decimal(str(f.get('minNotional', 0))): checks['exchange_filters'] = False
-                maximum = Decimal(str(f.get('maxNotional', 0)))
-                if maximum > 0 and notional > maximum: checks['exchange_filters'] = False
-            if kind == 'PRICE_FILTER' and request.order_type == 'LIMIT':
-                tick = Decimal(str(f.get('tickSize', 0)))
-                minimum = Decimal(str(f.get('minPrice', 0)))
-                maximum = Decimal(str(f.get('maxPrice', 0)))
-                if (tick > 0 and notional_price % tick != 0) or notional_price < minimum or (maximum > 0 and notional_price > maximum): checks['exchange_filters'] = False
+        checks['exchange_filters'] = passes_exchange_filters(request,info,quantity,notional_price,notional)
         if not request.reduce_only:
             nav = float(account.get('equity', 0))
             pnl = account.get('daily_pnl')
@@ -75,6 +62,31 @@ def validate_order(request, *, client):
         return {'approved':approved,'checks':checks,'reason':'Approved' if approved else 'Failed: '+', '.join(k for k,v in checks.items() if not v),'symbol':request.symbol,'side':request.side,'quantity':str(quantity),'price':str(notional_price),'market_price':str(price),'notional':str(notional),'market':'spot','order_type':request.order_type,'testnet':True,'reduce_only':request.reduce_only,'risk_coverage':account.get('coverage'),'coverage_started_at':account.get('coverage_started_at')}
     except Exception as exc:
         return {'approved':False,'checks':checks,'reason':str(exc)}
+
+def passes_exchange_filters(request, info, quantity, price, notional):
+    """Exact decimal testnet rules, shared without sharing Spot inventory policy."""
+    filters = info.get('filters', [])
+    if not filters:
+        return False
+    for f in filters:
+        kind = f['filterType']
+        if kind in ('LOT_SIZE', 'MARKET_LOT_SIZE') and (kind != 'MARKET_LOT_SIZE' or request.order_type == 'MARKET'):
+            for key, passes in [('minQty',lambda n:quantity>=n),('maxQty',lambda n:quantity<=n),
+                                ('stepSize',lambda n:request.quote_quantity is not None or quantity%n==0)]:
+                value = Decimal(str(f.get(key,0)))
+                if value > 0 and not passes(value): return False
+        if kind in ('MIN_NOTIONAL','NOTIONAL'):
+            # Futures exempts reduce-only orders from min-notional, enabling dust exits.
+            if not (request.market == 'futures' and request.reduce_only):
+                if notional < Decimal(str(f.get('minNotional',f.get('notional',0)))): return False
+            maximum = Decimal(str(f.get('maxNotional',0)))
+            if maximum > 0 and notional > maximum: return False
+        if kind == 'PRICE_FILTER' and request.order_type == 'LIMIT':
+            tick = Decimal(str(f.get('tickSize',0)))
+            minimum = Decimal(str(f.get('minPrice',0)))
+            maximum = Decimal(str(f.get('maxPrice',0)))
+            if (tick > 0 and price%tick != 0) or price < minimum or (maximum > 0 and price > maximum): return False
+    return True
 
 async def preview_order(request: OrderRequest, *, client):
     return await asyncio.to_thread(validate_order, request, client=client)

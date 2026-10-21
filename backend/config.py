@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     BINANCE_API_SECRET: str = ""
     BINANCE_BASE_URL: str = "https://testnet.binance.vision"
     BINANCE_USE_TESTNET: bool = True
+    BINANCE_FUTURES_API_KEY: str = ""
+    BINANCE_FUTURES_API_SECRET: str = ""
 
     # LLM Configuration
     GOOGLE_API_KEY: str = ""

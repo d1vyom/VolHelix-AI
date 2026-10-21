@@ -2,10 +2,12 @@ from pydantic import BaseModel, Field, model_validator
 from typing import Any, Optional, List
 
 from backend.models.market import StrategyType, TradeStatus, OrderType, OrderSide, OptionLeg
+from backend.exchange.models import Market
 
 
 class TradeProposal(BaseModel):
     id: str
+    market: Market = 'spot'
     symbol: str = ""                       # e.g., "BTCUSDT"
     underlying: Optional[str] = None       # Compatibility alias with symbol
     strategy_type: StrategyType = StrategyType.MASTER_ORDER_FLOW
@@ -64,6 +66,7 @@ class MCPCallLog(BaseModel):
 
 class TradeRecord(BaseModel):
     trade_id: str
+    market: Market = 'spot'
     proposal: TradeProposal
     status: TradeStatus = TradeStatus.OPEN
     entry_time: Optional[str] = None

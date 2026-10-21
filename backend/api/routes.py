@@ -624,7 +624,8 @@ async def submit_exchange_order(order_req: OrderSubmission):
     clean_sym = _normalize_symbol(order_req.symbol)
     request = order_req.model_copy(update={"symbol": clean_sym})
     try:
-        result = await submit_order(request, client=await asyncio.to_thread(_get_binance_client))
+        from backend.exchange.registry import get_exchange_client
+        result = await submit_order(request, client=await asyncio.to_thread(get_exchange_client,request.market))
     except MarketDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except OrderExecutionError as exc:
@@ -637,7 +638,7 @@ async def submit_exchange_order(order_req: OrderSubmission):
     tp_price = round(reference_price * 1.04, 2)
     sl_price = round(reference_price * 0.985, 2)
     prop = TradeProposal(
-        id=result.order_id, symbol=clean_sym, underlying=clean_sym,
+        id=result.order_id, market=request.market, symbol=clean_sym, underlying=clean_sym,
         strategy_type=StrategyType.MASTER_ORDER_FLOW, side=request.side,
         order_type=request.order_type, qty=result.executed_qty,
         quote_qty=request.quote_quantity, limit_price=request.limit_price,
@@ -645,7 +646,7 @@ async def submit_exchange_order(order_req: OrderSubmission):
         thesis=f"Binance Testnet acknowledgement: {result.exchange_status}",
     )
     trade = TradeRecord(
-        trade_id=result.order_id, proposal=prop, status=status,
+        trade_id=result.order_id, market=request.market, proposal=prop, status=status,
         entry_time=datetime.now().isoformat(), entry_price=result.entry_price,
         current_price=result.current_price, take_profit_price=tp_price,
         stop_loss_price=sl_price, binance_order_id=result.order_id,
@@ -665,7 +666,7 @@ async def submit_exchange_order(order_req: OrderSubmission):
                                             "status": status.value, "entry_price": result.entry_price})
     except Exception:
         pass
-    return {"success": True, **result.model_dump(), "symbol": clean_sym,
+    return {"success": True, **result.model_dump(), "symbol": clean_sym, "market":request.market,
             "status": status.value, "order_type": request.order_type,
             "limit_price": request.limit_price, "qty": result.executed_qty,
             "side": request.side, "take_profit_price": tp_price, "stop_loss_price": sl_price,

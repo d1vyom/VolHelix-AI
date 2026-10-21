@@ -410,6 +410,11 @@ class BinanceClient:
     # TRADING (Testnet Paper Trading)
     # ──────────────────────────────────────────────
 
+    def get_execution_info(self, symbol: str) -> dict:
+        """Validate execution filters against Spot testnet, never public listings."""
+        from backend.exchange.models import normalize_symbol_info
+        return normalize_symbol_info(self.trading_client.get_symbol_info(symbol.upper()))
+
     def get_execution_context(self, symbol: str) -> dict:
         """Server analysis and freshly valued testnet account; never client approval."""
         import hashlib
