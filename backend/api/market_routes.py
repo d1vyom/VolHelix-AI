@@ -1,7 +1,7 @@
 """Market discovery, reads and server-computed order confirmation previews."""
 import asyncio
-from fastapi import APIRouter, HTTPException, Query
-from backend.exchange.execution import preview_order
+from fastapi import APIRouter, HTTPException, Query, Path
+from backend.exchange.execution import preview_order, OrderExecutionError, execution_error_detail
 from backend.exchange.schemas import OrderRequest, OrderPreview
 from backend.exchange.models import Market
 from backend.exchange import registry, catalog
@@ -26,6 +26,23 @@ async def preview(request: OrderRequest):
     from backend.api.routes import _normalize_symbol
     request = request.model_copy(update={'symbol':_normalize_symbol(request.symbol)})
     return await preview_order(request,client=await asyncio.to_thread(registry.get_exchange_client,request.market))
+
+
+@router.post('/api/market/order-intents/{client_order_id}/reconcile')
+async def reconcile_order_intent(client_order_id: str = Path(pattern=r'^[A-Za-z0-9_-]{1,36}$'), market: Market = 'spot'):
+    """Reconcile the server's stored intent; caller supplies no order payload."""
+    from backend.exchange.lifecycle import reconcile_intent
+    from backend.api.routes import _invalidate_cache
+    try:
+        result, trade = await reconcile_intent(market, client_order_id,
+            client=await asyncio.to_thread(registry.get_exchange_client, market))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail='Intent not found in selected market') from exc
+    except OrderExecutionError as exc:
+        raise HTTPException(status_code=502, detail=execution_error_detail(exc, market, client_order_id)) from exc
+    _invalidate_cache()
+    return {'success':True, 'outcome':'ACKNOWLEDGED', **result.model_dump(),
+            'market':market, 'symbol':trade.proposal.symbol, 'trade_id':trade.trade_id, 'status':trade.status.value}
 
 @router.get('/api/market/instruments')
 async def instruments(market: Market = 'spot', search: str = Query(default='',max_length=60)):

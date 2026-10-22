@@ -35,6 +35,19 @@ Offline browser verification: in `frontend/`, run `npx playwright test`. Its Nex
 cache uses `.next-e2e`; controlled Socket.IO listens only on `127.0.0.1:8107`. HTTP
 exchange endpoints are fixtures; no backend app, guardian or live orders start.
 
+Execution failures use `detail: {outcome, message, market, client_order_id}`.
+`REJECTED` means a persisted exchange rejection, `NOT_DISPATCHED` means a
+pre-dispatch check prevented execution, and `UNKNOWN` retains the original intent
+and reservation. HTTP502 alone never determines the outcome. Successful actual
+acknowledgements include `outcome: "ACKNOWLEDGED"`.
+
+`POST /api/market/order-intents/{client_order_id}/reconcile?market=spot|futures`
+takes no order body. It loads the original durable payload and only queries the
+exchange or reuses its terminal acknowledgement; it cannot create another order.
+An actual acknowledgement updates the entry ledger or the original tracked exit.
+Intent-only pending rows use this endpoint without session storage. Their Cancel
+action stays disabled until reconciliation establishes a recorded trade identity.
+
 ## Binance references
 
 - [Futures routed connections](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/Connect): separate depth/public and aggTrade/market routes.

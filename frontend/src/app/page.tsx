@@ -5,7 +5,7 @@ import io from "socket.io-client";
 import { useMarket } from "@/components/MarketProvider";
 import { OrderTicket } from "@/components/OrderTicket";
 import { MarketDepth } from "@/components/MarketDepth";
-import { formatMoney, readBars, readOrders, readPositions } from "@/lib/market";
+import { formatMoney, readBars, readOrders, readPositions, reconcileOrderIntent } from "@/lib/market";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Tooltip,
@@ -250,16 +250,19 @@ export default function BybitTradingTerminal() {
     showToast(available?"Binance positions & orders synchronized":"Account data unavailable; saved exposure retained as stale");
   };
 
-  const handleFillPending = async (orderId:string) => {
-    setIsFillingOrder(orderId);
-    const res=await fillPendingTrade(orderId,undefined,market);
+  const handleFillPending = async (order:ExchangeOrder) => {
+    setIsFillingOrder(order.id);
+    const res=order.trade_id?await fillPendingTrade(order.trade_id,undefined,market):
+      order.client_order_id?await reconcileOrderIntent(market,order.client_order_id):{success:false,error:'Unresolved order identity unavailable'};
     showToast(res.success?'Exchange status reconciled':res.error || 'Reconciliation failed');
     await refreshAccountAndPositions();setIsFillingOrder(null);
   };
 
   const handleCancelOrder = async (orderId: string) => {
+    const order=orders.find(row=>row.id===orderId);
+    if(!order?.trade_id){showToast('Reconcile first to establish exchange identity.');return;}
     try {
-      const res = await cancelExchangeOrder(orderId,market,orders.find(order=>order.id===orderId)?.symbol);
+      const res = await cancelExchangeOrder(order.trade_id,market,order.symbol);
       if (res && res.success) {
         showToast("Order cancelled successfully");
         await refreshAccountAndPositions();
@@ -653,8 +656,8 @@ export default function BybitTradingTerminal() {
                                   <td className="py-2 px-2 text-right">
                                     <div className="flex items-center justify-end gap-1.5">
                                       <button
-                                        onClick={() => handleFillPending(ord.id)}
-                                        disabled={isFillingOrder === ord.id}
+                                        onClick={() => handleFillPending(ord)}
+                                        disabled={isFillingOrder === ord.id || (!ord.trade_id&&!ord.client_order_id)}
                                         className="px-2 py-0.5 rounded bg-[#20b26c]/20 hover:bg-[#20b26c]/30 text-[#20b26c] border border-[#20b26c]/40 text-[10px] font-bold transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1"
                                         title="Reconcile the actual exchange order state"
                                       >
@@ -663,11 +666,14 @@ export default function BybitTradingTerminal() {
                                       </button>
                                       <button
                                         onClick={() => handleCancelOrder(ord.id)}
+                                        disabled={!ord.trade_id}
+                                        title={!ord.trade_id?'Reconcile first to establish exchange identity.':'Cancel recorded exchange order'}
                                         className="px-2 py-0.5 rounded bg-[#26282f] hover:bg-[#ef454a]/20 hover:text-[#ef454a] text-[#878996] text-[10px] transition-colors cursor-pointer"
                                       >
                                         Cancel
                                       </button>
                                     </div>
+                                    {!ord.trade_id&&<p className="mt-1 text-[#f7a600]">Reconcile first to establish exchange identity.</p>}
                                   </td>
                                 </tr>
                               );

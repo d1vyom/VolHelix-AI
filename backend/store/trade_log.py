@@ -63,6 +63,18 @@ class TradeLog:
             raise ValueError('Ambiguous order identity; supply market and symbol')
         return candidates[0] if candidates else None
 
+    async def find_exit_intent(self, market: str, client_order_id: str) -> Optional[TradeRecord]:
+        """Find the current or completed exit owner without loading the whole ledger."""
+        execution_path = '$.exit_executions."' + client_order_id + '"'
+        async with aiosqlite.connect(DB_PATH) as db:
+            rows = await (await db.execute("""SELECT data FROM trades
+                WHERE json_extract(data,'$.market')=? AND
+                (json_extract(data,'$.exit_client_order_id')=? OR json_type(data,?) IS NOT NULL)
+                LIMIT 2""", (market, client_order_id, execution_path))).fetchall()
+        if len(rows) > 1:
+            raise ValueError('Ambiguous tracked exit identity; reservation retained')
+        return TradeRecord.model_validate_json(rows[0][0]) if rows else None
+
     async def get_all_trades(self) -> List[TradeRecord]:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute("SELECT data FROM trades ORDER BY rowid DESC") as cursor:

@@ -415,7 +415,7 @@ def get_exchange_bars(symbol: str = "BTCUSDT", timeframe: str = "1H", limit: int
 
 
 from backend.exchange.schemas import OrderRequest
-from backend.exchange.execution import submit_order, OrderExecutionError, MarketDataUnavailable
+from backend.exchange.execution import submit_order, OrderExecutionError, MarketDataUnavailable, execution_error_detail
 
 # Preserve the existing import and route contract.
 OrderSubmission = OrderRequest
@@ -429,9 +429,9 @@ async def submit_exchange_order(order_req: OrderSubmission):
     try:
         result,trade = await execute_entry(request,client=await asyncio.to_thread(get_exchange_client,request.market))
     except MarketDataUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=execution_error_detail(exc, request.market, request.client_order_id)) from exc
     except OrderExecutionError as exc:
-        raise HTTPException(status_code=409 if 'conflict' in str(exc) else 502, detail=str(exc)) from exc
+        raise HTTPException(status_code=409 if 'conflict' in str(exc) else 502, detail=execution_error_detail(exc, request.market, request.client_order_id)) from exc
     status=trade.status
     filled=result.exchange_status=='FILLED'
     tp_price=trade.take_profit_price
@@ -448,7 +448,7 @@ async def submit_exchange_order(order_req: OrderSubmission):
                                             "status": status.value, "entry_price": result.entry_price})
     except Exception:
         pass
-    return {"success": True, **result.model_dump(), "trade_id":trade.trade_id, "symbol": clean_sym, "market":request.market,
+    return {"success": True, "outcome":"ACKNOWLEDGED", **result.model_dump(), "trade_id":trade.trade_id, "symbol": clean_sym, "market":request.market,
             "status": status.value, "order_type": request.order_type,
             "limit_price": request.limit_price, "qty": result.executed_qty,
             "side": request.side, "take_profit_price": tp_price, "stop_loss_price": sl_price,
@@ -493,6 +493,8 @@ async def close_exchange_position(req: ClosePositionRequest):
         closed=[]
         for trade in trades:
             closed.append(await close_trade_position(trade,client=client))
+    except OrderExecutionError as exc:
+        raise HTTPException(status_code=502, detail=execution_error_detail(exc, req.market)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502,detail=str(exc)) from exc
     _invalidate_cache()

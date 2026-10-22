@@ -7,12 +7,25 @@ from backend.exchange.schemas import OrderRequest, OrderResult
 
 class OrderExecutionError(Exception):
     """Exchange failed or returned an unusable acknowledgement."""
+    outcome = 'UNKNOWN'
+
+class OrderNotDispatched(OrderExecutionError):
+    """A pre-dispatch check failed; no create call was made for this request."""
+    outcome = 'NOT_DISPATCHED'
+
+class OrderRejected(OrderExecutionError):
+    """The exchange acknowledgement durably proves a rejection."""
+    outcome = 'REJECTED'
 
 class OrderOutcomeUnknown(OrderExecutionError):
     """A single reconciliation has already failed; retain the client order ID."""
 
-class MarketDataUnavailable(OrderExecutionError):
+class MarketDataUnavailable(OrderNotDispatched):
     """A finite positive production quote could not be obtained."""
+
+def execution_error_detail(exc: OrderExecutionError, market: str, client_order_id: str | None = None) -> dict:
+    """Expose proven outcomes independently of HTTP status or human wording."""
+    return {'outcome':exc.outcome, 'message':str(exc), 'market':market, 'client_order_id':client_order_id}
 
 def validate_order(request, *, client):
     """Fresh server inputs only. Preview verdicts never authorize dispatch."""
@@ -148,7 +161,7 @@ async def submit_order(request: OrderRequest, *, client) -> OrderResult:
         await asyncio.to_thread(order_intents.bind_account,client,request.market,False)
         existing=await asyncio.to_thread(order_intents.get,request)
     except ValueError as exc:
-        raise OrderExecutionError(str(exc)) from exc
+        raise OrderNotDispatched(str(exc)) from exc
     if existing:
         return await _reuse_intent(request,existing,client)
     try:
@@ -161,13 +174,13 @@ async def submit_order(request: OrderRequest, *, client) -> OrderResult:
     snapshot_started=time.time()
     verdict = await asyncio.to_thread(validate_order, request, client=client)
     if not verdict['approved']:
-        raise OrderExecutionError(verdict['reason'])
+        raise OrderNotDispatched(verdict['reason'])
     try:
         await asyncio.to_thread(order_intents.bind_account,client,request.market)
         account=verdict['_reservation_account']
         existing=await asyncio.to_thread(order_intents.claim,request,verdict,account,snapshot_started)
     except (ValueError,KeyError,TypeError) as exc:
-        raise OrderExecutionError(str(exc)) from exc
+        raise OrderNotDispatched(str(exc)) from exc
     if existing:
         return await _reuse_intent(request,existing,client)
     kwargs = dict(symbol=request.symbol, side=request.side, order_type=request.order_type,
@@ -193,7 +206,7 @@ async def submit_order(request: OrderRequest, *, client) -> OrderResult:
         await asyncio.to_thread(order_intents.finish,request)
         raise OrderOutcomeUnknown(f'Order outcome unavailable; reconcile client ID {request.client_order_id} before retrying') from exc
     if result.exchange_status=='REJECTED':
-        raise OrderExecutionError('Exchange rejected order')
+        raise OrderRejected('Exchange rejected order')
     return result
 
 
@@ -202,7 +215,7 @@ async def _reuse_intent(request, existing, client):
     if existing['result'] and existing['status']!='UNKNOWN':
         result=OrderResult.model_validate_json(existing['result'])
         if result.exchange_status=='REJECTED':
-            raise OrderExecutionError('Exchange rejected order')
+            raise OrderRejected('Exchange rejected order')
         return result
     try:
         response=await asyncio.to_thread(client.get_order_by_client_id,request.symbol,request.client_order_id)
@@ -210,7 +223,7 @@ async def _reuse_intent(request, existing, client):
         result=parse_acknowledgement(response,request,float(existing['notional'])/float(existing['quantity']))
         result=await asyncio.to_thread(order_intents.finish,request,result)
         if result.exchange_status=='REJECTED':
-            raise OrderExecutionError('Exchange rejected order')
+            raise OrderRejected('Exchange rejected order')
         return result
     except OrderExecutionError:
         raise

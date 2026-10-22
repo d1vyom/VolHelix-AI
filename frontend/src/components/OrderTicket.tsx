@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import type { ExchangePosition } from '@/lib/api';
-import { OrderIntent, Preview, request } from '@/lib/market';
+import { OrderIntent, Preview, request, readExecutionResponse } from '@/lib/market';
 import { useMarket } from './MarketProvider';
 
 type Attempt = { intent: OrderIntent; preview: Preview; close?: ExchangePosition };
@@ -35,14 +35,12 @@ export function OrderTicket({onUpdated,close,onDismiss}:{onUpdated?:()=>void;clo
     setBusy(true);setUnknown(false);sessionStorage.setItem(storageKey,JSON.stringify(attempt));
     try {
       const response=await fetch(`${process.env.NEXT_PUBLIC_API_URL||''}${attempt.close?'/api/exchange/close-position':'/api/exchange/order'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(attempt.close?{market:attempt.intent.market,symbol:attempt.intent.symbol,trade_id:attempt.close.trade_id || attempt.close.id}:attempt.intent)});
-      const result=await response.json();
-      const state=String(result.exchange_status || result.status || '').toUpperCase();
-      const uncertain=state==='UNKNOWN'||state==='DISPATCHING'||response.status>=500;
-      const rejection=result.error || result.detail;
+      const result=await readExecutionResponse(response);
+      const {state,uncertain}=result;
       if(!uncertain)sessionStorage.removeItem(storageKey);
       if(!alive.current)return;
       setUnknown(uncertain);
-      setNotice(uncertain?`UNKNOWN: outcome unconfirmed for ${attempt.intent.symbol}. Reconcile using the same intent.`:result.success?`${attempt.intent.market} ${attempt.intent.symbol}: ${state || 'Acknowledged'}${result.executed_qty!=null?` · Executed ${result.executed_qty}`:''}`:typeof rejection==='string'?rejection:`Order rejected (HTTP ${response.status})`);
+      setNotice(uncertain?`UNKNOWN: outcome unconfirmed for ${attempt.intent.symbol}. Reconcile using the same intent.`:result.success?`${attempt.intent.market} ${attempt.intent.symbol}: ${state || 'Acknowledged'}${result.executed_qty!=null?` · Executed ${result.executed_qty}`:''}`:result.error);
       dialog.current?.close();if(!uncertain)setAttempt(null);onUpdated?.();
     }catch{if(alive.current){setUnknown(true);setNotice('UNKNOWN: network response lost. Reconcile using the same intent.');dialog.current?.close();}}
     finally{if(alive.current)setBusy(false);}

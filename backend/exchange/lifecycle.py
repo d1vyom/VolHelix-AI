@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime
 
 from backend.exchange.schemas import OrderRequest, OrderResult
-from backend.exchange.execution import submit_order, parse_acknowledgement, OrderExecutionError
+from backend.exchange.execution import submit_order, parse_acknowledgement, OrderExecutionError, OrderNotDispatched, OrderRejected, OrderOutcomeUnknown, _reuse_intent
 from backend.models.trade import TradeRecord, TradeProposal
 from backend.models.market import TradeStatus
 from backend.store.trade_log import trade_log
@@ -43,7 +43,7 @@ async def persist_entry(request, result, *, proposal=None):
 
 async def execute_entry(request, *, client, proposal=None):
     if request.reduce_only or (request.market=='spot' and request.side=='SELL'):
-        raise OrderExecutionError('Inventory reductions require the tracked-position close endpoint')
+        raise OrderNotDispatched('Inventory reductions require the tracked-position close endpoint')
     result=await submit_order(request,client=client)
     trade=await persist_entry(request,result,proposal=proposal)
     return result,trade
@@ -120,7 +120,7 @@ async def close_trade_position(trade, *, client, exit_type=TradeStatus.CLOSED):
                 raise
     updated=await trade_log.apply_exit(trade.trade_id,result,exit_type)
     if result.exchange_status=='REJECTED':
-        raise OrderExecutionError('Exchange rejected exit; position retained')
+        raise OrderRejected('Exchange rejected exit; position retained')
     return updated
 
 
@@ -135,6 +135,39 @@ async def recover_entries():
             await execute_entry(request,client=client)
         except Exception as exc:
             get_logger('lifecycle').warning(f"Retained {intent['identity']} for reconciliation: {exc}")
+
+
+async def reconcile_intent(market: str, client_order_id: str, *, client):
+    """Resolve a durable original intent without validation, sizing or create calls."""
+    intent = await asyncio.to_thread(order_intents.lookup, market, client_order_id)
+    if not intent:
+        raise KeyError('Intent not found in selected market')
+    request = OrderRequest.model_validate_json(intent['payload'])
+    try:
+        await asyncio.to_thread(order_intents.bind_account, client, market)
+    except ValueError as exc:
+        raise OrderOutcomeUnknown(str(exc)) from exc
+    owner = None
+    if request.reduce_only:
+        try:
+            owner = await trade_log.find_exit_intent(market, client_order_id)
+        except ValueError as exc:
+            raise OrderOutcomeUnknown(str(exc)) from exc
+        if not owner:
+            raise OrderOutcomeUnknown('Tracked exit identity unavailable; reservation retained')
+    # A nonterminal acknowledgement is only a snapshot. Query its current state.
+    if intent['status'] not in TERMINAL:
+        intent['result'] = None
+    try:
+        result = await _reuse_intent(request, intent, client)
+    except OrderRejected:
+        if owner:
+            stored = await asyncio.to_thread(order_intents.lookup, market, client_order_id)
+            await trade_log.apply_exit(owner.trade_id, OrderResult.model_validate_json(stored['result']), TradeStatus.CLOSED)
+        raise
+    trade = (await trade_log.apply_exit(owner.trade_id, result, TradeStatus.CLOSED)
+             if owner else await persist_entry(request, result))
+    return result, trade
 
 
 async def position_snapshot(market):

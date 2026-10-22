@@ -197,6 +197,59 @@ test('structured execution validation rejection remains readable',async({page})=
   await expect(page.getByRole('button',{name:'Preview testnet order'})).toBeEnabled();
 });
 
+for(const outcome of ['REJECTED','NOT_DISPATCHED'])test(`backend 502 ${outcome} after preview releases the ticket safely`,async({page})=>{
+  await fixtures(page);
+  await page.route('**/api/exchange/order',route=>route.fulfill({status:502,contentType:'application/json',body:JSON.stringify({detail:{outcome,message:outcome==='REJECTED'?'Exchange rejected order':'Execution risk rejected changed funds',market:'spot',client_order_id:route.request().postDataJSON().client_order_id}})}));
+  await page.goto('/');await page.getByLabel('Order quantity').fill('0.001');
+  await page.getByRole('button',{name:'Preview testnet order'}).click();await page.getByRole('button',{name:'Confirm testnet order'}).click();
+  await expect(page.getByRole('status').filter({hasText:/rejected/i})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Preview testnet order'})).toBeEnabled();
+  expect(await page.evaluate(()=>sessionStorage.getItem('volhelix.pending-intent.v1'))).toBeNull();
+  await expect(page.getByText('No Active Positions',{exact:true})).toBeVisible();
+});
+
+test('saved uncertain intent clears only when durable reconciliation proves rejection',async({page})=>{
+  await fixtures(page);const sent:unknown[]=[];
+  await page.route('**/api/exchange/order',async route=>{sent.push(route.request().postDataJSON());if(sent.length===1)await route.abort();else await route.fulfill({status:502,contentType:'application/json',body:JSON.stringify({detail:{outcome:'REJECTED',message:'Exchange rejected order',market:'spot',client_order_id:route.request().postDataJSON().client_order_id}})});});
+  await page.goto('/');await page.getByLabel('Order quantity').fill('0.001');
+  await page.getByRole('button',{name:'Preview testnet order'}).click();await page.getByRole('button',{name:'Confirm testnet order'}).click();
+  await expect(page.getByRole('button',{name:'Reconcile / retry same intent'})).toBeVisible();
+  await page.reload();await page.getByRole('button',{name:'Reconcile / retry same intent'}).click();
+  await expect(page.getByRole('button',{name:'Preview testnet order'})).toBeEnabled();expect(sent[1]).toEqual(sent[0]);
+  expect(await page.evaluate(()=>sessionStorage.getItem('volhelix.pending-intent.v1'))).toBeNull();
+});
+
+for(const initialStatus of ['UNKNOWN','DISPATCHING'])test(`intent-only ${initialStatus} rows reconcile original server identity without session payload or trade-only actions`,async({page})=>{
+  await fixtures(page);let resolved=false;const calls:{url:string;body:string|null}[]=[];const wrongCalls:string[]=[];
+  await page.route('**/api/exchange/orders?**',route=>{const market=new URL(route.request().url()).searchParams.get('market');return route.fulfill({contentType:'application/json',body:JSON.stringify(market==='futures'?[resolved?{id:'futures:ETHUSDT:88',trade_id:'futures:ETHUSDT:88',client_order_id:'lost-server-intent',market:'futures',symbol:'ETHUSDT',qty:0.2,side:'BUY',type:'LIMIT',status:'FILLED',executed_qty:0.2,filled_avg_price:2200}:{id:'futures:lost-server-intent',client_order_id:'lost-server-intent',market:'futures',symbol:'ETHUSDT',qty:0.2,side:'BUY',type:'LIMIT',status:initialStatus,executed_qty:0,reduce_only:false,limit_price:2200}]:[])});});
+  await page.route('**/api/market/order-intents/**/reconcile?**',async route=>{calls.push({url:route.request().url(),body:route.request().postData()});if(calls.length===1)await route.fulfill({status:502,contentType:'application/json',body:JSON.stringify({detail:{outcome:'UNKNOWN',market:'futures',client_order_id:'lost-server-intent',message:'Exchange reconciliation unavailable'}})});else{resolved=true;await route.fulfill({contentType:'application/json',body:JSON.stringify({success:true,outcome:'ACKNOWLEDGED',market:'futures',client_order_id:'lost-server-intent',trade_id:'futures:ETHUSDT:88',exchange_status:'FILLED',executed_qty:0.2})});}});
+  page.on('request',request=>{if(/\/api\/trades\/.*\/fill|\/api\/exchange\/orders\//.test(request.url()))wrongCalls.push(request.url());});
+  await page.goto('/');await page.getByRole('button',{name:'Futures',exact:true}).click();
+  await page.getByRole('button',{name:/Pending Orders/}).click();
+  expect(await page.evaluate(()=>sessionStorage.length)).toBe(0);
+  await expect(page.getByRole('button',{name:'Cancel',exact:true})).toBeDisabled();
+  await expect(page.getByText('Reconcile first to establish exchange identity.')).toBeVisible();
+  await page.getByRole('button',{name:'Reconcile',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Reconcile',exact:true})).toBeEnabled();
+  await expect(page.getByRole('row').filter({hasText:'ETHUSDT'})).toContainText(initialStatus);
+  await page.getByRole('button',{name:'Reconcile',exact:true}).click();
+  await expect(page.getByText('No Pending Orders on Broker')).toBeVisible();
+  expect(calls).toHaveLength(2);expect(calls.every(call=>call.url.endsWith('/api/market/order-intents/lost-server-intent/reconcile?market=futures')&&call.body===null)).toBeTruthy();
+  expect(wrongCalls).toEqual([]);
+  await page.getByRole('button',{name:'Spot',exact:true}).click();await expect(page.getByRole('row').filter({hasText:'ETHUSDT'})).toHaveCount(0);
+});
+
+for(const classified of [true,false])test(`${classified?'classified UNKNOWN':'unclassified 502'} retains the entire original intent on retry`,async({page})=>{
+  await fixtures(page);const sent:unknown[]=[];
+  await page.route('**/api/exchange/order',async route=>{sent.push(route.request().postDataJSON());await route.fulfill({status:502,contentType:'application/json',body:JSON.stringify({detail:classified?{outcome:'UNKNOWN',message:'Exchange reconciliation unavailable'}:'Unclassified server failure'})});});
+  await page.goto('/');await page.getByLabel('Order quantity').fill('0.001');await page.getByLabel('Order type').selectOption('LIMIT');await page.getByLabel('Limit price').fill('59950');
+  await page.getByRole('button',{name:'Preview testnet order'}).click();await page.getByRole('button',{name:'Confirm testnet order'}).click();
+  await page.getByRole('button',{name:'Reconcile / retry same intent'}).click();
+  await expect.poll(()=>sent.length).toBe(2);expect(sent[1]).toEqual(sent[0]);
+  await expect(page.getByRole('button',{name:'Preview testnet order'})).toBeDisabled();
+  expect(await page.evaluate(()=>JSON.parse(sessionStorage.getItem('volhelix.pending-intent.v1')!).intent)).toEqual(sent[0]);
+});
+
 test('history never invents missing execution values',async({page})=>{
   await fixtures(page);
   await page.route('**/api/trades/history?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify([{trade_id:'spot:LEGACY:4',market:'spot',status:'CLOSED',symbol:'LEGACY',current_price:123,proposal:{strategy_type:'MASTER_ORDER_FLOW'}}])}));

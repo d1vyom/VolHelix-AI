@@ -7,6 +7,28 @@ export interface PositionSnapshot { market: Market; available: boolean; error?: 
 export interface OrderIntent { market: Market; symbol: string; qty: number; side: 'BUY'|'SELL'; order_type: 'MARKET'|'LIMIT'; limit_price?: number; client_order_id: string; reduce_only?: boolean }
 export interface Preview { approved: boolean; reason: string; checks: Record<string, boolean>; market?: Market; quantity?: string; price?: string; notional?: string; risk_coverage?: string; coverage_started_at?: string; testnet?: boolean }
 const base = process.env.NEXT_PUBLIC_API_URL || '';
+interface ExecutionReply {
+  success?:boolean; outcome?:string; status?:string; exchange_status?:string; executed_qty?:number;
+  error?:string; detail?:string|{outcome?:string;message?:string}|unknown[];
+}
+export async function readExecutionResponse(response:Response) {
+  const result=await response.json() as ExecutionReply;
+  const detail=result.detail && typeof result.detail==='object' && !Array.isArray(result.detail)?result.detail:null;
+  const outcome=detail?.outcome || result.outcome;
+  const state=String(result.exchange_status || result.status || '').toUpperCase();
+  const rejected=['REJECTED','NOT_DISPATCHED'].includes(outcome || '') || (response.ok&&state==='REJECTED');
+  const acknowledged=response.ok&&result.success===true&&(outcome==='ACKNOWLEDGED'||['NEW','PARTIALLY_FILLED','FILLED','PENDING_NEW','CANCELED','EXPIRED','EXPIRED_IN_MATCH','CLOSED','OPEN'].includes(state));
+  // FastAPI schema validation happens before the order handler can dispatch.
+  const invalidInput=response.status===422&&Array.isArray(result.detail);
+  const uncertain=outcome==='UNKNOWN'||outcome==='DISPATCHING'||state==='UNKNOWN'||state==='DISPATCHING'||(!rejected&&!acknowledged&&!invalidInput);
+  const error=result.error || detail?.message || (typeof result.detail==='string'?result.detail:`Order rejected (HTTP ${response.status})`);
+  return {...result,success:response.ok&&result.success===true,uncertain,error,state};
+}
+export async function reconcileOrderIntent(market:Market,clientOrderId:string) {
+  try {
+    return await readExecutionResponse(await fetch(`${base}/api/market/order-intents/${encodeURIComponent(clientOrderId)}/reconcile?market=${market}`,{method:'POST'}));
+  }catch{return {success:false,uncertain:true,error:'UNKNOWN: exchange reconciliation unavailable; reservation retained'};}
+}
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${base}${path}`, { ...init, cache: 'no-store' });
   const data = await response.json().catch(() => null);
