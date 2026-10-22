@@ -3,6 +3,7 @@ from datetime import datetime
 from backend.models.portfolio import PortfolioSnapshot
 from backend.models.market import Regime, CryptoAssetBalance
 from backend.models.trade import TradeRecord
+from collections import deque
 
 
 class PortfolioStore:
@@ -10,13 +11,13 @@ class PortfolioStore:
         self.initial_capital = 10000.0
         self.snapshot: PortfolioSnapshot = PortfolioSnapshot(
             timestamp=datetime.now().isoformat(),
-            equity=10000.0,
-            buying_power=10000.0,
+            equity=0.0,
+            buying_power=0.0,
             daily_risk_available=False,
-            daily_pnl=0.0,
-            daily_pnl_pct=0.0,
-            total_pnl=0.0,
-            total_pnl_pct=0.0,
+            daily_pnl=None,
+            daily_pnl_pct=None,
+            total_pnl=None,
+            total_pnl_pct=None,
             open_positions=0,
             open_position_count=0,
             balances={},
@@ -27,14 +28,19 @@ class PortfolioStore:
             exposures={},
             exposure_by_symbol={}
         )
-        self.snapshot_history: List[PortfolioSnapshot] = []
+        self.snapshot_history = deque(maxlen=1000)
         
     def update_from_exchange(self, account_data: dict, positions_data: List[dict], current_regime: Regime):
         """Sync the portfolio state from Binance."""
+        if account_data.get('error') or account_data.get('status')=='ERROR':
+            self.snapshot.account_available=False
+            self.snapshot.daily_risk_available=False
+            self.snapshot.daily_pnl=self.snapshot.daily_pnl_pct=None
+            return
         equity = float(account_data.get('equity', 0.0))
         buying_power = float(account_data.get('buying_power', 0.0))
-        total_pnl = round(equity - self.initial_capital, 2)
-        total_pnl_pct = round((total_pnl / self.initial_capital) * 100, 2) if self.initial_capital > 0 else 0.0
+        total_pnl = account_data.get("total_pnl")
+        total_pnl_pct = account_data.get("total_pnl_pct")
 
         balances_dict = {}
         raw_balances = account_data.get('balances', {})
@@ -54,9 +60,10 @@ class PortfolioStore:
             timestamp=datetime.now().isoformat(),
             equity=equity,
             buying_power=buying_power,
-            daily_risk_available='daily_pnl' in account_data,
-            daily_pnl=float(account_data.get('daily_pnl', 0.0)),
-            daily_pnl_pct=(float(account_data.get('daily_pnl', 0.0)) / equity * 100) if equity > 0 else 0.0,
+            account_available=True,
+            daily_risk_available=account_data.get('daily_pnl') is not None,
+            daily_pnl=account_data.get('daily_pnl'),
+            daily_pnl_pct=(float(account_data['daily_pnl']) / equity * 100) if equity > 0 and account_data.get('daily_pnl') is not None else None,
             total_pnl=total_pnl,
             total_pnl_pct=total_pnl_pct,
             open_positions=len(positions_data),
@@ -69,7 +76,7 @@ class PortfolioStore:
             exposures=exposures,
             exposure_by_symbol=exposures
         )
-        self.snapshot_history.append(self.snapshot)
+        self.snapshot_history.append(self.snapshot.model_copy(deep=True))
 
     # Backward compatibility alias
     def update_from_alpaca(self, account_data: dict, positions_data: List[dict], current_regime: Regime):
@@ -92,7 +99,7 @@ class PortfolioStore:
         self.snapshot.open_position_count += 1
         pos_value = trade.proposal.quote_qty or (trade.proposal.qty * trade.proposal.entry_price)
         self.snapshot.buying_power = max(0.0, self.snapshot.buying_power - pos_value)
-        self.snapshot_history.append(self.snapshot)
+        self.snapshot_history.append(self.snapshot.model_copy(deep=True))
 
 
 portfolio_store = PortfolioStore()

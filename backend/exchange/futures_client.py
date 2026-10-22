@@ -128,6 +128,12 @@ class FuturesClient:
         self._require_credentials()
         return self._normalize_order(self.trading_client.futures_get_order(symbol=symbol,orderId=order_id))
 
+    def get_order_fills(self, symbol: str, order_id: str) -> list[dict]:
+        """Return order-specific actual Futures commissions without changing position size."""
+        self._require_credentials()
+        rows=self.trading_client.futures_account_trades(symbol=symbol,orderId=order_id,limit=1000)
+        return [row for row in rows if str(row['orderId'])==str(order_id)]
+
     def get_orders(self, symbol=None, limit=50):
         self._require_credentials()
         params = {'symbol':symbol} if symbol else {}

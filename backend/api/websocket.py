@@ -9,7 +9,7 @@ from backend.config import settings
 from backend.marketdata.hub import hub, get_hub
 from backend.api.flow_schemas import SubscribeRequest
 
-sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
+sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=settings.CORS_ORIGINS)
 socket_app = socketio.ASGIApp(sio)
 broadcasters: dict[str, asyncio.Task] = {}
 last_emit_state: dict[str, dict] = {}

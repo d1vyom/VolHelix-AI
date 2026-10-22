@@ -47,6 +47,8 @@ def test_acknowledgement_uses_actual_fills(orders, status, executed, quote, expe
     exchange, emit = orders
     exchange.trading_client.create_order.side_effect = None
     exchange.trading_client.create_order.return_value = {'orderId':123,'symbol':'SOLUSDT','side':'BUY','type':'MARKET','status':status,'origQty':'0.5','executedQty':executed,'cummulativeQuoteQty':quote,'fills':[]}
+    exchange.trading_client.get_my_trades.side_effect = None
+    exchange.trading_client.get_my_trades.return_value = [{'orderId':123,'id':1,'qty':executed,'price':'160','commission':'0','commissionAsset':'USDT'}] if float(executed) else []
     response = client.post('/api/exchange/order', json={'symbol':'SOLUSDT','quote_quantity':80})
     assert response.status_code == 200
     data = response.json()
@@ -124,7 +126,7 @@ def test_contradictory_execution_never_persists(orders, status, executed, origin
 def test_complete_fill_fallback_uses_weighted_actual_price(orders):
     exchange, _ = orders
     exchange.trading_client.create_order.side_effect = None
-    exchange.trading_client.create_order.return_value = {'orderId':123,'symbol':'SOLUSDT','side':'BUY','type':'MARKET','status':'FILLED','origQty':'0.5','executedQty':'0.5','fills':[{'qty':'0.2','price':'150'},{'qty':'0.3','price':'160'}]}
+    exchange.trading_client.create_order.return_value = {'orderId':123,'symbol':'SOLUSDT','side':'BUY','type':'MARKET','status':'FILLED','origQty':'0.5','executedQty':'0.5','fills':[{'qty':'0.2','price':'150','commission':'0','commissionAsset':'USDT'},{'qty':'0.3','price':'160','commission':'0','commissionAsset':'USDT'}]}
     response = client.post('/api/exchange/order', json={'symbol':'SOLUSDT','qty':0.5})
     assert response.status_code == 200
     trade = asyncio.run(trade_log.get_trade_by_id('spot:SOLUSDT:123'))

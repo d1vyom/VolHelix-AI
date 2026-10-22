@@ -37,22 +37,6 @@ def setup_logger():
         serialize=True  # This makes it write JSON
     )
 
-    # WebSocket output (custom sink)
-    def websocket_sink(message):
-        try:
-            import requests
-            record = message.record
-            agent = record["name"]
-            
-            requests.post("http://localhost:8000/api/internal/log", json={
-                "agent": agent.split('.')[-1],
-                "message": record["message"],
-                "level": record["level"].name
-            }, timeout=0.5)
-        except Exception:
-            pass
-
-    logger.add(websocket_sink, level="INFO")
 
 setup_logger()
 

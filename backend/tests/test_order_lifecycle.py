@@ -117,7 +117,8 @@ def test_order_lifecycle_market_and_limit():
     exchange.trading_client.get_order.side_effect = None
     exchange.trading_client.get_order.return_value = {
         'orderId':lmt_data['order_id'],'status':'FILLED','origQty':'0.1',
-        'executedQty':'0.1','cummulativeQuoteQty':'54.95'}
+        'executedQty':'0.1','cummulativeQuoteQty':'54.95',
+        'fills':[{'qty':'.1','price':'549.5','commission':'0','commissionAsset':'USDT'}]}
     fill_res = client.post(f"/api/trades/{limit_order_id}/fill", json={})
     assert fill_res.status_code == 200
     fill_data = fill_res.json()

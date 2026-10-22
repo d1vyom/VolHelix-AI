@@ -3,7 +3,8 @@ import asyncio
 from datetime import datetime
 
 from backend.exchange.schemas import OrderRequest, OrderResult
-from backend.exchange.execution import submit_order, parse_acknowledgement, OrderExecutionError, OrderNotDispatched, OrderRejected, OrderOutcomeUnknown, _reuse_intent
+from backend.exchange.execution import submit_order, parse_acknowledgement, recover_fees, passes_exchange_filters, OrderExecutionError, OrderNotDispatched, OrderRejected, OrderOutcomeUnknown, _reuse_intent
+from decimal import Decimal, ROUND_DOWN
 from backend.models.trade import TradeRecord, TradeProposal
 from backend.models.market import TradeStatus
 from backend.store.trade_log import trade_log
@@ -58,6 +59,7 @@ async def reconcile_trade(trade, *, client):
         else:
             raw=await asyncio.to_thread(client.get_order,request.symbol,trade.binance_order_id)
         result=parse_acknowledgement(raw,request,trade.current_price or trade.entry_price or trade.proposal.limit_price or 1)
+        result=await recover_fees(result,request,client)
         if result.order_id != trade.binance_order_id:
             raise ValueError('Exchange order identity mismatch')
         if trade.client_order_id:
@@ -87,6 +89,19 @@ async def close_trade_position(trade, *, client, exit_type=TradeStatus.CLOSED):
         trade=await cancel_trade_order(trade,client=client)
         if trade.exchange_status not in TERMINAL:
             raise OrderExecutionError('Entry cancellation unconfirmed; position retained')
+    if trade.market=='spot' and (trade.fees_known is False or (trade.fees_known is None and hasattr(client,'get_order_fills'))):
+        try:
+            trade=await reconcile_trade(trade,client=client)
+        except OrderExecutionError as exc:
+            raise OrderOutcomeUnknown('Actual entry commission reconciliation unavailable; retained tracked holdings') from exc
+        if trade.fees_known is False:
+            raise OrderOutcomeUnknown('Actual entry commission unavailable; retained tracked holdings')
+    if trade.market=='spot' and trade.exit_fees_known is False:
+        for identity,known in trade.exit_order_fees_known.items():
+            if known is False:
+                _,trade=await reconcile_intent(trade.market,identity,client=client)
+        if trade.exit_fees_known is False:
+            raise OrderOutcomeUnknown('Actual exit commission unavailable; retained tracked holdings')
     trade=await trade_log.prepare_exit(trade.trade_id)
     if trade.proposal.qty<=0:
         return trade
@@ -101,12 +116,25 @@ async def close_trade_position(trade, *, client, exit_type=TradeStatus.CLOSED):
             try:
                 raw=await asyncio.to_thread(client.get_order_by_client_id,request.symbol,client_id)
                 result=parse_acknowledgement(raw,request,trade.current_price or trade.entry_price)
+                result=await recover_fees(result,request,client)
                 result=await asyncio.to_thread(order_intents.finish,request,result)
             except Exception as exc:
                 raise OrderExecutionError('Exit reconciliation unavailable; retained exposure') from exc
     else:
+        quantity=Decimal(str(trade.proposal.qty))
+        if trade.market=='spot':
+            info=await asyncio.to_thread(client.get_execution_info,trade.proposal.symbol)
+            for rule in info.get('filters',[]):
+                if rule['filterType'] in ('LOT_SIZE','MARKET_LOT_SIZE'):
+                    step=Decimal(str(rule.get('stepSize',0)))
+                    if step>0:
+                        quantity=(quantity/step).to_integral_value(rounding=ROUND_DOWN)*step
+            price=Decimal(str((await asyncio.to_thread(client.get_price,trade.proposal.symbol))['price']))
+            probe=OrderRequest(symbol=trade.proposal.symbol,side='SELL',qty=float(quantity) if quantity>0 else 1,reduce_only=True)
+            if quantity<=0 or not passes_exchange_filters(probe,info,quantity,price,quantity*price):
+                return await trade_log.mark_dust(trade.trade_id,'Below Spot quantity step or minimum notional; retained inventory')
         request=OrderRequest(market=trade.market,symbol=trade.proposal.symbol,
-            side='SELL' if trade.proposal.side=='BUY' else 'BUY',qty=trade.proposal.qty,
+            side='SELL' if trade.proposal.side=='BUY' else 'BUY',qty=float(quantity),
             reduce_only=True,client_order_id=client_id)
         try:
             result=await submit_order(request,client=client)
@@ -119,6 +147,11 @@ async def close_trade_position(trade, *, client, exit_type=TradeStatus.CLOSED):
             else:
                 raise
     updated=await trade_log.apply_exit(trade.trade_id,result,exit_type)
+    if updated.proposal.qty>0 and result.exchange_status in TERMINAL and trade.market=='spot':
+        # A subsequent close rechecks filters against fresh price before dispatch.
+        residual=Decimal(str(updated.proposal.qty))
+        if 'info' in locals() and not passes_exchange_filters(request,info,residual,price,residual*price):
+            updated=await trade_log.mark_dust(updated.trade_id,'Below Spot quantity step or minimum notional; retained inventory')
     if result.exchange_status=='REJECTED':
         raise OrderRejected('Exchange rejected exit; position retained')
     return updated
@@ -202,6 +235,10 @@ async def position_snapshot(market):
             'take_profit_price':trade.take_profit_price,'stop_loss_price':trade.stop_loss_price,
             'strategy':trade.proposal.strategy_type.value,'order_type':trade.proposal.order_type,
             'exchange_status':trade.exchange_status,'stale':not available or not live_position})
+        output[-1].update(executed_qty=trade.executed_qty,closed_qty=trade.closed_qty,
+            base_asset=trade.base_asset,entry_fees=trade.entry_fees,exit_fees=trade.exit_fees,
+            fees_known=trade.fees_known,exit_fees_known=trade.exit_fees_known,
+            dust_qty=trade.dust_qty,dust_reason=trade.dust_reason,pnl_basis=trade.pnl_basis)
     for live_position in live:
         if live_position['symbol'] not in recorded:
             signed=float(live_position['qty'])

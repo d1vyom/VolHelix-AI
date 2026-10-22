@@ -59,7 +59,40 @@ class AutoTrader:
         self.guardian_interval_seconds: int = 5
         self._guardian_thread: Optional[threading.Thread] = None
         self._guardian_stop_event: threading.Event = threading.Event()
-        self.ensure_guardian_running()
+        self._event_loop = None
+        self._event_futures = set()
+        self._event_slots = threading.BoundedSemaphore(32)
+
+    def bind_event_loop(self, loop) -> None:
+        """Bind notifications to the application loop owned by lifespan."""
+        self._event_loop=loop
+
+    def _schedule_event(self, factory) -> None:
+        loop=self._event_loop
+        if loop is None or not loop.is_running() or not self._event_slots.acquire(blocking=False):
+            return
+        coroutine=factory()
+        try:
+            future=asyncio.run_coroutine_threadsafe(coroutine,loop)
+        except Exception:
+            coroutine.close()
+            self._event_slots.release()
+            return
+        self._event_futures.add(future)
+        def finished(done):
+            self._event_futures.discard(done)
+            self._event_slots.release()
+            if not done.cancelled() and done.exception():
+                logger.warning('Trading notification unavailable; execution remains in ledger')
+        future.add_done_callback(finished)
+
+    async def stop_events(self) -> None:
+        """Cancel and await bounded notifications after the trading threads stop."""
+        self._event_loop=None
+        pending=list(self._event_futures)
+        for future in pending:
+            future.cancel()
+        await asyncio.gather(*(asyncio.wrap_future(future) for future in pending),return_exceptions=True)
 
     def _get_binance_client(self) -> BinanceClient:
         if self._binance_client is None:
@@ -159,7 +192,7 @@ class AutoTrader:
                     "realized_pnl": pnl,
                     "exit_price": price
                 })
-            threading.Thread(target=lambda: asyncio.run(_emit()), daemon=True).start()
+            self._schedule_event(_emit)
         except Exception:
             pass
 
@@ -178,7 +211,7 @@ class AutoTrader:
                     "fill_price": price,
                     "status": "OPEN"
                 })
-            threading.Thread(target=lambda: asyncio.run(_emit()), daemon=True).start()
+            self._schedule_event(_emit)
         except Exception:
             pass
 
@@ -210,6 +243,15 @@ class AutoTrader:
         self.last_log = "Autonomous scanning paused by operator. Position Guardian active 24/7 for TP/SL."
         logger.info(self.last_log)
         return {"success": True, "message": "Auto-trader stopped successfully", "status": self.status()}
+
+    def shutdown(self) -> None:
+        """Signal and join owned trading loops before application resources close."""
+        self._stop_event.set()
+        self._guardian_stop_event.set()
+        self.is_running=False
+        for worker in (self._worker_thread,self._guardian_thread):
+            if worker and worker.is_alive() and threading.current_thread()!=worker:
+                worker.join()
 
     def status(self) -> Dict:
         """Return live autonomous status, guardian state, and trade statistics."""
@@ -406,7 +448,7 @@ class AutoTrader:
                         "message": f"Scan for {requested_symbol or 'Crypto Watchlist'}: Strict confluence criteria not met. Holding USDT safely.",
                         "confidence": 0.95
                     })
-                threading.Thread(target=lambda: asyncio.run(_emit_hold()), daemon=True).start()
+                self._schedule_event(_emit_hold)
             except Exception:
                 pass
 
@@ -479,7 +521,7 @@ class AutoTrader:
                     "message": f"High-Confluence Master Strategy Setup ({eval_data['status_label']}, Score {eval_data['score']}) triggered on {chosen_symbol}! Spot Order Dispatched on Binance Testnet. TP: ${tp_price} | SL: ${sl_price}",
                     "confidence": eval_data["score"]
                 })
-            threading.Thread(target=lambda: asyncio.run(_emit()), daemon=True).start()
+            self._schedule_event(_emit)
         except Exception:
             pass
 

@@ -30,6 +30,8 @@ def _get_client_cache(key: str, ttl_seconds: float = 10.0) -> Optional[Any]:
 
 
 def _set_client_cache(key: str, val: Any) -> None:
+    if key not in _CLIENT_CACHE and len(_CLIENT_CACHE)>=1000:
+        _CLIENT_CACHE.pop(next(iter(_CLIENT_CACHE)))
     _CLIENT_CACHE[key] = (val, time.time())
 
 
@@ -86,6 +88,7 @@ class BinanceClient:
             duration_ms=duration
         )
         self.call_logs.append(log_entry)
+        del self.call_logs[:-1000]
         logger.debug(f"Binance [{tool}] completed in {duration}ms")
         return log_entry
 
@@ -461,6 +464,11 @@ class BinanceClient:
         raw=self.trading_client.get_order(symbol=symbol,orderId=order_id)
         return {'order_id':raw['orderId'],'status':raw['status'],'orig_qty':raw['origQty'],
                 'executed_qty':raw['executedQty'],'cummulative_quote_qty':raw.get('cummulativeQuoteQty',0),'fills':raw.get('fills',[])}
+
+    def get_order_fills(self, symbol: str, order_id: str) -> list[dict]:
+        """Actual commissions from this testnet order only; coverage is validated upstream."""
+        rows=self.trading_client.get_my_trades(symbol=symbol,orderId=order_id,limit=1000)
+        return [row for row in rows if str(row['orderId'])==str(order_id)]
 
     def get_order_by_client_id(self, symbol: str, client_order_id: str) -> dict:
         order = self.trading_client.get_order(symbol=symbol,origClientOrderId=client_order_id)

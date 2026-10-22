@@ -95,6 +95,17 @@ class TradeRecord(BaseModel):
     exit_executions: dict[str, float] = Field(default_factory=dict)
     commission: float = 0.0
     commission_asset: str = ""
+    base_asset: str = ''
+    entry_fees: dict[str, float] = Field(default_factory=dict)
+    exit_fees: dict[str, float] = Field(default_factory=dict)
+    exit_order_fees: dict[str, dict[str, float]] = Field(default_factory=dict)
+    exit_order_fees_known: dict[str, bool | None] = Field(default_factory=dict)
+    fees_known: bool | None = None
+    exit_fees_known: bool | None = None
+    dust_qty: float = 0.0
+    dust_reason: str | None = None
+    pnl_basis: str = 'gross_price_difference_fees_separate'
+    net_realized_pnl: float | None = None
     
     # Logs
     mcp_logs: List[MCPCallLog] = Field(default_factory=list)

@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from backend.models.market import Regime, CryptoAssetBalance
 
 
@@ -10,10 +10,18 @@ class PortfolioSnapshot(BaseModel):
     equity: float = 10000.0               # Total portfolio value in USDT
     buying_power: float = 10000.0         # Available USDT for trading
     daily_risk_available: bool = True
-    daily_pnl: float = 0.0
-    daily_pnl_pct: float = 0.0
-    total_pnl: float = 0.0
-    total_pnl_pct: float = 0.0
+    account_available: bool = False
+    daily_pnl: float | None = None
+    daily_pnl_pct: float | None = None
+    total_pnl: float | None = None
+    total_pnl_pct: float | None = None
+
+    @model_validator(mode='after')
+    def require_daily_observation(self):
+        """Unknown daily PnL never authorizes the deterministic risk gate."""
+        if self.daily_pnl is None:
+            self.daily_risk_available=False
+        return self
     
     # Positions & Balances
     open_positions: int = 0

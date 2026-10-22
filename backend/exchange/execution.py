@@ -148,8 +148,55 @@ def parse_acknowledgement(response, request, current_price):
     result = OrderResult(order_id=str(response['order_id']), client_order_id=request.client_order_id, exchange_status=response['status'],
                          executed_qty=executed, orig_qty=response.get('orig_qty', 0),
                          entry_price=price, current_price=current_price)
+    result.base_asset=response.get('base_asset','')
+    result.fees_known=response.get('fees_known')
+    if fills:
+        try:
+            total=Decimal(0); fees={}
+            for fill in fills:
+                quantity=Decimal(str(fill['qty'])); fee=Decimal(str(fill['commission']))
+                asset=fill['commissionAsset']
+                if not quantity.is_finite() or quantity<=0 or not fee.is_finite() or fee<0 or not asset:
+                    raise ValueError('Invalid actual commission')
+                total+=quantity
+                fees[asset]=fees.get(asset,Decimal(0))+fee
+            if total!=executed:
+                raise ValueError('Commission fills do not cover executed quantity')
+            result.fees={asset:float(value) for asset,value in fees.items()}
+            result.fees_known=True
+        except (KeyError,ValueError,ArithmeticError,TypeError):
+            result.fees_known=False
     if (executed > 0 and price <= 0) or (result.exchange_status == 'FILLED' and executed <= 0):
         raise ValueError('Filled acknowledgement lacks actual execution')
+    return result
+
+
+async def recover_fees(result, request, client):
+    """Keep valid exposure even if its separate order-specific fee query fails."""
+    if result.executed_qty<=0:
+        return result
+    if result.fees_known is True:
+        if not result.base_asset:
+            try:
+                info=await asyncio.to_thread(client.get_execution_info,request.symbol)
+                result.base_asset=info['base_asset']
+            except Exception:
+                result.fees_known=False
+        return result
+    if not hasattr(client,'get_order_fills'):
+        return result
+    result.fees_known=False
+    try:
+        fills=await asyncio.to_thread(client.get_order_fills,request.symbol,result.order_id)
+        info=await asyncio.to_thread(client.get_execution_info,request.symbol)
+        recovered=parse_acknowledgement(dict(order_id=result.order_id,status=result.exchange_status,
+            orig_qty=result.orig_qty,executed_qty=result.executed_qty,
+            cummulative_quote_qty=str(Decimal(str(result.entry_price))*Decimal(str(result.executed_qty))),
+            fills=fills,base_asset=info['base_asset']),request,result.current_price)
+        if recovered.fees_known:
+            return recovered
+    except Exception:
+        pass
     return result
 
 async def submit_order(request: OrderRequest, *, client) -> OrderResult:
@@ -202,6 +249,7 @@ async def submit_order(request: OrderRequest, *, client) -> OrderResult:
         except Exception:
             response = await asyncio.to_thread(client.get_order_by_client_id, request.symbol, request.client_order_id)
         result=parse_acknowledgement(response,request,current_price)
+        result=await recover_fees(result,request,client)
         result=await asyncio.to_thread(order_intents.finish,request,result)
     except Exception as exc:
         await asyncio.to_thread(order_intents.finish,request)
@@ -215,6 +263,9 @@ async def _reuse_intent(request, existing, client):
     from backend.store import order_intents
     if existing['result'] and existing['status']!='UNKNOWN':
         result=OrderResult.model_validate_json(existing['result'])
+        if result.fees_known is False:
+            result=await recover_fees(result,request,client)
+            result=await asyncio.to_thread(order_intents.finish,request,result)
         if result.exchange_status=='REJECTED':
             raise OrderRejected('Exchange rejected order')
         return result
@@ -222,6 +273,7 @@ async def _reuse_intent(request, existing, client):
         response=await asyncio.to_thread(client.get_order_by_client_id,request.symbol,request.client_order_id)
         # Reconciliation relies on executed amounts, never on a fresh market quote.
         result=parse_acknowledgement(response,request,float(existing['notional'])/float(existing['quantity']))
+        result=await recover_fees(result,request,client)
         result=await asyncio.to_thread(order_intents.finish,request,result)
         if result.exchange_status=='REJECTED':
             raise OrderRejected('Exchange rejected order')

@@ -99,13 +99,20 @@ class TradeLog:
                 trade=TradeRecord.model_validate_json(row[0])
             if result.executed_qty < trade.executed_qty:
                 raise ValueError('Execution quantity cannot regress')
+            grew=result.executed_qty>trade.executed_qty
             trade.executed_qty=result.executed_qty
+            if result.fees_known is True:
+                trade.entry_fees=result.fees
+                trade.fees_known=True
+            elif grew or trade.fees_known is not True:
+                trade.fees_known=False if result.fees_known is False or trade.fees_known is not None else None
+            trade.base_asset=result.base_asset or trade.base_asset
             trade.requested_qty=result.orig_qty
             trade.binance_order_id=result.order_id
             trade.client_order_id=result.client_order_id or trade.client_order_id
             trade.exchange_status=result.exchange_status
             trade.entry_price=trade.proposal.entry_price=result.entry_price
-            trade.proposal.qty=max(0,float(Decimal(str(result.executed_qty))-Decimal(str(trade.closed_qty))))
+            trade.proposal.qty=self._held_quantity(trade)
             trade.proposal.breakevens=[result.entry_price] if result.entry_price else []
             trade.current_price=result.current_price
             if result.exchange_status in ('NEW','PENDING_NEW','PARTIALLY_FILLED'):
@@ -114,6 +121,26 @@ class TradeLog:
                 trade.status=TradeStatus.OPEN
             elif trade.closed_qty==0:
                 trade.status=TradeStatus.CANCELLED
+            await self._write_record(db,trade)
+            await db.commit()
+            return trade
+
+    @staticmethod
+    def _held_quantity(trade):
+        """Gross fills remain auditable; only Spot base fees consume inventory."""
+        base_fee=Decimal(0)
+        if trade.market=='spot':
+            base_fee=Decimal(str(trade.entry_fees.get(trade.base_asset,0)))+Decimal(str(trade.exit_fees.get(trade.base_asset,0)))
+        return max(0,float(Decimal(str(trade.executed_qty))-Decimal(str(trade.closed_qty))-base_fee))
+
+    async def mark_dust(self, trade_id, reason):
+        """Keep untradeable residual inventory visible, never record it as sold."""
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('BEGIN IMMEDIATE')
+            row=await (await db.execute('SELECT data FROM trades WHERE trade_id=?',(trade_id,))).fetchone()
+            trade=TradeRecord.model_validate_json(row[0])
+            trade.dust_qty=trade.proposal.qty
+            trade.dust_reason=reason
             await self._write_record(db,trade)
             await db.commit()
             return trade
@@ -146,7 +173,8 @@ class TradeLog:
             trade=TradeRecord.model_validate_json(row[0])
             trade.executed_qty=trade.executed_qty or trade.proposal.qty+trade.closed_qty
             terminal_key=result.client_order_id+':terminal'
-            if trade.exit_executions.get(terminal_key):
+            was_terminal=bool(trade.exit_executions.get(terminal_key))
+            if was_terminal and not (result.fees_known is True and trade.exit_order_fees.get(result.client_order_id)!=result.fees):
                 return trade
             previous=trade.exit_executions.get(result.client_order_id,0)
             delta=result.executed_qty-previous
@@ -159,20 +187,33 @@ class TradeLog:
             realized=(quote-prior_quote)-trade.entry_price*delta
             trade.realized_pnl=round(trade.realized_pnl+(realized if trade.proposal.side=='BUY' else -realized),8)
             trade.closed_qty=float(Decimal(str(trade.closed_qty))+Decimal(str(result.executed_qty))-Decimal(str(previous)))
-            trade.proposal.qty=max(0,float(Decimal(str(trade.executed_qty))-Decimal(str(trade.closed_qty))))
+            if result.fees_known is True:
+                trade.exit_order_fees[result.client_order_id]=result.fees
+                trade.exit_order_fees_known[result.client_order_id]=True
+            elif delta>0 or result.client_order_id not in trade.exit_order_fees_known:
+                trade.exit_order_fees_known[result.client_order_id]=result.fees_known
+            trade.exit_fees={}
+            for fees in trade.exit_order_fees.values():
+                for asset,fee in fees.items():
+                    trade.exit_fees[asset]=float(Decimal(str(trade.exit_fees.get(asset,0)))+Decimal(str(fee)))
+            known=list(trade.exit_order_fees_known.values())
+            trade.exit_fees_known=False if False in known else (True if all(value is True for value in known) else None)
+            trade.proposal.qty=self._held_quantity(trade)
+            trade.dust_qty=0
+            trade.dust_reason=None
             trade.exit_executions[result.client_order_id]=result.executed_qty
             trade.exit_executions[quote_key]=quote
             terminal=result.exchange_status in ('FILLED','CANCELED','EXPIRED','EXPIRED_IN_MATCH','REJECTED')
-            if terminal:
+            if terminal and not was_terminal:
                 trade.exit_executions[terminal_key]=1
                 trade.exit_attempt+=1
                 if trade.exit_client_order_id==result.client_order_id:
                     trade.exit_client_order_id=None
-            elif trade.exit_client_order_id is None:
+            elif not terminal and trade.exit_client_order_id is None:
                 trade.exit_client_order_id=result.client_order_id
             if delta>0:
                 trade.exit_price=result.entry_price
-            if trade.proposal.qty<1e-10 and result.executed_qty>0:
+            if trade.proposal.qty==0 and result.executed_qty>0:
                 trade.status=exit_type
                 trade.exit_time=datetime.now().isoformat()
             await self._write_record(db,trade)

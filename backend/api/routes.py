@@ -2,6 +2,7 @@ import time
 import uuid
 import threading
 import asyncio
+import math
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
@@ -51,6 +52,8 @@ def _get_cached(key: str, ttl: float = 3.0):
     return None
 
 def _set_cached(key: str, data):
+    if key not in _CACHE and len(_CACHE)>=1000:
+        _CACHE.pop(next(iter(_CACHE)))
     _CACHE[key] = {"time": time.time(), "data": data}
 
 def _invalidate_cache(prefixes: Optional[List[str]] = None):
@@ -170,18 +173,21 @@ def get_signals():
     client = _get_binance_client()
     signals = []
     for s in settings.WATCHED_SYMBOLS:
-        ticker = client.get_24hr_ticker(s) or {}
-        change = float(ticker.get("price_change_pct", 0.0) or 0.0)
-        signals.append({
-            "symbol": s,
-            "current_price": float(ticker.get("last_price", 0.0) or 0.0),
-            "change_24h": change,
-            "volume_24h": float(ticker.get("quote_volume", 0.0) or 0.0),
-            "high_24h": float(ticker.get("high", 0.0) or 0.0),
-            "low_24h": float(ticker.get("low", 0.0) or 0.0),
-            "trend": "BULLISH" if change >= 0 else "BEARISH",
-            "timestamp": datetime.now().isoformat()
-        })
+        try:
+            ticker = client.get_24hr_ticker(s) or {}
+            price=float(ticker['last_price'])
+            if ticker.get('error') or not math.isfinite(price) or price<=0:
+                raise ValueError('Signal market data unavailable')
+            change=ticker.get('price_change_pct')
+            signals.append({'symbol':s,'available':True,'current_price':price,
+                'change_24h':change,'volume_24h':ticker.get('quote_volume'),
+                'high_24h':ticker.get('high'),'low_24h':ticker.get('low'),
+                'trend':None if change is None else ('BULLISH' if float(change)>=0 else 'BEARISH'),
+                'timestamp':datetime.now().isoformat()})
+        except Exception:
+            signals.append({'symbol':s,'available':False,'current_price':None,
+                'change_24h':None,'volume_24h':None,'high_24h':None,'low_24h':None,
+                'trend':None,'timestamp':datetime.now().isoformat()})
     return signals
 
 
@@ -241,30 +247,21 @@ def get_exchange_account():
     if cached:
         return cached
 
-    client = _get_binance_client()
     try:
-        acc = client.get_account()
-        data = {
-            "equity": float(acc.get("equity", settings.INITIAL_CAPITAL)),
-            "buying_power": float(acc.get("buying_power", settings.INITIAL_CAPITAL)),
-            "cash": float(acc.get("cash", settings.INITIAL_CAPITAL)),
-            "portfolio_value": float(acc.get("equity", settings.INITIAL_CAPITAL)),
-            "status": "ACTIVE",
-            "currency": "USDT",
-            "balances": acc.get("balances", {})
-        }
-        _set_cached("account", data)
+        acc = _get_binance_client().get_account()
+        if acc.get('error') or acc.get('status')=='ERROR':
+            raise ValueError('Account unavailable')
+        equity=float(acc['equity']); buying_power=float(acc['buying_power'])
+        if not all(math.isfinite(value) and value>=0 for value in (equity,buying_power)):
+            raise ValueError('Account amounts unavailable')
+        data={'equity':equity,'buying_power':buying_power,'cash':buying_power,
+            'portfolio_value':equity,'status':acc.get('status','ACTIVE'),
+            'currency':'USDT','balances':acc.get('balances',{})}
+        _set_cached('account',data)
         return data
-    except Exception as e:
-        return {
-            "equity": settings.INITIAL_CAPITAL,
-            "buying_power": settings.INITIAL_CAPITAL,
-            "cash": settings.INITIAL_CAPITAL,
-            "portfolio_value": settings.INITIAL_CAPITAL,
-            "status": "ACTIVE",
-            "currency": "USDT",
-            "error": str(e)
-        }
+    except Exception as exc:
+        raise HTTPException(status_code=503,detail='Account unavailable') from exc
+
 
 
 @router.get("/api/exchange/positions")
@@ -323,38 +320,29 @@ def get_exchange_quote(symbol: str = "BTCUSDT"):
     if cached is not None:
         return cached
 
-    client = _get_binance_client()
     try:
-        ticker = client.get_24hr_ticker(clean_sym)
-        bid = float(ticker.get("bid", 0.0))
-        ask = float(ticker.get("ask", 0.0))
-        last = float(ticker.get("last", ask or bid or 75000.0))
-        res = {
-            "symbol": clean_sym,
-            "bid": bid if bid > 0 else round(last * 0.9999, 2),
-            "ask": ask if ask > 0 else round(last * 1.0001, 2),
-            "last": last,
-            "high_24h": float(ticker.get("high", last * 1.02)),
-            "low_24h": float(ticker.get("low", last * 0.98)),
-            "volume_24h": float(ticker.get("volume", 1500.0)),
-            "price_change_24h": float(ticker.get("price_change", 0.0)),
-            "price_change_percent_24h": float(ticker.get("price_change_percent", 0.0)),
-            "spread": round(ask - bid, 4) if (ask > 0 and bid > 0) else 0.50,
-            "timestamp": datetime.now().isoformat()
-        }
-        _set_cached(cache_key, res)
+        ticker = _get_binance_client().get_24hr_ticker(clean_sym)
+        def number(*keys,positive=False):
+            value=next((ticker[key] for key in keys if ticker.get(key) is not None),None)
+            if value is None:
+                return None
+            value=float(value)
+            return value if math.isfinite(value) and (not positive or value>0) else None
+        last=number('last_price','last',positive=True)
+        if ticker.get('error') or last is None:
+            raise ValueError('Market quote unavailable')
+        bid=number('bid',positive=True); ask=number('ask',positive=True)
+        res={'symbol':clean_sym,'bid':bid,'ask':ask,'last':last,
+            'high_24h':number('high'),'low_24h':number('low'),
+            'volume_24h':number('volume'),'price_change_24h':number('price_change'),
+            'price_change_percent_24h':number('price_change_pct','price_change_percent'),
+            'spread':ask-bid if ask is not None and bid is not None else None,
+            'timestamp':datetime.now().isoformat()}
+        _set_cached(cache_key,res)
         return res
-    except Exception as e:
-        fallback = 76600.0 if "BTC" in clean_sym else 2460.0
-        return {
-            "symbol": clean_sym,
-            "bid": fallback - 0.5,
-            "ask": fallback + 0.5,
-            "last": fallback,
-            "spread": 1.0,
-            "timestamp": datetime.now().isoformat(),
-            "error": str(e)
-        }
+    except Exception as exc:
+        raise HTTPException(status_code=503,detail='Market quote unavailable') from exc
+
 
 
 @router.get("/api/exchange/bars")

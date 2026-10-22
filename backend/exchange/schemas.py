@@ -38,6 +38,9 @@ class OrderResult(BaseModel):
     orig_qty: float = Field(ge=0, allow_inf_nan=False)
     entry_price: float = Field(ge=0, allow_inf_nan=False)
     current_price: float = Field(gt=0, allow_inf_nan=False)
+    base_asset: str = ''
+    fees: dict[str, float] = Field(default_factory=dict)
+    fees_known: bool | None = None  # None retains compatibility with legacy acknowledgements.
 
 
 class OrderPreview(BaseModel):

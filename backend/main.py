@@ -1,4 +1,5 @@
 import asyncio
+from backend.config import settings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes import router
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
     print("Initializing Database...")
     await trade_log.init_db()
     await postmortem_store.init_db()
+    auto_trader.bind_event_loop(asyncio.get_running_loop())
     auto_trader.ensure_guardian_running()
     print("Position Guardian 24/7 TP/SL Engine Active...")
     
@@ -31,20 +33,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Failed to start MarketDataHub: {e}")
         
-    yield
-    
     try:
-        await stop_broadcasters()
-        await stop_hubs()
-    except Exception as e:
-        print(f"Failed to stop MarketDataHub: {e}")
+        yield
+    finally:
+        await asyncio.to_thread(auto_trader.shutdown)
+        for cleanup in (auto_trader.stop_events,stop_broadcasters,stop_hubs):
+            try:
+                await cleanup()
+            except Exception as e:
+                print(f"Failed runtime cleanup: {e}")
 
 fastapi_app = FastAPI(title="VolHelix AI Backend", lifespan=lifespan)
 
 # CORS for frontend
 fastapi_app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

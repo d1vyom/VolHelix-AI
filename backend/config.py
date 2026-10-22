@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     DASHBOARD_PORT: int = 3000
     LOG_LEVEL: str = "INFO"
+    CORS_ORIGINS_STR: str = Field(default='http://localhost:3000,http://127.0.0.1:3000',alias='CORS_ORIGINS')
+
+    @property
+    def CORS_ORIGINS(self) -> list[str]:
+        """Explicit frontend origins; wildcard credentialed access is unsupported."""
+        return [origin.strip() for origin in self.CORS_ORIGINS_STR.split(',') if origin.strip() and origin.strip()!='*']
 
     # Crypto Market Constants (24/7 — no market hours restriction)
     MARKET_IS_ALWAYS_OPEN: bool = True

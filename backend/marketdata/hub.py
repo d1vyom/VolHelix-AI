@@ -19,6 +19,7 @@ from backend.marketdata.stream_manager import StreamManager
 from backend.marketdata.connectors.binance_spot import BinanceSpotConnector
 from backend.marketdata.connectors.binance_futures import BinanceFuturesConnector
 from backend.store.flow_store import FlowStore
+from pathlib import Path
 
 class MarketDataHub:
     """Market-owned orderflow state; the module keeps one hub per market."""
@@ -46,7 +47,7 @@ class MarketDataHub:
         
         self.listeners: list[Callable[[str, Any], None]] = []
         self.dynamic_subs: Dict[str, int] = {} # symbol -> refcount
-        self.flow_store = FlowStore()
+        self.flow_store = FlowStore(str(Path(__file__).resolve().parents[1] / "data" / "flow.db"))
         
         self._resync_tasks: set[asyncio.Task] = set()
         self._persistence_task = None
