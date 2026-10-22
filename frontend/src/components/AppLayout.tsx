@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
+import { MarketProvider } from "./MarketProvider";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -20,10 +21,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div className="flex min-h-screen bg-[#121214]">
+    <MarketProvider><div className="flex min-h-screen bg-[#121214]">
       <Sidebar collapsed={collapsed} onToggle={setCollapsed} />
       <div
-        className={`flex-1 flex flex-col min-h-screen transition-all duration-200 ${
+        className={`app-content min-w-0 flex-1 flex flex-col min-h-screen transition-all duration-200 ${
           collapsed ? "pl-[68px]" : "pl-[240px]"
         }`}
       >
@@ -31,13 +32,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <main
           className={`flex-1 w-full mx-auto ${
             isFullBleed
-              ? "p-0 max-w-none h-[calc(100vh-56px)] overflow-hidden"
+              ? "p-0 max-w-none min-h-[calc(100vh-56px)]"
               : "p-4 md:p-6 max-w-7xl"
           }`}
         >
           {children}
         </main>
       </div>
-    </div>
+    </div></MarketProvider>
   );
 }

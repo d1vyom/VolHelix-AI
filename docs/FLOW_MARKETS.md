@@ -12,6 +12,29 @@ Verified 2026-10-22. Public market data only; trading and risk paths are unchang
 - REST bounds: footprintlimit1..240, tape1..2000, CVD1..240, DOMlevels1..100, heatmapwindow1..600, positive finite tick_group. Footprint bars include populated forming cells and their actual tick_group; exceptional ranges coarsen real cells to at most512 display rows without changing OHLC or volumes. Use each bar's grouping. New symbols derive default grouping from the first genuine trade price (metadata tick until then).
 - Public Futures REST fapi.binance.com/fapi/v1 and sockets depth/public, aggTrade/market; no auth/trading. Spot paths remain defaults. No change to classic order routes, auto-trader, guardian or risk gate.
 
+## Frontend connection
+
+The shared header selection scopes dashboard reads, order tickets and terminal
+subscriptions to `market` plus `symbol`. Every new intent receives a stable client
+ID; an uncertain response is retained in tab session storage and reconciled with
+the original payload, including after reload or a market switch. Spot sells use
+the tracked position close action with its qualified trade ID.
+
+REST defaults to relative `/api` through Next's `BACKEND_URL` rewrite. Socket.IO
+uses an explicit browser URL because the Next rewrite does not provide a reliable
+WebSocket upgrade. At build time its precedence is `NEXT_PUBLIC_SOCKET_URL`,
+`NEXT_PUBLIC_API_URL`, `BACKEND_URL`, then `http://127.0.0.1:8000`. These values are
+public endpoints, never credentials. When a Docker/service hostname is used for
+`BACKEND_URL`, configure `NEXT_PUBLIC_SOCKET_URL` to a URL reachable by the browser;
+restart/rebuild after changing public values. The local default needs no env file.
+The socket waits for `flow_subscribe` ACK before hydrating. Bounded REST refresh
+every five seconds includes volume profile; unsubscribe/disconnect and aborted
+requests release the previous selection. Socket connection alone never means LIVE.
+
+Offline browser verification: in `frontend/`, run `npx playwright test`. Its Next
+cache uses `.next-e2e`; controlled Socket.IO listens only on `127.0.0.1:8107`. HTTP
+exchange endpoints are fixtures; no backend app, guardian or live orders start.
+
 ## Binance references
 
 - [Futures routed connections](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/Connect): separate depth/public and aggTrade/market routes.

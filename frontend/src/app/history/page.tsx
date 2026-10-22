@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback, Suspense } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef, Suspense } from "react";
+import { useMarket } from '@/components/MarketProvider';
 import { TrendingUp, BarChart, Package, Award, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 import {
@@ -16,23 +17,30 @@ import { getTrades } from "../../lib/api";
 import { TradeRecord } from "../../lib/types";
 
 function TradeHistoryContent() {
-  const [trades, setTrades] = useState<TradeRecord[]>([]);
+  const {market}=useMarket();
+  const selection=useRef<AbortController|null>(null);
+  useEffect(()=>{const controller=new AbortController();selection.current=controller;return ()=>controller.abort();},[market]);
+  const [ledger,setLedger]=useState<{market:string;trades:TradeRecord[]}>({market:'',trades:[]});
+  const trades=useMemo(()=>ledger.market===market?ledger.trades:[],[ledger,market]);
+  const [error,setError]=useState('');
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("");
 
   const fetchTrades = useCallback(async () => {
+    const signal=selection.current?.signal;
     setIsRefreshing(true);
     try {
-      const data = await getTrades();
-      setTrades(Array.isArray(data) ? data : []);
+      const data = await getTrades(market,signal);
+      if(signal?.aborted)return;
+      setLedger({market,trades:Array.isArray(data)?data:[]});setError('');
       setLastUpdated(new Date().toLocaleTimeString());
     } catch {
-      // Keep the last known ledger on a transient fetch failure.
+      if(!signal?.aborted)setError('STALE ledger: trade data unavailable; showing last saved rows for this market.');
     } finally {
       setIsRefreshing(false);
     }
-  }, []);
+  }, [market]);
 
   useEffect(() => {
     let isMounted = true;
@@ -118,17 +126,17 @@ function TradeHistoryContent() {
             <span className="p-2 rounded-xl bg-[#f0b90b]/10 border border-[#f0b90b]/30 text-[#f0b90b]">
               <BarChart className="w-5 h-5" />
           </span>
-          Crypto Spot Trade Ledger & Quantitative Analytics
+          {market.toUpperCase()} Trade Ledger & Quantitative Analytics
         </h1>
         <p className="text-xs text-[#848e9c] font-mono mt-1">
-          Real-time Binance Testnet spot execution logs from the VolHelix Master Flow strategy
+          Binance Testnet {market} execution records
         </p>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0ecb81]/10 border border-[#0ecb81]/30 text-[11px] font-mono text-[#0ecb81]">
             <span className="w-1.5 h-1.5 rounded-full bg-[#0ecb81] animate-pulse" />
-            Auto-Sync 3s {lastUpdated && `(${lastUpdated})`}
+            {error?'STALE / unavailable':'Poll every 3s'} {lastUpdated && `(${lastUpdated})`}
           </div>
 
           <button
@@ -147,6 +155,7 @@ function TradeHistoryContent() {
         </div>
       </div>
 
+      {error&&<p role="status" className="text-[#f7a600]">{error}</p>}
       {/* 4 Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-5 rounded-2xl bg-[#181a20] border border-[#2b313a] shadow-xl">
@@ -155,7 +164,7 @@ function TradeHistoryContent() {
             {stats.totalPnL >= 0 ? "+" : ""}${stats.totalPnL.toFixed(2)}
           </div>
           <div className="text-[11px] font-mono text-[#848e9c] mt-2">
-            Net of execution fees
+            Reported realized P&L; execution fees excluded
           </div>
         </div>
 
@@ -314,7 +323,7 @@ function TradeHistoryContent() {
                     <td className="py-3.5 px-3 text-[#eaecef] font-semibold" title={t.trade_id}>
                       {displayId}
                     </td>
-                    <td className="py-3.5 px-3 font-bold text-[#f0b90b]">{t.proposal?.underlying || "BTCUSDT"}</td>
+                    <td className="py-3.5 px-3 font-bold text-[#f0b90b]">{t.symbol || t.proposal?.underlying || 'Unavailable'}</td>
                     <td className="py-3.5 px-3 text-[#eaecef]">
                       {t.proposal?.strategy_type === "MASTER_ORDER_FLOW" ? (
                         <span className="inline-flex items-center gap-1.5 font-bold text-[#f0b90b] bg-[#f0b90b]/10 px-2 py-0.5 rounded border border-[#f0b90b]/30">

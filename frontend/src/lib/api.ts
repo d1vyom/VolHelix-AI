@@ -1,3 +1,4 @@
+import type { Market } from "./market";
 import { PortfolioSnapshot, TradeRecord, MarketSignal, MarketClockStatus } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -31,22 +32,16 @@ export async function getPositions(): Promise<TradeRecord[]> {
   }
 }
 
-export async function getTrades(): Promise<TradeRecord[]> {
-  try {
-    const res = await fetch(`${API_BASE}/api/trades`);
-    return await safeJson<TradeRecord[]>(res, []);
-  } catch {
-    return [];
-  }
+export async function getTrades(market: Market = "spot", signal?:AbortSignal): Promise<TradeRecord[]> {
+  const res = await fetch(`${API_BASE}/api/trades?market=${market}`,{cache:'no-store',signal});
+  if(!res.ok)throw new Error('Trade ledger unavailable');
+  return res.json();
 }
 
-export async function getTradeHistory(): Promise<TradeRecord[]> {
-  try {
-    const res = await fetch(`${API_BASE}/api/trades/history`);
-    return await safeJson<TradeRecord[]>(res, []);
-  } catch {
-    return [];
-  }
+export async function getTradeHistory(market: Market = "spot", signal?:AbortSignal): Promise<TradeRecord[]> {
+  const res = await fetch(`${API_BASE}/api/trades/history?market=${market}`,{cache:'no-store',signal});
+  if(!res.ok)throw new Error('Trade history unavailable');
+  return res.json();
 }
 
 export async function getSignals(): Promise<MarketSignal[]> {
@@ -82,6 +77,8 @@ export interface ExchangeAccount {
 }
 
 export interface ExchangePosition {
+  market?: Market;
+  stale?: boolean;
   id?: string;
   trade_id?: string;
   symbol: string;
@@ -100,6 +97,9 @@ export interface ExchangePosition {
 }
 
 export interface ExchangeOrder {
+  market?: Market;
+  trade_id?: string;
+  client_order_id?: string;
   id: string;
   symbol: string;
   qty: number;
@@ -146,27 +146,8 @@ export type AlpacaOrder = ExchangeOrder;
 export type AlpacaQuote = ExchangeQuote;
 export type AlpacaBar = ExchangeBar;
 
-export async function getExchangeAccount(): Promise<ExchangeAccount> {
-  try {
-    const res = await fetch(`${API_BASE}/api/exchange/account`);
-    return await safeJson<ExchangeAccount>(res, {
-      equity: 10000.0,
-      buying_power: 10000.0,
-      cash: 10000.0,
-      portfolio_value: 10000.0,
-      status: "ACTIVE",
-      currency: "USDT",
-    });
-  } catch {
-    return {
-      equity: 10000.0,
-      buying_power: 10000.0,
-      cash: 10000.0,
-      portfolio_value: 10000.0,
-      status: "ACTIVE",
-      currency: "USDT",
-    };
-  }
+export async function getExchangeAccount(market: Market = "spot"): Promise<ExchangeAccount | null> {
+  try {return await safeJson<ExchangeAccount|null>(await fetch(`${API_BASE}/api/market/account?market=${market}`),null);}catch{return null;}
 }
 export const getAlpacaAccount = getExchangeAccount;
 
@@ -190,27 +171,8 @@ export async function getExchangeOrders(): Promise<ExchangeOrder[]> {
 }
 export const getAlpacaOrders = getExchangeOrders;
 
-export async function getExchangeQuote(symbol: string): Promise<ExchangeQuote> {
-  try {
-    const res = await fetch(`${API_BASE}/api/exchange/quote?symbol=${encodeURIComponent(symbol)}`);
-    return await safeJson<ExchangeQuote>(res, {
-      symbol,
-      bid: 76500.0,
-      ask: 76501.0,
-      last: 76500.5,
-      spread: 1.0,
-      timestamp: new Date().toISOString(),
-    });
-  } catch {
-    return {
-      symbol,
-      bid: 76500.0,
-      ask: 76501.0,
-      last: 76500.5,
-      spread: 1.0,
-      timestamp: new Date().toISOString(),
-    };
-  }
+export async function getExchangeQuote(symbol: string, market: Market = "spot"): Promise<ExchangeQuote | null> {
+  try {const response=await fetch(`${API_BASE}/api/market/quote?symbol=${encodeURIComponent(symbol)}&market=${market}`);const data=await safeJson<{price:number;symbol:string;timestamp:string}|null>(response,null);return data&&data.price>0?{symbol:data.symbol,last:data.price,timestamp:data.timestamp,bid:NaN,ask:NaN,spread:NaN}:null;}catch{return null;}
 }
 export const getAlpacaQuote = getExchangeQuote;
 
@@ -297,12 +259,12 @@ export async function submitExchangeOrder(
 }
 export const submitAlpacaOrder = submitExchangeOrder;
 
-export async function fillPendingTrade(tradeId: string, fillPrice?: number): Promise<{ success: boolean; message?: string; error?: string }> {
+export async function fillPendingTrade(tradeId: string, fillPrice?: number, market: Market = "spot"): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
-    const res = await fetch(`${API_BASE}/api/trades/${encodeURIComponent(tradeId)}/fill`, {
+    const res = await fetch(`${API_BASE}/api/trades/${encodeURIComponent(tradeId)}/fill?market=${market}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fill_price: fillPrice }),
+      body: JSON.stringify(fillPrice === undefined ? {} : { fill_price: fillPrice }),
     });
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
@@ -331,12 +293,12 @@ export async function getMarketStatus(): Promise<MarketClockStatus> {
   }
 }
 
-export async function closeExchangePosition(symbol: string): Promise<ExchangeCloseResponse> {
+export async function closeExchangePosition(symbol: string, market: Market = "spot", trade_id?: string): Promise<ExchangeCloseResponse> {
   try {
     const res = await fetch(`${API_BASE}/api/exchange/close-position`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol }),
+      body: JSON.stringify({ symbol, market, trade_id }),
     });
     return await safeJson<ExchangeCloseResponse>(res, { success: false });
   } catch {
@@ -345,9 +307,9 @@ export async function closeExchangePosition(symbol: string): Promise<ExchangeClo
 }
 export const closeAlpacaPosition = closeExchangePosition;
 
-export async function cancelExchangeOrder(orderId: string): Promise<{ success: boolean; error?: string }> {
+export async function cancelExchangeOrder(orderId: string, market: Market = "spot", symbol?: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const res = await fetch(`${API_BASE}/api/exchange/orders/${encodeURIComponent(orderId)}`, {
+    const res = await fetch(`${API_BASE}/api/exchange/orders/${encodeURIComponent(orderId)}?market=${market}${symbol ? `&symbol=${encodeURIComponent(symbol)}` : ""}`, {
       method: "DELETE",
     });
     return await safeJson(res, { success: false });
@@ -357,9 +319,9 @@ export async function cancelExchangeOrder(orderId: string): Promise<{ success: b
 }
 export const cancelAlpacaOrder = cancelExchangeOrder;
 
-export async function cancelAllExchangeOrders(): Promise<{ success: boolean; cancelled?: number; error?: string }> {
+export async function cancelAllExchangeOrders(market: Market = "spot"): Promise<{ success: boolean; cancelled?: number; error?: string }> {
   try {
-    const res = await fetch(`${API_BASE}/api/exchange/cancel-all`, {
+    const res = await fetch(`${API_BASE}/api/exchange/cancel-all?market=${market}`, {
       method: "POST",
     });
     return await safeJson(res, { success: false });
@@ -451,27 +413,10 @@ export interface AutoTradingStatus {
   }>;
 }
 
-export async function getAutoTradingStatus(): Promise<AutoTradingStatus> {
+export async function getAutoTradingStatus(): Promise<AutoTradingStatus|null> {
   try {
-    const res = await fetch(`${API_BASE}/api/bot/auto-trading/status`);
-    return await safeJson<AutoTradingStatus>(res, {
-      is_running: false,
-      interval_seconds: 30,
-      max_open_positions: 5,
-      watched_symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"],
-      total_automated_trades: 0,
-      last_log: "Standby",
-    });
-  } catch {
-    return {
-      is_running: false,
-      interval_seconds: 30,
-      max_open_positions: 5,
-      watched_symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"],
-      total_automated_trades: 0,
-      last_log: "Standby",
-    };
-  }
+    return await safeJson<AutoTradingStatus|null>(await fetch(`${API_BASE}/api/bot/auto-trading/status`,{cache:'no-store'}),null);
+  } catch { return null; }
 }
 
 export async function startAutoTrading(interval: number = 30): Promise<{ success: boolean; message?: string }> {
@@ -498,7 +443,7 @@ export async function stopAutoTrading(): Promise<{ success: boolean; message?: s
   }
 }
 
-export async function triggerAutoTradingCycle(symbol?: string): Promise<{
+export async function triggerAutoTradingCycle(symbol?: string, market: Market = "spot"): Promise<{
   success: boolean;
   executed?: boolean;
   trade_id?: string;
@@ -518,7 +463,7 @@ export async function triggerAutoTradingCycle(symbol?: string): Promise<{
     const res = await fetch(`${API_BASE}/api/bot/auto-trading/trigger-cycle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(symbol ? { symbol } : {}),
+      body: JSON.stringify(symbol ? { symbol, market } : {market}),
     });
     return await safeJson(res, { success: false });
   } catch {

@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useMemo } from "react";
+import { useMarket } from "@/components/MarketProvider";
 import dynamic from "next/dynamic";
 import { BarChart3, Gauge, Activity, TrendingUp, Layers, Zap } from "lucide-react";
 import { motion } from "framer-motion";
-import { getExchangeQuote } from "../../lib/api";
+
 
 const VolSurface = dynamic(() => import("../../components/VolSurface"), {
   ssr: false,
@@ -51,14 +52,6 @@ const REGIME_LABELS: Record<string, string> = {
   CRISIS: "Crisis",
 };
 
-const DEFAULT_SPOTS: Record<string, number> = {
-  BTCUSDT: 76650.0,
-  ETHUSDT: 2465.0,
-  SOLUSDT: 101.5,
-  BNBUSDT: 727.0,
-  XRPUSDT: 1.30,
-};
-
 const BASE_IVS: Record<string, number> = {
   BTCUSDT: 0.52,
   ETHUSDT: 0.58,
@@ -68,33 +61,13 @@ const BASE_IVS: Record<string, number> = {
 };
 
 export default function VolatilityLab() {
-  const [selectedTicker, setSelectedTicker] = useState("BTCUSDT");
-  const [spotPrices, setSpotPrices] = useState<Record<string, number>>(DEFAULT_SPOTS);
-
-  // Live spot price fetching from Binance
-  useEffect(() => {
-    let isMounted = true;
-    const fetchSpot = async () => {
-      try {
-        const q = await getExchangeQuote(selectedTicker);
-        if (isMounted && q && q.last > 0) {
-          setSpotPrices((prev) => ({ ...prev, [selectedTicker]: q.last }));
-        }
-      } catch {
-        // use default
-      }
-    };
-    fetchSpot();
-    const timer = setInterval(fetchSpot, 5000);
-    return () => {
-      isMounted = false;
-      clearInterval(timer);
-    };
-  }, [selectedTicker]);
+  const {market,symbol:selectedTicker,quote,select}=useMarket();
+  const setSelectedTicker=(symbol:string)=>select(market,symbol);
+  const spot=quote?.price;
 
   // Dynamically compute calibrated strike prices centered around the asset's real spot price
   const strikes = useMemo(() => {
-    const spot = spotPrices[selectedTicker] || DEFAULT_SPOTS[selectedTicker] || 76500;
+    if(!spot)return [];
     const step = spot > 10000 ? 500 : spot > 1000 ? 25 : spot > 100 ? 2.5 : spot > 10 ? 1 : 0.05;
     const center = Math.round(spot / step) * step;
     return [
@@ -106,13 +79,13 @@ export default function VolatilityLab() {
       center + 2 * step,
       center + 3 * step,
     ];
-  }, [selectedTicker, spotPrices]);
+  }, [spot]);
 
   // Dynamically compute 3D Implied Volatility Surface Manifold (Moneyness vs DTE)
   const surfaceData = useMemo(() => {
     const expiries = ["7d", "14d", "21d", "30d", "45d", "60d", "90d"];
     const baseIV = BASE_IVS[selectedTicker] || 0.22;
-    const spot = spotPrices[selectedTicker] || DEFAULT_SPOTS[selectedTicker] || 500;
+    if(!spot)return {strikes:[],expiries:[],ivMatrix:[]};
 
     const ivMatrix = strikes.map((strike) => {
       const moneyness = (strike - spot) / spot;
@@ -127,32 +100,12 @@ export default function VolatilityLab() {
     });
 
     return { strikes, expiries, ivMatrix };
-  }, [selectedTicker, strikes, spotPrices]);
+  }, [selectedTicker, strikes, spot]);
 
-  const ivGauges: IVGaugeData[] = useMemo(() => [
-    { symbol: "BTCUSDT", ivRank: 0.42, ivPercentile: 0.38, currentIV: BASE_IVS["BTCUSDT"], spotPrice: spotPrices["BTCUSDT"] || DEFAULT_SPOTS["BTCUSDT"] },
-    { symbol: "ETHUSDT", ivRank: 0.55, ivPercentile: 0.51, currentIV: BASE_IVS["ETHUSDT"], spotPrice: spotPrices["ETHUSDT"] || DEFAULT_SPOTS["ETHUSDT"] },
-    { symbol: "SOLUSDT", ivRank: 0.68, ivPercentile: 0.72, currentIV: BASE_IVS["SOLUSDT"], spotPrice: spotPrices["SOLUSDT"] || DEFAULT_SPOTS["SOLUSDT"] },
-    { symbol: "BNBUSDT", ivRank: 0.38, ivPercentile: 0.41, currentIV: BASE_IVS["BNBUSDT"], spotPrice: spotPrices["BNBUSDT"] || DEFAULT_SPOTS["BNBUSDT"] },
-    { symbol: "XRPUSDT", ivRank: 0.71, ivPercentile: 0.69, currentIV: BASE_IVS["XRPUSDT"], spotPrice: spotPrices["XRPUSDT"] || DEFAULT_SPOTS["XRPUSDT"] },
-  ], [spotPrices]);
-
-  const greeksHeatmap: GreekExposure[] = useMemo(() => [
-    { symbol: "BTCUSDT", delta: 120, theta: 45, vega: -80, gamma: 15, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
-    { symbol: "ETHUSDT", delta: -80, theta: 62, vega: -120, gamma: 20, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
-    { symbol: "SOLUSDT", delta: 140, theta: 35, vega: -95, gamma: 40, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
-    { symbol: "BNBUSDT", delta: -21, theta: 38, vega: -45, gamma: 25, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
-    { symbol: "XRPUSDT", delta: 48, theta: 28, vega: -62, gamma: 30, deltaLimit: 250, thetaTarget: 30, vegaLimit: 200 },
-  ], []);
-
-  const [regimeHistory] = useState<{ date: string; regime: string; vix?: number }[]>([
-    { date: "Aug 15", regime: "LOW_VOL", vix: 13.2 },
-    { date: "Aug 20", regime: "NORMAL", vix: 15.4 },
-    { date: "Aug 25", regime: "NORMAL", vix: 16.1 },
-    { date: "Aug 28", regime: "ELEVATED", vix: 19.8 },
-    { date: "Sep 01", regime: "NORMAL", vix: 16.2 },
-    { date: "Sep 02", regime: "NORMAL", vix: 16.5 },
-  ]);
+  // No observed IV, portfolio Greeks or regime series is supplied by this API.
+  const ivGauges: IVGaugeData[]=[];
+  const greeksHeatmap: GreekExposure[]=[];
+  const regimeHistory: {date:string;regime:string;vix?:number}[]=[];
 
   const getGaugeColor = (value: number) => {
     if (value < 0.25) return "#3b82f6";
@@ -214,26 +167,11 @@ export default function VolatilityLab() {
             Volatility Lab & Greeks Engine
           </h1>
           <p className="text-xs text-[#848e9c] font-mono mt-1">
-            3D Implied Volatility Surface, 52-Week IV Rank Gauges & Risk Exposures
+            Illustrative volatility model. Observed IV, Greeks and regime history require a connected data source.
           </p>
         </div>
 
-        {/* Ticker Selector */}
-        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#181a20] border border-[#2b313a] font-mono text-xs">
-          {["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"].map((sym) => (
-            <button
-              key={sym}
-              onClick={() => setSelectedTicker(sym)}
-              className={`px-3 py-1.5 rounded-lg transition-all font-bold ${
-                selectedTicker === sym
-                  ? "bg-[#f0b90b] text-[#0b0e11] shadow-[0_0_12px_rgba(240,185,11,0.3)]"
-                  : "text-[#848e9c] hover:text-[#eaecef]"
-              }`}
-            >
-              {sym}
-            </button>
-          ))}
-        </div>
+        <strong className="font-mono text-[#f7a600]">{market} · {selectedTicker}</strong>
       </div>
 
       {/* Main 3D Surface Panel */}
@@ -247,22 +185,22 @@ export default function VolatilityLab() {
           <div>
             <h3 className="font-semibold text-[#eaecef] flex items-center gap-2 text-base">
               <Layers className="w-4 h-4 text-[#f0b90b]" />
-              {selectedTicker} 3D Implied Volatility Surface (Moneyness vs DTE)
+              {selectedTicker} Illustrative Volatility Surface (Moneyness vs DTE)
             </h3>
             <p className="text-xs font-mono text-[#848e9c] mt-0.5">
-              Live Spot: <span className="text-[#f0b90b] font-bold">${(spotPrices[selectedTicker] || DEFAULT_SPOTS[selectedTicker]).toFixed(2)}</span> | Strike Manifold: ${strikes[0]} – ${strikes[strikes.length - 1]} | Dynamic Vol Skew
+              Production {market} quote: <span className="text-[#f0b90b] font-bold">{spot ? `$${spot.toFixed(2)}` : "Quote unavailable"}</span> - Assumed IV {((BASE_IVS[selectedTicker] || 0.22)*100).toFixed(0)}%; theoretical scenario, not observed market IV.
             </p>
           </div>
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-1 rounded-lg bg-[#f0b90b]/15 text-[#f0b90b] border border-[#f0b90b]/30 text-xs font-mono font-bold flex items-center gap-1.5">
               <Zap className="w-3.5 h-3.5" />
-              Black-Scholes Inversion
+              Illustrative model
             </span>
           </div>
         </div>
 
         <div className="w-full h-84 rounded-xl overflow-hidden bg-[#0b0e11] border border-[#2b313a] flex items-center justify-center">
-          <VolSurface key={selectedTicker} data={surfaceData} />
+          {spot ? <VolSurface key={`${market}:${selectedTicker}`} data={surfaceData} /> : <p role="status">Quote unavailable. Model awaits production price.</p>}
         </div>
       </motion.div>
 
@@ -284,6 +222,7 @@ export default function VolatilityLab() {
           </div>
 
           <div className="space-y-3">
+            <p>IV observations unavailable</p>
             {ivGauges.map((gauge) => {
               const isSelected = gauge.symbol === selectedTicker;
               return (
@@ -344,6 +283,7 @@ export default function VolatilityLab() {
               <span className="text-xs font-mono text-[#848e9c]">Markov HMM Model</span>
             </div>
 
+            <p>Regime history unavailable</p>
             <div className="flex items-center justify-between gap-2 overflow-x-auto pb-2">
               {regimeHistory.map((item, idx) => {
                 const color = REGIME_COLORS[item.regime] || "#0ecb81";
@@ -382,7 +322,7 @@ export default function VolatilityLab() {
                 Portfolio Greeks Exposure Heatmap
               </h3>
               <span className="text-xs font-mono px-2 py-0.5 rounded bg-[#0ecb81]/15 text-[#0ecb81] border border-[#0ecb81]/30 font-bold">
-                Delta-Neutral Track
+                Exposure unavailable
               </span>
             </div>
 
@@ -399,6 +339,7 @@ export default function VolatilityLab() {
                   </tr>
                 </thead>
                 <tbody>
+                  <tr><td colSpan={6} className="py-4">Portfolio Greeks unavailable</td></tr>
                   {greeksHeatmap.map((item) => {
                     const isSelected = item.symbol === selectedTicker;
                     return (

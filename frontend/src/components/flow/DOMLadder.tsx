@@ -4,17 +4,20 @@ import { PanelFrame } from "./PanelFrame";
 import { LadderLevel } from "@/lib/flow/flowTypes";
 import { formatCompactNumber } from "@/lib/flow/flowFormat";
 import { Crosshair } from "lucide-react";
+import { useMarket } from "../MarketProvider";
 
 const ROW_HEIGHT = 20;
 
 const LadderRow = memo(({ 
   level, 
   isBestBid, 
-  isBestAsk 
+  isBestAsk,
+  onStage
 }: { 
   level: LadderLevel; 
   isBestBid: boolean; 
   isBestAsk: boolean;
+  onStage: (price:number)=>void;
 }) => {
   // Use depth_pct for background bar width
   const depthWidth = `${Math.min(100, (level.depth_pct || 0) * 100)}%`;
@@ -26,7 +29,7 @@ const LadderRow = memo(({
   const priceColor = isBid ? "text-[#34C759]" : isAsk ? "text-[#FF453A]" : "text-neutral-300";
 
   return (
-    <div 
+    <button type="button" aria-label={`Stage limit at ${level.price}`} onClick={()=>onStage(level.price)}
       className={`flex items-center w-full text-xs font-mono border-b border-[#2C2C2E]/30 relative cursor-pointer ${bgClass}`}
       style={{ height: ROW_HEIGHT }}
     >
@@ -71,13 +74,15 @@ const LadderRow = memo(({
         {(level.traded_buy > 0 || level.traded_sell > 0) && <span className="text-neutral-600">|</span>}
         {level.traded_buy > 0 && <span className="text-[#34C759]">{formatCompactNumber(level.traded_buy)}</span>}
       </div>
-    </div>
+    </button>
   );
 });
 LadderRow.displayName = "LadderRow";
 
 export function DOMLadder({ symbol }: { symbol: string }) {
   const state = useFlowStore();
+  const {market}=useMarket();
+  const stage=(price:number)=>window.dispatchEvent(new CustomEvent('volhelix:stage-order',{detail:{market,symbol,price}}));
   const dom = state.dom;
   
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -109,8 +114,8 @@ export function DOMLadder({ symbol }: { symbol: string }) {
         {/* Header/Controls */}
         <div className="flex items-center px-2 py-1 text-[10px] font-mono text-neutral-400 bg-[#2C2C2E] border-b border-[#3A3A3C] shrink-0 justify-between">
           <div className="flex items-center gap-3">
-            <span>SPREAD: {dom?.spread_bps?.toFixed(1) || 0} bps</span>
-            <span>IMB: {dom?.book_imbalance ? (dom.book_imbalance * 100).toFixed(0) : 0}%</span>
+            <span>SPREAD: {dom?.spread_bps?.toFixed(1) ?? '—'} bps</span>
+            <span>IMB: {dom ? (dom.book_imbalance * 100).toFixed(0) : '—'}%</span>
           </div>
           <button 
             onClick={() => setAutoCenter(!autoCenter)}
@@ -150,6 +155,7 @@ export function DOMLadder({ symbol }: { symbol: string }) {
                     level={level} 
                     isBestBid={level.price === dom.best_bid}
                     isBestAsk={level.price === dom.best_ask}
+                    onStage={stage}
                   />
                 </div>
               ))}

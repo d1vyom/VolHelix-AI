@@ -21,6 +21,10 @@ export function StreamHealthBadge({ health }: { health?: StreamHealth | null }) 
     colorClass = "text-[#34C759] bg-[#34C759]/10";
     Icon = Activity;
     label = `${lag_ms}ms`;
+  } else if (status === "WAITING" || status === "STALE") {
+    colorClass = "text-[#f7a600] bg-[#f7a600]/10";
+    Icon = AlertTriangle;
+    label = status;
   } else if (status === "DEGRADED") {
     colorClass = "text-[#FF9F0A] bg-[#FF9F0A]/10";
     Icon = AlertTriangle;

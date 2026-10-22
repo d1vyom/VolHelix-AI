@@ -1,137 +1,18 @@
-import { safeJson } from "../api";
-import { 
-  StreamHealth, FootprintBar, TapeEntry, DomAnalytics, 
-  HeatmapSnapshot, VolumeProfileSnapshot, FlowMetrics, CVDPoint
-} from "./flowTypes";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
-
-export interface FlowStatusResponse {
-  enabled: boolean;
-  reason?: string;
-  symbols?: string[];
-  health?: Record<string, StreamHealth>;
+import { request, Market } from '../market';
+import type { StreamHealth, FootprintBar, TapeEntry, DomAnalytics, HeatmapSnapshot, VolumeProfileSnapshot, FlowMetrics, CVDPoint } from './flowTypes';
+export interface FlowStatusResponse {enabled:boolean;reason?:string;symbols?:string[];health?:Record<string,StreamHealth>}
+export interface FootprintResponse {market:Market;symbol:string;interval:string;tick_group:number;bars:FootprintBar[]}
+async function read<T>(path:string,market:Market,symbol?:string,params:Record<string,string|number|undefined>={},signal?:AbortSignal):Promise<T|null>{
+ const query=new URLSearchParams({market,...(symbol?{symbol}:{})});
+ for(const [key,value] of Object.entries(params))if(value!==undefined)query.set(key,String(value));
+ try{return await request<T>(`/api/flow/${path}?${query}`,{signal});}catch{return null;}
 }
-
-export async function getFlowStatus(): Promise<FlowStatusResponse> {
-  try {
-    const res = await fetch(`${API_BASE}/api/flow/status`);
-    return await safeJson<FlowStatusResponse>(res, { enabled: false, reason: "Fetch failed" });
-  } catch {
-    return { enabled: false, reason: "Fetch failed" };
-  }
-}
-
-export interface FootprintResponse {
-  symbol: string;
-  interval: string;
-  tick_group: number;
-  bars: FootprintBar[];
-}
-
-export async function getFootprint(symbol: string, interval: string = "1m", limit: number = 60, tickGroup?: number): Promise<FootprintResponse | null> {
-  try {
-    let url = `${API_BASE}/api/flow/footprint?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`;
-    if (tickGroup !== undefined) url += `&tick_group=${tickGroup}`;
-    const res = await fetch(url);
-    const data = await safeJson<{ success?: boolean } & FootprintResponse>(res, {} as { success?: boolean } & FootprintResponse);
-    if (data.success === false) return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function getDom(symbol: string, levels: number = 20, tickGroup?: number): Promise<DomAnalytics | null> {
-  try {
-    let url = `${API_BASE}/api/flow/dom?symbol=${encodeURIComponent(symbol)}&levels=${levels}`;
-    if (tickGroup !== undefined) url += `&tick_group=${tickGroup}`;
-    const res = await fetch(url);
-    const data = await safeJson<{ success?: boolean } & DomAnalytics>(res, {} as { success?: boolean } & DomAnalytics);
-    if (data.success === false) return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function getTape(symbol: string, limit: number = 200, minNotional?: number): Promise<{ symbol: string, entries: TapeEntry[] } | null> {
-  try {
-    let url = `${API_BASE}/api/flow/tape?symbol=${encodeURIComponent(symbol)}&limit=${limit}`;
-    if (minNotional !== undefined) url += `&min_notional=${minNotional}`;
-    const res = await fetch(url);
-    const data = await safeJson<{ success?: boolean, symbol: string, entries: TapeEntry[] }>(res, { symbol, entries: [] });
-    if (data.success === false) return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function getHeatmap(symbol: string, windowSec?: number, tickGroup?: number): Promise<HeatmapSnapshot | null> {
-  try {
-    let url = `${API_BASE}/api/flow/heatmap?symbol=${encodeURIComponent(symbol)}`;
-    if (windowSec !== undefined) url += `&window_sec=${windowSec}`;
-    if (tickGroup !== undefined) url += `&tick_group=${tickGroup}`;
-    const res = await fetch(url);
-    const data = await safeJson<{ success?: boolean } & HeatmapSnapshot>(res, {} as { success?: boolean } & HeatmapSnapshot);
-    if (data.success === false) return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function getVolumeProfile(
-  symbol: string, 
-  mode: "SESSION" | "VISIBLE" | "FIXED_RANGE" = "SESSION",
-  startTs?: number,
-  endTs?: number,
-  tickGroup?: number
-): Promise<VolumeProfileSnapshot | null> {
-  try {
-    let url = `${API_BASE}/api/flow/volume-profile?symbol=${encodeURIComponent(symbol)}&mode=${mode}`;
-    if (startTs !== undefined) url += `&start_ts=${startTs}`;
-    if (endTs !== undefined) url += `&end_ts=${endTs}`;
-    if (tickGroup !== undefined) url += `&tick_group=${tickGroup}`;
-    const res = await fetch(url);
-    const data = await safeJson<{ success?: boolean } & VolumeProfileSnapshot>(res, {} as { success?: boolean } & VolumeProfileSnapshot);
-    if (data.success === false) return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function getCVD(symbol: string, interval: string = "1m", limit: number = 240): Promise<{ symbol: string, points: CVDPoint[], vwap: number, bands: [number, number] } | null> {
-  try {
-    const res = await fetch(`${API_BASE}/api/flow/cvd?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`);
-    const data = await safeJson<{ success?: boolean, symbol: string, points: CVDPoint[], vwap: number, bands: [number, number] }>(res, {} as { success?: boolean, symbol: string, points: CVDPoint[], vwap: number, bands: [number, number] });
-    if (data.success === false) return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function getMetrics(symbol: string): Promise<FlowMetrics | null> {
-  try {
-    const res = await fetch(`${API_BASE}/api/flow/metrics?symbol=${encodeURIComponent(symbol)}`);
-    const data = await safeJson<{ success?: boolean } & FlowMetrics>(res, {} as { success?: boolean } & FlowMetrics);
-    if (data.success === false) return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function getSymbolInfo(symbol: string): Promise<Record<string, unknown> | null> {
-  try {
-    const res = await fetch(`${API_BASE}/api/flow/symbol-info?symbol=${encodeURIComponent(symbol)}`);
-    const data = await safeJson<{ success?: boolean }>(res, { success: false });
-    if (data.success === false) return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
+export const getFlowStatus=(market:Market='spot')=>read<FlowStatusResponse>('status',market);
+export const getFootprint=(symbol:string,interval='1m',limit=60,tick_group?:number,market:Market='spot',signal?:AbortSignal)=>read<FootprintResponse>('footprint',market,symbol,{interval,limit,tick_group},signal);
+export const getDom=(symbol:string,levels=20,tick_group?:number,market:Market='spot',signal?:AbortSignal)=>read<DomAnalytics>('dom',market,symbol,{levels,tick_group},signal);
+export const getTape=(symbol:string,limit=200,min_notional?:number,market:Market='spot',signal?:AbortSignal)=>read<{symbol:string;market:Market;entries:TapeEntry[]}>('tape',market,symbol,{limit,min_notional},signal);
+export const getHeatmap=(symbol:string,window_sec?:number,tick_group?:number,market:Market='spot',signal?:AbortSignal)=>read<HeatmapSnapshot>('heatmap',market,symbol,{window_sec,tick_group},signal);
+export const getVolumeProfile=(symbol:string,mode:'SESSION'|'VISIBLE'|'FIXED_RANGE'='SESSION',start_ts?:number,end_ts?:number,tick_group?:number,market:Market='spot',signal?:AbortSignal)=>read<VolumeProfileSnapshot>('volume-profile',market,symbol,{mode,start_ts,end_ts,tick_group},signal);
+export const getCVD=(symbol:string,interval='1m',limit=240,market:Market='spot',signal?:AbortSignal)=>read<{symbol:string;points:CVDPoint[];vwap:number;vwap_upper_1:number;vwap_lower_1:number}>('cvd',market,symbol,{interval,limit},signal);
+export const getMetrics=(symbol:string,market:Market='spot',signal?:AbortSignal)=>read<FlowMetrics>('metrics',market,symbol,{},signal);
+export const getSymbolInfo=(symbol:string,market:Market='spot')=>read<Record<string,unknown>>('symbol-info',market,symbol);

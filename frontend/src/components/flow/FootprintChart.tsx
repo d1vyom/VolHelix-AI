@@ -60,10 +60,7 @@ export function FootprintChart({ symbol }: { symbol: string }) {
     
     if (minPrice === Infinity) return;
     
-    const priceRange = Math.max(1, maxPrice - minPrice);
-    const tickSize = allBars[0]?.cells[1] 
-      ? allBars[0].cells[1].price - allBars[0].cells[0].price 
-      : priceRange / 10;
+    const tickSize = Math.max(...allBars.map(bar=>bar.tick_group));
       
     // Add margin
     maxPrice += tickSize * 2;
@@ -83,7 +80,6 @@ export function FootprintChart({ symbol }: { symbol: string }) {
       return chartH - ((price - minPrice) / renderRange) * chartH;
     };
     
-    const cellH = Math.max(10, (tickSize / renderRange) * chartH);
     
     ctx.font = "10px monospace";
     ctx.textAlign = "center";
@@ -91,6 +87,7 @@ export function FootprintChart({ symbol }: { symbol: string }) {
 
     for (let i = 0; i < allBars.length; i++) {
       const bar = allBars[i];
+      const cellH = Math.max(1, (bar.tick_group / renderRange) * chartH);
       const xCenter = w - 60 - (allBars.length - i - 0.5) * colWidth;
       
       // Draw candle wick

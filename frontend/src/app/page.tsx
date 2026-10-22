@@ -2,6 +2,10 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
 import io from "socket.io-client";
+import { useMarket } from "@/components/MarketProvider";
+import { OrderTicket } from "@/components/OrderTicket";
+import { MarketDepth } from "@/components/MarketDepth";
+import { formatMoney, readBars, readOrders, readPositions } from "@/lib/market";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Tooltip,
@@ -18,36 +22,23 @@ import {
   Trash2, 
   Award,
   Layers,
-  Zap
+  Zap,
 } from "lucide-react";
 import {
-  getExchangeAccount,
-  getExchangePositions,
-  getExchangeOrders,
-  getExchangeQuote,
-  getExchangeBars,
-  submitExchangeOrder,
-  closeExchangePosition,
   cancelExchangeOrder,
   cancelAllExchangeOrders,
   fillPendingTrade,
-  getMarketStatus,
   getTradeHistory,
-  executeBotTrade,
-  getOrderFlowAnalytics,
-  OrderFlowData,
   getAutoTradingStatus,
   startAutoTrading,
   stopAutoTrading,
   triggerAutoTradingCycle,
   AutoTradingStatus,
-  ExchangeAccount,
   ExchangePosition,
   ExchangeOrder,
-  ExchangeQuote,
   ExchangeBar
 } from "../lib/api";
-import { MarketClockStatus, TradeRecord } from "../lib/types";
+import { TradeRecord } from "../lib/types";
 
 interface AgentLog {
   id: string;
@@ -64,120 +55,6 @@ type DockTab = "positions" | "pending" | "orders" | "debate" | "riskgate" | "his
 // (order blocks + fair value gaps + gamma walls). Regime changes only scale size.
 const MASTER_STRATEGY = "MASTER_ORDER_FLOW";
 
-interface OrderBookProps {
-  quote: ExchangeQuote;
-  midPrice: number;
-  tickStep: number;
-  selectedTicker: string;
-}
-
-const OrderBookWidget = memo(function OrderBookWidget({
-  quote,
-  midPrice,
-  tickStep,
-  selectedTicker,
-}: OrderBookProps) {
-  const [bookTick, setBookTick] = useState<number>(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setBookTick((t) => (t + 1) % 10000);
-    }, 600);
-    return () => clearInterval(timer);
-  }, []);
-
-  const { orderBookAsks, orderBookBids, spreadVal } = useMemo(() => {
-    const baseAsk = quote.ask || (midPrice + tickStep);
-    const baseBid = quote.bid || (midPrice - tickStep);
-    const spread = Math.max(0.01, quote.spread || (baseAsk - baseBid));
-
-    // High-frequency micro-variations synced with bookTick and real quote sizes
-    const seed = Math.sin(bookTick + midPrice) * 1000;
-    const askSizes = [
-      Math.max(20, Math.round((quote.ask_size || 76) + Math.sin(seed + 1) * 35)),
-      Math.max(40, Math.round(210 + Math.cos(seed + 2) * 55)),
-      Math.max(30, Math.round(95 + Math.sin(seed + 3) * 40)),
-      Math.max(50, Math.round(142 + Math.cos(seed + 4) * 60)),
-    ];
-    const bidSizes = [
-      Math.max(25, Math.round((quote.bid_size || 88) + Math.cos(seed + 5) * 35)),
-      Math.max(35, Math.round(164 + Math.sin(seed + 6) * 50)),
-      Math.max(60, Math.round(245 + Math.cos(seed + 7) * 70)),
-      Math.max(40, Math.round(110 + Math.sin(seed + 8) * 45)),
-    ];
-
-    const maxVol = Math.max(...askSizes, ...bidSizes, 1);
-
-    const asks = [
-      { price: baseAsk + tickStep * 3, size: askSizes[3], depth: Math.round((askSizes[3] / maxVol) * 100) },
-      { price: baseAsk + tickStep * 2, size: askSizes[2], depth: Math.round((askSizes[2] / maxVol) * 100) },
-      { price: baseAsk + tickStep * 1, size: askSizes[1], depth: Math.round((askSizes[1] / maxVol) * 100) },
-      { price: baseAsk, size: askSizes[0], depth: Math.round((askSizes[0] / maxVol) * 100) },
-    ];
-
-    const bids = [
-      { price: baseBid, size: bidSizes[0], depth: Math.round((bidSizes[0] / maxVol) * 100) },
-      { price: baseBid - tickStep * 1, size: bidSizes[1], depth: Math.round((bidSizes[1] / maxVol) * 100) },
-      { price: baseBid - tickStep * 2, size: bidSizes[2], depth: Math.round((bidSizes[2] / maxVol) * 100) },
-      { price: baseBid - tickStep * 3, size: bidSizes[3], depth: Math.round((bidSizes[3] / maxVol) * 100) },
-    ];
-
-    return { orderBookAsks: asks, orderBookBids: bids, spreadVal: spread };
-  }, [quote, midPrice, tickStep, bookTick]);
-
-  return (
-    <div className="rounded-lg bg-[#18191f] border border-[#26282f] p-3 font-mono shadow-lg">
-      <div className="flex items-center justify-between pb-2 border-b border-[#26282f] mb-2 text-[#878996]">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-[#f5f5f5]">Order Book ({selectedTicker})</span>
-          <span className="flex items-center gap-1 text-[9px] text-[#20b26c] font-bold px-1.5 py-0.2 rounded bg-[#20b26c]/10 border border-[#20b26c]/30">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c] animate-pulse" />
-            REALTIME
-          </span>
-        </div>
-        <span className="text-[10px] text-[#5e6673]">Spread ${spreadVal.toFixed(2)}</span>
-      </div>
-
-      {/* Asks (Red) */}
-      <div className="space-y-1">
-        {orderBookAsks.map((ask, i) => (
-          <div key={i} className="relative flex justify-between text-[11px] py-0.5 px-1 overflow-hidden">
-            <div
-              className="absolute right-0 top-0 bottom-0 bg-[#ef454a]/15 rounded transition-all duration-300 ease-out"
-              style={{ width: `${ask.depth}%` }}
-            />
-            <span className="relative text-[#ef454a] font-bold">${ask.price.toFixed(2)}</span>
-            <span className="relative text-[#878996] font-semibold">{ask.size}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Real Mark Price from Binance */}
-      <div className="py-2 my-1 border-y border-[#26282f] flex items-center justify-between text-xs">
-        <span className="font-extrabold text-sm text-[#20b26c]">${midPrice.toFixed(2)}</span>
-        <span className="text-[10px] text-[#878996] flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c]" />
-          Binance Real Last
-        </span>
-      </div>
-
-      {/* Bids (Green) */}
-      <div className="space-y-1">
-        {orderBookBids.map((bid, i) => (
-          <div key={i} className="relative flex justify-between text-[11px] py-0.5 px-1 overflow-hidden">
-            <div
-              className="absolute right-0 top-0 bottom-0 bg-[#20b26c]/15 rounded transition-all duration-300 ease-out"
-              style={{ width: `${bid.depth}%` }}
-            />
-            <span className="relative text-[#20b26c] font-bold">${bid.price.toFixed(2)}</span>
-            <span className="relative text-[#878996] font-semibold">{bid.size}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-});
-
 const VolumeBarChart = memo(function VolumeBarChart({ bars }: { bars: ExchangeBar[] }) {
   return (
     <>
@@ -185,10 +62,10 @@ const VolumeBarChart = memo(function VolumeBarChart({ bars }: { bars: ExchangeBa
         <div className="flex items-center gap-2">
           <span className="font-bold text-[#f5f5f5]">Trading Volume (Vol)</span>
           <span className="text-[#5e6673]">|</span>
-          <span>Green Bars = Shares Traded Per Interval</span>
+          <span>Green Bars = Base Volume Per Interval</span>
         </div>
         <span className="text-[#20b26c] font-semibold">
-          Latest: {bars.length > 0 ? `${(bars[bars.length - 1].volume / 1000).toFixed(1)}K shares` : "--"}
+          Latest: {bars.length > 0 ? `${(bars[bars.length - 1].volume / 1000).toFixed(1)}K units` : "--"}
         </span>
       </div>
 
@@ -203,7 +80,7 @@ const VolumeBarChart = memo(function VolumeBarChart({ bars }: { bars: ExchangeBa
                 fontFamily: "monospace",
                 fontSize: "11px",
               }}
-              formatter={(val) => [`${Number(val).toLocaleString()} shares`, "Traded Volume"]}
+              formatter={(val) => [`${Number(val).toLocaleString()} units`, "Traded Volume"]}
               labelStyle={{ color: "#20b26c", fontWeight: "bold" }}
             />
             <Bar dataKey="volume" name="Volume" fill="#20b26c" opacity={0.65} radius={[2, 2, 0, 0]} />
@@ -216,40 +93,32 @@ const VolumeBarChart = memo(function VolumeBarChart({ bars }: { bars: ExchangeBa
 
 export default function BybitTradingTerminal() {
   const [activeTab, setActiveTab] = useState<DockTab>("positions");
-  const [selectedTicker, setSelectedTicker] = useState("BTCUSDT");
+  const marketState=useMarket();
+  const {market,symbol:selectedTicker}=marketState;
+  const [closing,setClosing]=useState<ExchangePosition|null>(null);
+  const account=marketState.account;
+  const midPrice=marketState.quote?.price;
+  const [readError,setReadError]=useState('');
   const [chartInterval, setChartInterval] = useState("1H");
   const [chartType, setChartType] = useState<"CANDLE" | "LINE">("CANDLE");
-  const [tradeMode, setTradeMode] = useState<"BOT" | "MANUAL">("BOT");
-  const [orderSide, setOrderSide] = useState<"BUY" | "SELL">("BUY");
-  const [orderType, setOrderType] = useState<"market" | "limit">("market");
-  const [limitPrice, setLimitPrice] = useState<number>(76500.0);
-  const [orderQty, setOrderQty] = useState(0.002);
-  const [orderFlow, setOrderFlow] = useState<OrderFlowData | null>(null);
   const [autoTrading, setAutoTrading] = useState<AutoTradingStatus | null>(null);
+  const [autoTradingUnavailable,setAutoTradingUnavailable]=useState(true);
+  const applyAutoStatus=useCallback((status:AutoTradingStatus|null)=>{setAutoTradingUnavailable(!status);if(status)setAutoTrading(status);},[]);
   const [isTogglingAuto, setIsTogglingAuto] = useState(false);
-  const [kellyPercent, setKellyPercent] = useState(80);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [marketClock, setMarketClock] = useState<MarketClockStatus | null>(null);
-  const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>([]);
   const [isFillingOrder, setIsFillingOrder] = useState<string | null>(null);
 
-  const [account, setAccount] = useState<ExchangeAccount>({
-    equity: 10000.0,
-    buying_power: 10000.0,
-    cash: 10000.0,
-    portfolio_value: 10000.0,
-    status: "ACTIVE",
-    currency: "USDT",
-  });
-  const [positions, setPositions] = useState<ExchangePosition[]>([]);
-  const [orders, setOrders] = useState<ExchangeOrder[]>([]);
+  const [ledger,setLedger]=useState<{market:string;positions:ExchangePosition[];orders:ExchangeOrder[];history:TradeRecord[]}>({market:'',positions:[],orders:[],history:[]});
+  const positions=ledger.market===market?ledger.positions:[];
+  const orders=useMemo(()=>ledger.market===market?ledger.orders:[],[ledger,market]);
+  const tradeHistory=useMemo(()=>ledger.market===market?ledger.history:[],[ledger,market]);
 
   // Computed pending orders (queued for market open / awaiting fill)
   const pendingOrders = useMemo(() => {
     return orders.filter((o) => {
       const s = (o.status || "").toLowerCase();
-      return ["accepted", "new", "pending_new", "held", "open", "calculated"].includes(s);
+      return ["accepted", "new", "pending_new", "held", "open", "calculated", "unknown", "dispatching", "partially_filled", "pending"].includes(s);
     });
   }, [orders]);
 
@@ -288,27 +157,10 @@ export default function BybitTradingTerminal() {
 
     return { total, netPnl, winRate, profitFactor, wins, losses, avgWin, avgLoss };
   }, [closedTrades]);
-  const [quote, setQuote] = useState<ExchangeQuote>({
-    symbol: "BTCUSDT",
-    bid: 76500.0,
-    ask: 76501.0,
-    last: 76500.5,
-    spread: 0.5,
-    timestamp: "",
-  });
   const [bars, setBars] = useState<ExchangeBar[]>([]);
-
-  const [logs, setLogs] = useState<AgentLog[]>([
-    { id: "1", time: "14:28:12", agent: "MarketIntel", msg: "Scanning crypto order flow on BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, XRPUSDT. Realized Volatility: 42.1% (NORMAL regime).", isRisk: false, confidence: 0.92 },
-    { id: "2", time: "14:28:15", agent: "StrategySynthesizer", msg: "Bullish Order Block retest confirmed on BTCUSDT at $75,980. Estimated alpha: +$420/BTC.", isRisk: false, confidence: 0.85 },
-    { id: "3", time: "14:28:19", agent: "DevilsAdvocate", msg: "Stress-tested tail risk against upcoming protocol settlement. Drawdown risk well within limits.", isRisk: true, confidence: 0.78 },
-    { id: "4", time: "14:28:22", agent: "RiskGate", msg: "10/10 Deterministic rules passed. Sized at 2.0% NAV ($200 USDT). Execution authorized on Binance Spot Testnet.", isRisk: true, confidence: 1.0 },
-  ]);
-
-  const barsCache = useRef<Record<string, ExchangeBar[]>>({});
-  const lastSymbolRef = useRef<string>("BTCUSDT");
-  const currentFetchId = useRef<number>(0);
-  const orderFlowLoadedRef = useRef<Record<string, boolean>>({});
+  const [logs,setLogs]=useState<AgentLog[]>([]);
+  const selectionRef=useRef<AbortController|null>(null);
+  useEffect(()=>{const controller=new AbortController();selectionRef.current=controller;return ()=>controller.abort();},[market]);
 
   const showToast = (text: string) => {
     setToastMsg(text);
@@ -316,77 +168,15 @@ export default function BybitTradingTerminal() {
   };
 
   const refreshAccountAndPositions = useCallback(async () => {
+    const signal=selectionRef.current?.signal;
     try {
-      const [acc, pos, ord, hist, mkt] = await Promise.all([
-        getExchangeAccount(),
-        getExchangePositions(),
-        getExchangeOrders(),
-        getTradeHistory(),
-        getMarketStatus(),
-      ]);
-      setAccount(acc);
-      setPositions(pos);
-      setOrders(ord);
-      setTradeHistory(hist);
-      setMarketClock(mkt);
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const loadMarketData = useCallback(async (sym: string, tf: string) => {
-    const fetchId = ++currentFetchId.current;
-    const cacheKey = `${sym}_${tf}`;
-    const symbolChanged = sym !== lastSymbolRef.current;
-    lastSymbolRef.current = sym;
-
-    // 1. Instant Cache Render: 0ms visual transition
-    if (barsCache.current[cacheKey]) {
-      setBars(barsCache.current[cacheKey]);
-    } else if (symbolChanged) {
-      // Clear previous ticker's bars so no mismatched candles can ever display
-      setBars([]);
-    }
-
-    // 2. Fast Standalone Bars Fetch (NOT blocked by order flow or options chain)
-    getExchangeBars(sym, tf).then((b) => {
-      if (fetchId !== currentFetchId.current) return;
-      if (b && b.length > 0) {
-        barsCache.current[cacheKey] = b;
-        setBars(b);
-      }
-    }).catch(() => {});
-
-    // 3. Fast Quote Fetch for the active symbol
-    getExchangeQuote(sym).then((q) => {
-      if (fetchId !== currentFetchId.current) return;
-      if (q && q.symbol === sym) {
-        setQuote((prev) => {
-          if (
-            prev.symbol === q.symbol &&
-            prev.last === q.last &&
-            prev.bid === q.bid &&
-            prev.ask === q.ask &&
-            prev.spread === q.spread
-          ) {
-            return prev;
-          }
-          return q;
-        });
-      }
-    }).catch(() => {});
-
-    // 4. Heavy Order Flow Analytics: Only fetch once per symbol or if missing
-    if (symbolChanged || !orderFlowLoadedRef.current[sym]) {
-      orderFlowLoadedRef.current[sym] = true;
-      getOrderFlowAnalytics(sym).then((ofData) => {
-        if (fetchId !== currentFetchId.current) return;
-        if (ofData && ofData.success) {
-          setOrderFlow(ofData);
-        }
-      }).catch(() => {});
-    }
-  }, []);
+      const [pos,ord,hist]=await Promise.all([readPositions(market,signal),readOrders(market,signal),getTradeHistory(market,signal)]);
+      if(signal?.aborted)return false;
+      setLedger({market,positions:pos.positions,orders:ord,history:hist});
+      setReadError(pos.available?'':`STALE positions: ${pos.error || 'Account unavailable'}`);
+      return pos.available;
+    } catch(error) {if(!signal?.aborted){setReadError(`STALE account data: ${error instanceof Error?error.message:'Account unavailable'}`);setLedger(previous=>previous.market===market?{...previous,positions:previous.positions.map(position=>({...position,stale:true}))}:previous);}return false;}
+  },[market]);
 
   // 1. Initial mount: Connect persistent socket and poll account every 10s
   useEffect(() => {
@@ -394,7 +184,7 @@ export default function BybitTradingTerminal() {
     const initialTimer = setTimeout(() => {
       if (isMounted) {
         refreshAccountAndPositions();
-        getAutoTradingStatus().then((st) => setAutoTrading(st)).catch(() => {});
+        getAutoTradingStatus().then((st) => {if(isMounted)applyAutoStatus(st);}).catch(() => {});
       }
     }, 0);
 
@@ -406,13 +196,13 @@ export default function BybitTradingTerminal() {
       if (!isMounted) return;
       try {
         const st = await getAutoTradingStatus();
-        setAutoTrading(st);
+        if(isMounted)applyAutoStatus(st);
       } catch {
         // ignore
       }
     }, 4000);
 
-    const socket = io("http://localhost:8000");
+    const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL, {path:"/socket.io",transports:["websocket"]});
     socket.on("reasoning_event", (event) => {
       if (!isMounted) return;
       setLogs((prev) => [
@@ -422,7 +212,7 @@ export default function BybitTradingTerminal() {
           agent: event.agent || "System",
           msg: event.message || "",
           isRisk: event.agent === "RiskGate" || event.agent === "DevilsAdvocate",
-          confidence: event.confidence ?? 0.88,
+          confidence: event.confidence ?? 0,
         },
         ...prev,
       ].slice(0, 40));
@@ -435,205 +225,41 @@ export default function BybitTradingTerminal() {
       clearInterval(autoInterval);
       socket.disconnect();
     };
-  }, [refreshAccountAndPositions]);
+  }, [refreshAccountAndPositions,applyAutoStatus]);
 
-  // 2. Real-time market data: Fetch immediately on ticker/interval switch, then fast quote updates
-  useEffect(() => {
-    let isMounted = true;
-    loadMarketData(selectedTicker, chartInterval);
+  useEffect(()=>{
+    const controller=new AbortController();let alive=true;
+    const clear=setTimeout(()=>setBars([]),0);
+    const load=async()=>{try {const data=await readBars(market,selectedTicker,chartInterval,controller.signal);if(alive)setBars(data);}catch(error){if(alive){setBars([]);setReadError(error instanceof Error?error.message:'Chart unavailable');}}};
+    void load();const timer=setInterval(load,5000);
+    return ()=>{alive=false;controller.abort();clearTimeout(clear);clearInterval(timer);};
+  },[market,selectedTicker,chartInterval]);
 
-    const quoteInterval = setInterval(async () => {
-      if (!isMounted) return;
-      try {
-        const q = await getExchangeQuote(selectedTicker);
-        if (isMounted && q && q.symbol === selectedTicker) {
-          setQuote((prev) => {
-            if (
-              prev.symbol === q.symbol &&
-              prev.last === q.last &&
-              prev.bid === q.bid &&
-              prev.ask === q.ask &&
-              prev.spread === q.spread
-            ) {
-              return prev;
-            }
-            return q;
-          });
-        }
-      } catch {
-        // ignore
-      }
-    }, 1500);
-
-    const barsInterval = setInterval(async () => {
-      if (!isMounted) return;
-      try {
-        const b = await getExchangeBars(selectedTicker, chartInterval);
-        if (isMounted && b && b.length > 0) {
-          setBars(b);
-        }
-      } catch {
-        // ignore
-      }
-    }, 5000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(quoteInterval);
-      clearInterval(barsInterval);
-    };
-  }, [selectedTicker, chartInterval, loadMarketData]);
+  useEffect(()=>{
+    const clear=setTimeout(()=>{setClosing(null);setReadError('Loading account data');},0);
+    return ()=>clearTimeout(clear);
+  },[market]);
 
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Synchronize ticker selection with Top Header and respond to external scans
-  useEffect(() => {
-    const handleTickerEvent = (e: Event) => {
-      const customEvent = e as CustomEvent<string>;
-      if (customEvent.detail && customEvent.detail !== selectedTicker) {
-        setSelectedTicker(customEvent.detail);
-      }
-    };
-    const handleScanEvent = () => {
-      refreshAccountAndPositions();
-      showToast("Options scan complete. Live data updated.");
-    };
-    window.addEventListener("volhelix:ticker-change", handleTickerEvent);
-    window.addEventListener("volhelix:scan-complete", handleScanEvent);
-    return () => {
-      window.removeEventListener("volhelix:ticker-change", handleTickerEvent);
-      window.removeEventListener("volhelix:scan-complete", handleScanEvent);
-    };
-  }, [selectedTicker, refreshAccountAndPositions]);
-
   const handleSyncExchange = async () => {
     setIsSyncing(true);
-    await refreshAccountAndPositions();
-    setTimeout(() => {
-      setIsSyncing(false);
-      showToast("Binance account, positions & orders synchronized!");
-    }, 400);
+    const available=await refreshAccountAndPositions();
+    marketState.refresh();
+    setIsSyncing(false);
+    showToast(available?"Binance positions & orders synchronized":"Account data unavailable; saved exposure retained as stale");
   };
 
-  const handleManualOrder = async () => {
-    // 24/7 crypto markets are always open
-    setIsSubmitting(true);
-    try {
-      const cleanSym = selectedTicker;
-      const targetLimitPrice = orderType === "limit" ? limitPrice : undefined;
-      const res = await submitExchangeOrder(
-        cleanSym,
-        orderQty,
-        orderSide.toLowerCase() as "buy" | "sell",
-        orderType,
-        targetLimitPrice
-      );
-      if (res && res.success) {
-        if (orderType === "market") {
-          showToast(`Market Order Executed @ $${quote.last?.toFixed(2) || "market"}! Moved to Positions.`);
-          setActiveTab("positions");
-        } else {
-          showToast(`Limit Order Placed @ $${targetLimitPrice?.toFixed(2)}! Moved to Pending Tab.`);
-          setActiveTab("pending");
-        }
-        await refreshAccountAndPositions();
-      } else {
-        showToast(res.error || "Order rejected by broker");
-        await refreshAccountAndPositions();
-      }
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Order submission failed";
-      showToast(message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleFillPending = async (orderId: string, fillPrice?: number) => {
+  const handleFillPending = async (orderId:string) => {
     setIsFillingOrder(orderId);
-    try {
-      const targetPrice = fillPrice || quote.last || 575.0;
-      const res = await fillPendingTrade(orderId, targetPrice);
-      if (res && res.success) {
-        showToast(`Order ${orderId.slice(0, 8)} Filled @ $${targetPrice.toFixed(2)}! Moved to Positions.`);
-        await refreshAccountAndPositions();
-        setActiveTab("positions");
-      } else {
-        showToast(res.error || "Fill failed");
-      }
-    } catch {
-      showToast("Error filling pending order");
-    } finally {
-      setIsFillingOrder(null);
-    }
-  };
-
-  const midPrice = quote.last || 574.85;
-  const tickStep = midPrice > 1000 ? 5.0 : 0.05;
-
-  // Master Strategy execution fallbacks. The server anchors the final levels to
-  // order blocks, fair value gaps and gamma walls; these are the pre-trade preview.
-  const tpSlConfig = useMemo(() => {
-    const cfg = { tp: 0.040, sl: 0.018 };
-    const tpPrice = midPrice * (1 + cfg.tp);
-    const slPrice = midPrice * (1 - cfg.sl);
-    return {
-      tpPct: cfg.tp * 100,
-      slPct: cfg.sl * 100,
-      tpRatio: cfg.tp,
-      slRatio: cfg.sl,
-      tpPrice,
-      slPrice,
-    };
-  }, [midPrice]);
-
-  const handleBotTrade = async () => {
-    setIsSubmitting(true);
-    try {
-      const cleanSym = selectedTicker;
-      const res = await executeBotTrade(
-        cleanSym,
-        MASTER_STRATEGY,
-        kellyPercent / 100,
-        tpSlConfig.tpRatio,
-        tpSlConfig.slRatio
-      );
-      if (res && res.success) {
-        if (res.take_profit_price && res.stop_loss_price) {
-          showToast(`Bot Placed ${res.order_type || "SPOT"}! TP: $${res.take_profit_price.toFixed(2)} | SL: $${res.stop_loss_price.toFixed(2)}`);
-        } else {
-          showToast(`Bot Executed on Binance! Order: ${res.binance_order_id || res.alpaca_order_id || "FILLED"}`);
-        }
-        await refreshAccountAndPositions();
-      } else {
-        showToast("Bot Swarm Executed Paper Order");
-        await refreshAccountAndPositions();
-      }
-    } catch {
-      showToast("Bot Swarm Executed Order");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleClosePosition = async (sym: string) => {
-    try {
-      const res = await closeExchangePosition(sym);
-      if (res && res.success) {
-        showToast(`Closed ${sym} on Binance (${res.status})`);
-        await refreshAccountAndPositions();
-      } else {
-        showToast(`Close request sent for ${sym}`);
-        await refreshAccountAndPositions();
-      }
-    } catch {
-      showToast("Position closed");
-    }
+    const res=await fillPendingTrade(orderId,undefined,market);
+    showToast(res.success?'Exchange status reconciled':res.error || 'Reconciliation failed');
+    await refreshAccountAndPositions();setIsFillingOrder(null);
   };
 
   const handleCancelOrder = async (orderId: string) => {
     try {
-      const res = await cancelExchangeOrder(orderId);
+      const res = await cancelExchangeOrder(orderId,market,orders.find(order=>order.id===orderId)?.symbol);
       if (res && res.success) {
         showToast("Order cancelled successfully");
         await refreshAccountAndPositions();
@@ -647,7 +273,7 @@ export default function BybitTradingTerminal() {
 
   const handleCancelAllOrders = async () => {
     try {
-      const res = await cancelAllExchangeOrders();
+      const res = await cancelAllExchangeOrders(market);
       if (res && res.success) {
         showToast(`Cancelled ${res.cancelled ?? 0} pending order(s)`);
         await refreshAccountAndPositions();
@@ -660,17 +286,20 @@ export default function BybitTradingTerminal() {
   };
 
   const handleToggleAutoTrading = async () => {
+    if(!autoTrading?.is_running&&(market==='futures'||autoTradingUnavailable))return;
     setIsTogglingAuto(true);
     try {
       if (autoTrading?.is_running) {
-        await stopAutoTrading();
+        const result=await stopAutoTrading();
+        if(!result.success)throw new Error('Stop request failed');
         showToast("Autonomous Auto-Trading Paused");
       } else {
-        await startAutoTrading(30);
+        const result=await startAutoTrading(30);
+        if(!result.success)throw new Error('Start request failed');
         showToast("Autonomous Auto-Trading Activated (Scanning Every 30s)");
       }
       const st = await getAutoTradingStatus();
-      setAutoTrading(st);
+      applyAutoStatus(st);
     } catch {
       showToast("Error updating auto-trading");
     } finally {
@@ -679,11 +308,14 @@ export default function BybitTradingTerminal() {
   };
 
   const handleTriggerCycleNow = async () => {
+    if(market!=='spot')return;
     setIsSubmitting(true);
     try {
       showToast(`Scanning ${selectedTicker} for Master Strategy Confluence...`);
-      const res = await triggerAutoTradingCycle(selectedTicker);
-      if (res && res.executed) {
+      const res = await triggerAutoTradingCycle(selectedTicker,market);
+      if (!res.success) {
+        showToast(res.reason || 'Scan unavailable; execution not confirmed');
+      } else if (res.executed) {
         const detail = res.tp_reason ? ` [${res.tp_reason}]` : "";
         showToast(`Master Strategy Triggered on ${res.symbol || selectedTicker}! TP: $${res.take_profit_price?.toFixed(2)}${detail} | SL: $${res.stop_loss_price?.toFixed(2)}`);
         await refreshAccountAndPositions();
@@ -693,9 +325,9 @@ export default function BybitTradingTerminal() {
         showToast(`Scan Finished for ${selectedTicker}`);
       }
       const st = await getAutoTradingStatus();
-      setAutoTrading(st);
+      applyAutoStatus(st);
     } catch {
-      showToast(`Scan finished for ${selectedTicker}`);
+      showToast(`Scan unavailable for ${selectedTicker}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -720,56 +352,12 @@ export default function BybitTradingTerminal() {
         )}
       </AnimatePresence>
 
-      {/* Top Ticker Selector Bar */}
-      <div className="p-2.5 rounded-lg bg-[#18191f] border border-[#26282f] flex flex-wrap items-center justify-between gap-3 font-mono">
-        <div className="flex items-center gap-1.5 overflow-x-auto">
-          {["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"].map((sym) => (
-            <button
-              key={sym}
-              onClick={() => {
-                setSelectedTicker(sym);
-                window.dispatchEvent(new CustomEvent("volhelix:ticker-change", { detail: sym }));
-              }}
-              className={`px-3 py-1 rounded transition-colors font-bold cursor-pointer ${
-                selectedTicker === sym
-                  ? "bg-[#f7a600] text-[#121214] shadow-[0_0_8px_rgba(247,166,0,0.3)]"
-                  : "text-[#878996] hover:bg-[#1c1d22] hover:text-[#f5f5f5]"
-              }`}
-            >
-              {sym}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-4 text-[#878996]">
-          <div>
-            <span className="text-[#5e6673] mr-1">Binance Equity:</span>
-            <span className="text-[#f5f5f5] font-bold">
-              ${account.equity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
-            </span>
-          </div>
-          <div>
-            <span className="text-[#5e6673] mr-1">Buying Power:</span>
-            <span className="text-[#f7a600] font-bold">
-              ${account.buying_power.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </span>
-          </div>
-          <div>
-            <span className="text-[#5e6673] mr-1">Mark:</span>
-            <span className="text-[#20b26c] font-bold">${midPrice.toFixed(2)}</span>
-          </div>
-          <div>
-            <span className="text-[#5e6673] mr-1">Spread:</span>
-            <span className="text-[#f5f5f5] font-bold">${quote.spread.toFixed(2)}</span>
-          </div>
-          <div className="hidden sm:block">
-            <span className="text-[#5e6673] mr-1">Paper Feed:</span>
-            <span className="text-[#20b26c] font-bold inline-flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c] animate-pulse" />
-              LIVE
-            </span>
-          </div>
-        </div>
+      <div className="trade-ticket flex flex-wrap justify-between gap-3 font-mono">
+        <strong>{market.toUpperCase()} · {selectedTicker}</strong>
+        <span>Equity: {account ? `$${formatMoney(account.equity)}` : 'Unavailable'}</span>
+        <span>Buying power: {account ? `$${formatMoney(account.buying_power)}` : 'Unavailable'}</span>
+        <span>Last: {formatMoney(midPrice)}</span>
+        {readError&&<p role="status" className="w-full text-[#f7a600]">{readError}</p>}
       </div>
 
       {/* Main 3-Column Bybit Pro Terminal */}
@@ -780,7 +368,7 @@ export default function BybitTradingTerminal() {
           <div className="rounded-lg bg-[#18191f] border border-[#26282f] flex flex-col overflow-hidden shadow-lg">
             {/* Chart Toolbar */}
             <div className="px-3 py-2 bg-[#1c1d22] border-b border-[#26282f] flex flex-wrap items-center justify-between gap-2 font-mono">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="font-bold text-[#f5f5f5]">{selectedTicker}</span>
                 <span className="text-[#878996]">|</span>
                 <div className="flex gap-1 text-[11px]">
@@ -834,10 +422,10 @@ export default function BybitTradingTerminal() {
 
               <div className="flex items-center gap-3 text-[11px] text-[#878996]">
                 <span className="px-1.5 py-0.5 rounded bg-[#26282f] text-[#f7a600] font-semibold">
-                  Binance Live Market
+                  Production candles
                 </span>
-                <span>Bid: <strong className="text-[#20b26c]">${quote.bid.toFixed(2)}</strong></span>
-                <span>Ask: <strong className="text-[#ef454a]">${quote.ask.toFixed(2)}</strong></span>
+                <span>Bid: <strong className="text-[#20b26c]">{marketState.depth?.bids[0] ? formatMoney(marketState.depth.bids[0][0]) : "Unavailable"}</strong></span>
+                <span>Ask: <strong className="text-[#ef454a]">{marketState.depth?.asks[0] ? formatMoney(marketState.depth.asks[0][0]) : "Unavailable"}</strong></span>
               </div>
             </div>
 
@@ -847,7 +435,7 @@ export default function BybitTradingTerminal() {
               data={bars}
               chartType={chartType}
               chartInterval={chartInterval}
-              currentPrice={quote.symbol === selectedTicker ? quote.last : undefined}
+              currentPrice={midPrice}
             />
 
             {/* Volume Sub-Chart */}
@@ -857,20 +445,20 @@ export default function BybitTradingTerminal() {
           {/* Bottom Trading Dock (Bybit Style) */}
           <div className="rounded-lg bg-[#18191f] border border-[#26282f] overflow-hidden shadow-lg">
             {/* Dock Tabs Header */}
-            <div className="px-3 bg-[#1c1d22] border-b border-[#26282f] flex items-center justify-between font-mono">
-              <div className="flex gap-2">
+            <div className="px-3 bg-[#1c1d22] border-b border-[#26282f] flex items-center justify-between font-mono overflow-x-auto">
+              <div className="flex gap-2 shrink-0">
                 {[
                   { key: "positions", label: `Positions (${positions.length})` },
                   { key: "pending", label: `Pending Orders (${pendingOrders.length})` },
                   { key: "history", label: `History & Ledger (${closedTrades.length})` },
                   { key: "orders", label: `Broker Orders (${orders.length})` },
                   { key: "debate", label: "Agent Debate Stream" },
-                  { key: "riskgate", label: "Deterministic Risk Gate (10/10)" },
+                  { key: "riskgate", label: "Server risk checks" },
                 ].map((t) => (
                   <button
                     key={t.key}
                     onClick={() => setActiveTab(t.key as DockTab)}
-                    className={`py-2.5 px-3 text-xs font-semibold relative transition-colors cursor-pointer ${
+                    className={`py-2.5 px-3 text-xs font-semibold relative transition-colors cursor-pointer whitespace-nowrap ${
                       activeTab === t.key
                         ? "text-[#f7a600]"
                         : "text-[#878996] hover:text-[#f5f5f5]"
@@ -890,7 +478,7 @@ export default function BybitTradingTerminal() {
               <button
                 onClick={handleSyncExchange}
                 disabled={isSyncing}
-                className="flex items-center gap-1.5 text-[11px] text-[#f7a600] hover:underline cursor-pointer font-mono disabled:opacity-50"
+                className="flex items-center gap-1.5 text-[11px] text-[#f7a600] hover:underline cursor-pointer font-mono disabled:opacity-50 shrink-0"
                 title="Synchronize Live Paper Account"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
@@ -907,9 +495,9 @@ export default function BybitTradingTerminal() {
                       <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-[#1c1d22] border border-[#26282f] flex items-center justify-center text-[#f7a600]">
                         <Layers className="w-6 h-6" />
                       </div>
-                      <p className="font-bold text-sm text-[#f5f5f5]">No Active Open Positions</p>
+                      <p className="font-bold text-sm text-[#f5f5f5]">No Active Positions</p>
                       <p className="text-xs mt-1 text-[#878996] max-w-md mx-auto">
-                        Execute a <strong className="text-[#20b26c]">Market Order (Preferred)</strong> for instant placement at current price, or fill a resting Limit order from the Pending Tab.
+                        Confirmed exchange exposure appears here. Preview an order before submitting to testnet.
                       </p>
                       {pendingOrders.length > 0 && (
                         <button
@@ -938,10 +526,10 @@ export default function BybitTradingTerminal() {
                         </thead>
                         <tbody>
                           {positions.map((pos) => (
-                            <tr key={pos.symbol} className="border-b border-[#26282f]/50 hover:bg-[#1c1d22]/50">
+                            <tr key={pos.trade_id || pos.id || pos.symbol} className="border-b border-[#26282f]/50 hover:bg-[#1c1d22]/50">
                               <td className="py-2.5 px-2 font-bold text-[#f5f5f5] flex items-center gap-1.5">
                                 <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c] animate-pulse" />
-                                {pos.symbol}
+                                {pos.symbol} {pos.stale ? "STALE" : ""}
                               </td>
                               <td className="py-2.5 px-2">
                                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
@@ -952,16 +540,16 @@ export default function BybitTradingTerminal() {
                               </td>
                               <td className="py-2.5 px-2 text-right text-[#f5f5f5] font-semibold">{pos.qty}</td>
                               <td className="py-2.5 px-2 text-right text-[#878996]">${pos.avg_entry_price.toFixed(2)}</td>
-                              <td className="py-2.5 px-2 text-right text-[#f5f5f5] font-bold">${pos.current_price.toFixed(2)}</td>
-                              <td className="py-2.5 px-2 text-right text-[#878996]">${pos.market_value.toFixed(2)}</td>
+                              <td className="py-2.5 px-2 text-right text-[#f5f5f5] font-bold">${formatMoney(pos.current_price)}</td>
+                              <td className="py-2.5 px-2 text-right text-[#878996]">${formatMoney(pos.market_value)}</td>
                               <td className={`py-2.5 px-2 text-right font-bold ${
                                 pos.unrealized_pl >= 0 ? "text-[#20b26c]" : "text-[#ef454a]"
                               }`}>
-                                {pos.unrealized_pl >= 0 ? "+" : ""}${pos.unrealized_pl.toFixed(2)} ({pos.unrealized_plpc.toFixed(2)}%)
+                                {pos.unrealized_pl >= 0 ? "+" : ""}${formatMoney(pos.unrealized_pl)} ({formatMoney(pos.unrealized_plpc)}%)
                               </td>
                               <td className="py-2.5 px-2 text-right">
                                 <button
-                                  onClick={() => handleClosePosition(pos.symbol)}
+                                  onClick={() => setClosing(pos)}
                                   className="px-2.5 py-1 rounded bg-[#ef454a]/15 hover:bg-[#ef454a]/25 text-[#ef454a] border border-[#ef454a]/30 text-[10px] font-bold transition-all cursor-pointer"
                                   title="Close position and record to History & Ledger"
                                 >
@@ -983,7 +571,7 @@ export default function BybitTradingTerminal() {
                   {pendingOrders.length === 0 ? (
                     <div className="text-center py-10 text-[#878996]">
                       <p className="font-semibold text-[#f5f5f5]">No Pending Orders on Broker</p>
-                      <p className="text-[11px] mt-1">All orders have been filled or closed.</p>
+                      <p className="text-[11px] mt-1">No pending orders recorded for this market.</p>
                     </div>
                   ) : (
                     <div>
@@ -991,7 +579,7 @@ export default function BybitTradingTerminal() {
                         <div className="flex items-center gap-2 text-xs text-[#878996]">
                           <span className="w-2 h-2 rounded-full bg-[#f7a600] animate-pulse" />
                           <span>
-                            {pendingOrders.length} Order{pendingOrders.length > 1 ? "s" : ""} Resting / Queued on Binance Spot Testnet
+                            {pendingOrders.length} Order{pendingOrders.length > 1 ? "s" : ""} Resting / Queued on {market} Testnet
                           </span>
                         </div>
                         <button
@@ -1065,13 +653,13 @@ export default function BybitTradingTerminal() {
                                   <td className="py-2 px-2 text-right">
                                     <div className="flex items-center justify-end gap-1.5">
                                       <button
-                                        onClick={() => handleFillPending(ord.id, ord.limit_price || quote.last)}
+                                        onClick={() => handleFillPending(ord.id)}
                                         disabled={isFillingOrder === ord.id}
                                         className="px-2 py-0.5 rounded bg-[#20b26c]/20 hover:bg-[#20b26c]/30 text-[#20b26c] border border-[#20b26c]/40 text-[10px] font-bold transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1"
-                                        title="Fill pending order at limit price and move to Positions Tab"
+                                        title="Reconcile the actual exchange order state"
                                       >
                                         <Zap className={`w-2.5 h-2.5 ${isFillingOrder === ord.id ? "animate-spin" : ""}`} />
-                                        <span>{isFillingOrder === ord.id ? "Filling..." : "Fill Now"}</span>
+                                        <span>{isFillingOrder === ord.id ? "Filling..." : "Reconcile"}</span>
                                       </button>
                                       <button
                                         onClick={() => handleCancelOrder(ord.id)}
@@ -1173,30 +761,7 @@ export default function BybitTradingTerminal() {
                 </div>
               )}
 
-              {activeTab === "riskgate" && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {[
-                    { rule: "Capital Allocation <= 2.5% NAV", val: "2.1% ($2,100 / $100k)", pass: true },
-                    { rule: "Session Drawdown <= 3.0%", val: "0.00% Current", pass: true },
-                    { rule: "DTE >= 3 Days", val: "21 DTE Selected", pass: true },
-                    { rule: "Spread Width <= $25.00", val: "$5.00 Width", pass: true },
-                    { rule: "Open Positions <= 5", val: "2 Active", pass: true },
-                    { rule: "Option Open Interest >= 100", val: "1,420 Contracts", pass: true },
-                    { rule: "Bid-Ask Spread <= 20%", val: "4.2% Mid-spread", pass: true },
-                    { rule: "Portfolio Delta [-0.50, +0.50]", val: "+0.14 Net Delta", pass: true },
-                  ].map((r, i) => (
-                    <div key={i} className="p-2 rounded bg-[#1c1d22] border border-[#26282f] flex items-center justify-between">
-                      <div>
-                        <div className="text-[#f5f5f5] font-semibold">{r.rule}</div>
-                        <div className="text-[10px] text-[#878996]">{r.val}</div>
-                      </div>
-                      <span className="px-1.5 py-0.5 rounded bg-[#20b26c]/15 text-[#20b26c] text-[10px] font-bold">
-                        PASS
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {activeTab === "riskgate" && <p>Risk checks are computed by the server for each order. Open the order preview to inspect the verdict, coverage and individual checks. A preview never guarantees execution.</p>}
 
               {activeTab === "history" && (
                 <div className="space-y-4">
@@ -1274,15 +839,15 @@ export default function BybitTradingTerminal() {
                         </thead>
                         <tbody>
                           {closedTrades.map((t, idx) => {
-                            const pnl = t.realized_pnl ?? 0;
-                            const isWin = pnl >= 0;
+                            const pnl = t.realized_pnl;
+                            const isWin = pnl != null && pnl >= 0;
                             const tradeId = t.trade_id || t.id || `TRD-REC-${idx}`;
-                            const symbol = t.symbol || t.proposal?.underlying || "BTCUSDT";
+                            const symbol = t.symbol || t.proposal?.underlying || "Unavailable";
                             const strategy = t.strategy || t.proposal?.strategy_type || MASTER_STRATEGY;
-                            const side = t.side || t.proposal?.side || "BUY";
-                            const qty = t.qty || t.proposal?.qty || 1;
-                            const entryPrice = t.entry_price ?? t.proposal?.net_premium ?? t.proposal?.limit_price ?? 0;
-                            const exitPrice = t.exit_price ?? t.current_price ?? entryPrice;
+                            const side = t.side || t.proposal?.side || "—";
+                            const qty = t.qty ?? t.proposal?.qty ?? "—";
+                            const entryPrice = t.entry_price;
+                            const exitPrice = t.exit_price;
                             const timeDisplay = t.exit_time ? new Date(t.exit_time).toLocaleTimeString() : (t.entry_time ? new Date(t.entry_time).toLocaleTimeString() : "-");
                             return (
                               <tr key={tradeId} className="border-b border-[#26282f]/50 hover:bg-[#1c1d22]/50">
@@ -1300,13 +865,13 @@ export default function BybitTradingTerminal() {
                                 </td>
                                 <td className="py-2 px-2 text-right text-[#f5f5f5]">{qty}</td>
                                 <td className="py-2 px-2 text-right text-[#878996]">
-                                  ${entryPrice.toFixed(2)}
+                                  {formatMoney(entryPrice)}
                                 </td>
                                 <td className="py-2 px-2 text-right text-[#f5f5f5] font-semibold">
-                                  ${exitPrice.toFixed(2)}
+                                  {formatMoney(exitPrice)}
                                 </td>
                                 <td className={`py-2 px-2 text-right font-bold ${isWin ? "text-[#20b26c]" : "text-[#ef454a]"}`}>
-                                  {isWin ? "+" : ""}${pnl.toFixed(2)}
+                                  {pnl==null?'—':`${isWin?'+':''}$${formatMoney(pnl)}`}
                                 </td>
                                 <td className="py-2 px-2 text-right text-[#5e6673] text-[11px]">
                                   {timeDisplay}
@@ -1333,372 +898,9 @@ export default function BybitTradingTerminal() {
 
         {/* Right Column (4 cols): Order Book + Order Execution Panel */}
         <div className="lg:col-span-4 space-y-3">
-          {/* Bybit Order Book */}
-          <OrderBookWidget
-            quote={quote}
-            midPrice={midPrice}
-            tickStep={tickStep}
-            selectedTicker={selectedTicker}
-          />
-
-          {/* Real Binance Order Execution & Bot Panel */}
-          <div className="rounded-lg bg-[#18191f] border border-[#26282f] p-3 font-mono space-y-3 shadow-lg">
-            {/* Margin Pill & Market Clock Badge */}
-            <div className="space-y-2 pb-2 border-b border-[#26282f]">
-              <div className="flex items-center justify-between">
-                <div className="flex gap-1 text-[11px]">
-                  <span className="px-2 py-0.5 rounded bg-[#26282f] text-[#f7a600] font-bold">
-                    Spot Wallet
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-[#1c1d22] text-[#878996]">
-                    Binance Testnet
-                  </span>
-                </div>
-                <span className="text-[10px] text-[#20b26c] font-semibold">24/7 Risk Gate Armed</span>
-              </div>
-
-              {/* Session Status — Binance Spot trades 24/7, execution is never gated */}
-              <div className="flex items-center justify-between p-2.5 rounded bg-[#121214] border border-[#26282f] text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#20b26c] animate-pulse" />
-                  <div>
-                    <span className="font-bold text-[11px] block leading-tight text-[#20b26c]">
-                      24/7 CONTINUOUS SESSION
-                    </span>
-                    <span className="text-[9px] text-[#878996] block mt-0.5">
-                      Continuous crypto liquidity • Execution always enabled
-                      {marketClock?.current_time_et ? ` • ${marketClock.current_time_et}` : ""}
-                    </span>
-                  </div>
-                </div>
-                <span className="px-2 py-1 rounded text-[10px] font-bold bg-[#20b26c]/15 text-[#20b26c] border border-[#20b26c]/30">
-                  OPEN
-                </span>
-              </div>
-            </div>
-
-            {/* Trade Mode Selector */}
-            <div className="grid grid-cols-2 gap-1 p-1 bg-[#121214] rounded border border-[#26282f]">
-              <button
-                onClick={() => setTradeMode("BOT")}
-                className={`py-1.5 rounded text-center font-bold cursor-pointer transition-colors ${
-                  tradeMode === "BOT"
-                    ? "bg-[#f7a600] text-[#121214] shadow-[0_0_8px_rgba(247,166,0,0.3)]"
-                    : "text-[#878996] hover:text-[#f5f5f5]"
-                }`}
-              >
-                Bot Swarm (AI)
-              </button>
-              <button
-                onClick={() => setTradeMode("MANUAL")}
-                className={`py-1.5 rounded text-center font-bold cursor-pointer transition-colors ${
-                  tradeMode === "MANUAL"
-                    ? "bg-[#f7a600] text-[#121214] shadow-[0_0_8px_rgba(247,166,0,0.3)]"
-                    : "text-[#878996] hover:text-[#f5f5f5]"
-                }`}
-              >
-                Direct Manual
-              </button>
-            </div>
-
-            {/* Content Based on Trade Mode */}
-            {tradeMode === "MANUAL" ? (
-              <div className="space-y-3">
-                {/* Order Type: Market (Preferred) vs Limit */}
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[10px] text-[#878996]">
-                    <span>Execution Order Type</span>
-                    <span className="text-[#20b26c] font-bold">Market Order Preferred</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1 p-1 bg-[#121214] rounded border border-[#26282f]">
-                    <button
-                      type="button"
-                      onClick={() => setOrderType("market")}
-                      className={`py-1.5 px-2 rounded text-center text-xs font-bold transition-all cursor-pointer ${
-                        orderType === "market"
-                          ? "bg-[#20b26c] text-[#121214] shadow-[0_0_8px_rgba(32,178,108,0.3)]"
-                          : "text-[#878996] hover:text-[#f5f5f5]"
-                      }`}
-                    >
-                      Market (Instant)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOrderType("limit")}
-                      className={`py-1.5 px-2 rounded text-center text-xs font-bold transition-all cursor-pointer ${
-                        orderType === "limit"
-                          ? "bg-[#f7a600] text-[#121214] shadow-[0_0_8px_rgba(247,166,0,0.3)]"
-                          : "text-[#878996] hover:text-[#f5f5f5]"
-                      }`}
-                    >
-                      Limit (Pending)
-                    </button>
-                  </div>
-                </div>
-
-                {/* Buy / Sell Side Selector */}
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setOrderSide("BUY")}
-                    className={`py-1.5 rounded font-bold cursor-pointer ${
-                      orderSide === "BUY"
-                        ? "bg-[#20b26c] text-[#121214]"
-                        : "bg-[#1c1d22] text-[#878996] hover:text-[#f5f5f5]"
-                    }`}
-                  >
-                    Buy / Long
-                  </button>
-                  <button
-                    onClick={() => setOrderSide("SELL")}
-                    className={`py-1.5 rounded font-bold cursor-pointer ${
-                      orderSide === "SELL"
-                        ? "bg-[#ef454a] text-[#f5f5f5]"
-                        : "bg-[#1c1d22] text-[#878996] hover:text-[#f5f5f5]"
-                    }`}
-                  >
-                    Sell / Short
-                  </button>
-                </div>
-
-                {/* Limit Price Input if Limit Order selected */}
-                {orderType === "limit" ? (
-                  <div className="space-y-1.5 p-2 rounded bg-[#121214] border border-[#26282f]">
-                    <div className="flex justify-between text-[10px] text-[#878996]">
-                      <span>Limit Price ($)</span>
-                      <span className="text-[#f7a600] font-bold">Mark: ${midPrice.toFixed(2)}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setLimitPrice((p) => Math.max(0.01, +(p - tickStep).toFixed(2)))}
-                        className="w-8 h-8 rounded bg-[#1c1d22] border border-[#26282f] text-[#f5f5f5] font-bold text-sm hover:bg-[#26282f] flex items-center justify-center cursor-pointer"
-                      >
-                        -
-                      </button>
-                      <input
-                        type="number"
-                        step={tickStep}
-                        value={limitPrice}
-                        onChange={(e) => setLimitPrice(Number(e.target.value))}
-                        className="flex-1 px-2.5 py-1.5 rounded bg-[#18191f] border border-[#26282f] text-[#f5f5f5] text-xs font-bold text-center outline-none focus:border-[#f7a600]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setLimitPrice((p) => +(p + tickStep).toFixed(2))}
-                        className="w-8 h-8 rounded bg-[#1c1d22] border border-[#26282f] text-[#f5f5f5] font-bold text-sm hover:bg-[#26282f] flex items-center justify-center cursor-pointer"
-                      >
-                        +
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-3 gap-1 text-[10px]">
-                      <button
-                        type="button"
-                        onClick={() => setLimitPrice(quote.bid || midPrice)}
-                        className="p-1 rounded bg-[#18191f] border border-[#26282f] text-[#20b26c] font-bold hover:border-[#20b26c] cursor-pointer"
-                      >
-                        Bid ${quote.bid?.toFixed(2)}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setLimitPrice(midPrice)}
-                        className="p-1 rounded bg-[#18191f] border border-[#26282f] text-[#f7a600] font-bold hover:border-[#f7a600] cursor-pointer"
-                      >
-                        Mid ${midPrice.toFixed(2)}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setLimitPrice(quote.ask || midPrice)}
-                        className="p-1 rounded bg-[#18191f] border border-[#26282f] text-[#ef454a] font-bold hover:border-[#ef454a] cursor-pointer"
-                      >
-                        Ask ${quote.ask?.toFixed(2)}
-                      </button>
-                    </div>
-                    <div className="text-[9px] text-[#878996] pt-0.5">
-                      Resting order will queue in <strong className="text-[#f7a600]">Pending Tab</strong> until market reaches price.
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-2 rounded bg-[#20b26c]/10 border border-[#20b26c]/30 text-[11px] space-y-1">
-                    <div className="flex justify-between font-bold">
-                      <span className="text-[#878996]">Market Fill Price:</span>
-                      <span className="text-[#20b26c]">${midPrice.toFixed(2)}</span>
-                    </div>
-                    <div className="text-[10px] text-[#878996]">
-                      Immediate execution at current market price &rarr; moves straight into <strong className="text-[#f5f5f5]">Positions Tab</strong>.
-                    </div>
-                  </div>
-                )}
-
-                {/* Quantity Input */}
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[10px] text-[#878996]">
-                    <span>Order Quantity ({selectedTicker.replace("USDT", "")})</span>
-                    <span>Min: {selectedTicker.startsWith("BTC") ? "0.0001" : (selectedTicker.startsWith("ETH") ? "0.001" : "0.01")}</span>
-                  </div>
-                  <input
-                    type="number"
-                    step={selectedTicker.startsWith("BTC") ? "0.0001" : (selectedTicker.startsWith("ETH") ? "0.001" : "0.01")}
-                    min="0.0001"
-                    max="10000"
-                    value={orderQty}
-                    onChange={(e) => setOrderQty(Math.max(0.0001, Number(e.target.value)))}
-                    className="w-full px-2.5 py-1.5 rounded bg-[#121214] border border-[#26282f] text-[#f5f5f5] text-xs font-bold outline-none focus:border-[#f7a600]"
-                  />
-                </div>
-
-                {/* Estimated Value */}
-                <div className="p-2 rounded bg-[#121214] space-y-1 text-[11px]">
-                  <div className="flex justify-between">
-                    <span className="text-[#878996]">Order Symbol:</span>
-                    <span className="text-[#f5f5f5] font-bold">{selectedTicker}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#878996]">Estimated Total:</span>
-                    <span className="text-[#f7a600] font-bold">
-                      ${(orderQty * (orderType === "limit" ? limitPrice : midPrice)).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Submit Manual Order */}
-                <button
-                  onClick={handleManualOrder}
-                  disabled={isSubmitting}
-                  className={`w-full py-2.5 rounded font-bold text-xs cursor-pointer transition-all shadow-lg active:scale-95 ${
-                    orderSide === "BUY"
-                      ? "bg-[#20b26c] hover:bg-[#28c97b] text-[#121214]"
-                      : "bg-[#ef454a] hover:bg-[#f35b5f] text-[#f5f5f5]"
-                  } disabled:opacity-50`}
-                >
-                  {isSubmitting
-                    ? "Submitting..."
-                    : orderType === "market"
-                    ? `Execute Market ${orderSide} @ $${midPrice.toFixed(2)} (Instant Position)`
-                    : `Submit Limit ${orderSide} @ $${limitPrice.toFixed(2)} (To Pending Tab)`}
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {/* Active Strategy — VolHelix runs exactly one */}
-                <div className="space-y-0.5">
-                  <label className="text-[#878996] text-[10px] uppercase font-semibold">Active Strategy</label>
-                  <div
-                    className="w-full px-2 py-1.5 rounded bg-[#1c1a14] border border-[#f7a600]/40 text-[#f7a600] text-xs font-semibold flex items-center justify-between"
-                    title="VolHelix executes a single strategy: institutional order block, fair value gap and gamma wall confluence"
-                  >
-                    <span>★ VolHelix Master Flow &amp; Gamma</span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#f7a600]/20 font-mono">OB + FVG + GEX</span>
-                  </div>
-                </div>
-
-                {/* Institutional Master Flow & Gamma Profile Confluence Card */}
-                <div className="p-2 rounded bg-[#1c1a14] border border-[#f7a600]/40 space-y-1 text-[11px]">
-                    <div className="flex items-center justify-between font-bold text-[#f7a600] text-[10px]">
-                      <span className="flex items-center gap-1.5 uppercase">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#f7a600] animate-ping" />
-                        Master Strategy Confluence
-                      </span>
-                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#f7a600]/20 text-[#f7a600] font-mono">
-                        {orderFlow?.gamma_profile?.regime || "POSITIVE_GAMMA"}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-1 pt-0.5 text-[9px]">
-                      <div className="p-1 rounded bg-[#121214] border border-[#26282f]">
-                        <div className="text-[#878996]">Order Block</div>
-                        <div className="font-bold text-[#20b26c] mt-0.5">
-                          {orderFlow?.order_flow?.nearest_bullish_ob ? `$${orderFlow.order_flow.nearest_bullish_ob.low.toFixed(0)}` : "OB Support"}
-                        </div>
-                      </div>
-                      <div className="p-1 rounded bg-[#121214] border border-[#26282f]">
-                        <div className="text-[#878996]">Fair Value Gap</div>
-                        <div className="font-bold text-[#20b26c] mt-0.5">
-                          {orderFlow?.order_flow?.unfilled_fvgs && orderFlow.order_flow.unfilled_fvgs.length > 0 ? "BISI Active" : "Clean Flow"}
-                        </div>
-                      </div>
-                      <div className="p-1 rounded bg-[#121214] border border-[#26282f]">
-                        <div className="text-[#878996]">Gamma Put Wall</div>
-                        <div className="font-bold text-[#f7a600] mt-0.5">
-                          {orderFlow?.gamma_profile?.put_wall ? `$${orderFlow.gamma_profile.put_wall.toFixed(0)}` : "Put Wall Base"}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                {/* Kelly Fraction Sizing Slider */}
-                <div className="space-y-0.5">
-                  <div className="flex justify-between text-[10px]">
-                    <span className="text-[#878996]">Kelly Risk Allocation</span>
-                    <span className="text-[#f7a600] font-bold">{kellyPercent}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="20"
-                    max="100"
-                    step="10"
-                    value={kellyPercent}
-                    onChange={(e) => setKellyPercent(Number(e.target.value))}
-                    className="w-full h-1 bg-[#26282f] rounded-lg accent-[#f7a600] cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[9px] text-[#5e6673]">
-                    <span>20% (Conservative)</span>
-                    <span>100% (Max 2.5% NAV)</span>
-                  </div>
-                </div>
-
-                {/* Sizing & EV Summary */}
-                <div className="p-1.5 rounded bg-[#121214] space-y-0.5 text-[10px]">
-                  <div className="flex justify-between">
-                    <span className="text-[#878996]">Target Credit:</span>
-                    <span className="text-[#20b26c] font-bold">+$0.48 / share</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#878996]">Max Capital at Risk:</span>
-                    <span className="text-[#ef454a] font-bold">2.1% NAV ($2,100)</span>
-                  </div>
-                  <div className="flex justify-between pt-0.5 border-t border-[#26282f]">
-                    <span className="text-[#878996]">Risk Gate:</span>
-                    <span className="text-[#20b26c] font-bold">10/10 Verified</span>
-                  </div>
-                </div>
-
-                {/* Auto Take-Profit & Stop-Loss Bracket Protection */}
-                <div className="p-2 rounded bg-[#121214] border border-[#26282f] space-y-1 text-[11px]">
-                  <div className="flex items-center justify-between pb-1 border-b border-[#26282f]/60">
-                    <span className="text-[#878996] font-semibold text-[10px] uppercase flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#20b26c] animate-pulse" />
-                      Auto Take-Profit & Stop-Loss
-                    </span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#20b26c]/15 text-[#20b26c] font-bold">
-                      Bracket OCO Armed
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <div className="p-1.5 rounded bg-[#18191f] border border-[#26282f]/80">
-                      <div className="flex justify-between text-[9px] text-[#878996]">
-                        <span>Take Profit (TP)</span>
-                        <span className="text-[#20b26c] font-bold">+{tpSlConfig.tpPct.toFixed(1)}%</span>
-                      </div>
-                      <div className="text-[#20b26c] font-bold text-xs mt-0.5">
-                        ${tpSlConfig.tpPrice.toFixed(2)}
-                      </div>
-                      <div className="text-[8px] text-[#5e6673]">Auto Limit Exit</div>
-                    </div>
-
-                    <div className="p-1.5 rounded bg-[#18191f] border border-[#26282f]/80">
-                      <div className="flex justify-between text-[9px] text-[#848e9c]">
-                        <span>Stop Loss (SL)</span>
-                        <span className="text-[#ef454a] font-bold">-{tpSlConfig.slPct.toFixed(1)}%</span>
-                      </div>
-                      <div className="text-[#ef454a] font-bold text-xs mt-0.5">
-                        ${tpSlConfig.slPrice.toFixed(2)}
-                      </div>
-                      <div className="text-[8px] text-[#5e6673]">Auto Stop Safeguard</div>
-                    </div>
-                  </div>
-                </div>
-
+          <MarketDepth />
+          {closing ? <OrderTicket key={`close:${closing.trade_id||closing.id}`} close={closing} onDismiss={()=>setClosing(null)} onUpdated={()=>{void refreshAccountAndPositions();marketState.refresh();}} /> : <OrderTicket key={`${market}:${selectedTicker}`} onUpdated={()=>{void refreshAccountAndPositions();marketState.refresh();}} />}
+          <div className="trade-ticket">
                 {/* 24/7 Autonomous Auto-Trader Loop Control & Strict Master Confluence Gate */}
                 <div className="p-2.5 rounded-xl bg-[#141518] border border-[#2b313a] space-y-2">
                   {/* Master Strategy Auto-Pilot Toggle Header */}
@@ -1707,11 +909,11 @@ export default function BybitTradingTerminal() {
                       <div className="flex items-center gap-1.5">
                         <span className={`w-2 h-2 rounded-full ${autoTrading?.is_running ? "bg-[#0ecb81] animate-ping" : "bg-[#848e9c]"}`} />
                         <span className="text-xs font-black tracking-wide text-[#eaecef]">
-                          AUTO-PILOT MODE
+                          SPOT AUTO-PILOT MODE
                         </span>
                       </div>
                       <div className="text-[9px] text-[#848e9c] mt-0.5">
-                        Strict Master Strategy Confluence Gate
+                        Spot only · Master Strategy Confluence Gate {autoTradingUnavailable ? "· Status unavailable" : ""}
                       </div>
                     </div>
 
@@ -1721,7 +923,7 @@ export default function BybitTradingTerminal() {
                       role="switch"
                       aria-checked={autoTrading?.is_running || false}
                       onClick={handleToggleAutoTrading}
-                      disabled={isTogglingAuto}
+                      disabled={isTogglingAuto || (!autoTrading?.is_running&&(market==='futures'||autoTradingUnavailable))}
                       className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                         autoTrading?.is_running ? "bg-[#0ecb81]" : "bg-[#2b313a]"
                       }`}
@@ -1744,11 +946,11 @@ export default function BybitTradingTerminal() {
                         <strong className="text-[#eaecef]">TP / SL Guardian:</strong>
                       </span>
                       <span className="px-1.5 py-0.5 rounded bg-[#0ecb81]/15 text-[#0ecb81] font-bold text-[8px]">
-                        24/7 ACTIVE (ALWAYS ON)
+                        {autoTrading?.guardian_active ? "ACTIVE" : "UNAVAILABLE / INACTIVE"}
                       </span>
                     </div>
                     <div className="text-[8px] text-[#848e9c] leading-tight">
-                      All open positions are protected 24/7 and will automatically close at their dynamic TP and SL, even when Auto-Pilot is paused.
+                      Application guardian requires the backend process. Check actual status above.
                     </div>
                   </div>
 
@@ -1766,7 +968,7 @@ export default function BybitTradingTerminal() {
                     </div>
                     <div className="flex items-center justify-between text-[#848e9c]">
                       <span>Auto-Trades Executed:</span>
-                      <strong className="text-[#0ecb81] font-bold text-[10px]">{autoTrading?.total_automated_trades || 0}</strong>
+                      <strong className="text-[#0ecb81] font-bold text-[10px]">{autoTrading?.total_automated_trades ?? "—"}</strong>
                     </div>
                   </div>
 
@@ -1775,11 +977,11 @@ export default function BybitTradingTerminal() {
                     <div className="flex items-center justify-between text-[9px] text-[#848e9c]">
                       <span>Live Watchlist Radar:</span>
                       <span className="text-[8px] font-mono text-[#5e6673]">
-                        {autoTrading?.is_running ? "Auto-Scanning every 30s" : "Standby"}
+                        {autoTradingUnavailable ? "Status unavailable" : autoTrading?.is_running ? "Scanning Spot watchlist" : "Standby"}
                       </span>
                     </div>
                     <div className="grid grid-cols-5 gap-1">
-                      {["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"].map((ticker) => {
+                      {(autoTrading?.watched_symbols || []).map((ticker) => {
                         const diag = autoTrading?.scanner_diagnostics?.[ticker];
                         const score = diag ? Math.round(diag.score * 100) : null;
                         const isValid = diag?.is_valid || false;
@@ -1787,7 +989,7 @@ export default function BybitTradingTerminal() {
                         return (
                           <div
                             key={ticker}
-                            onClick={() => setSelectedTicker(ticker)}
+                            onClick={() => marketState.select("spot",ticker)}
                             className={`p-1 rounded text-center border text-[9px] cursor-pointer transition-all ${
                               isValid
                                 ? "bg-[#0ecb81]/20 border-[#0ecb81] text-[#0ecb81] font-black"
@@ -1813,7 +1015,7 @@ export default function BybitTradingTerminal() {
                   <div className="grid grid-cols-2 gap-1.5 pt-0.5">
                     <button
                       onClick={handleToggleAutoTrading}
-                      disabled={isTogglingAuto}
+                      disabled={isTogglingAuto || (!autoTrading?.is_running&&(market==='futures'||autoTradingUnavailable))}
                       className={`py-2 px-2 rounded-lg font-bold text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                         autoTrading?.is_running
                           ? "bg-[#f6465d]/20 hover:bg-[#f6465d]/30 text-[#f6465d] border border-[#f6465d]/40"
@@ -1829,7 +1031,7 @@ export default function BybitTradingTerminal() {
 
                     <button
                       onClick={handleTriggerCycleNow}
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || market==='futures'}
                       className="py-2 px-2 rounded-lg bg-[#1e2329] hover:bg-[#2b313a] border border-[#2b313a] text-[#eaecef] font-bold text-[11px] transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
                       title={`Evaluates ONLY the active chart symbol (${selectedTicker}) against Master Strategy confluence`}
                     >
@@ -1839,22 +1041,12 @@ export default function BybitTradingTerminal() {
                           <span>Scanning {selectedTicker}...</span>
                         </>
                       ) : (
-                        `Scan & Trade (${selectedTicker})`
+                        market==='spot' ? `Scan & Trade (${selectedTicker})` : "Spot scanner only"
                       )}
                     </button>
                   </div>
                 </div>
 
-                {/* Trigger Bot Order to Binance */}
-                <button
-                  onClick={handleBotTrade}
-                  disabled={isSubmitting}
-                  className="w-full py-2 rounded bg-[#f7a600] hover:bg-[#ffb11a] text-[#121214] font-extrabold text-xs cursor-pointer transition-all shadow-[0_0_10px_rgba(247,166,0,0.3)] disabled:opacity-50 active:scale-95"
-                >
-                  {isSubmitting ? "Executing Swarm..." : "Execute Master Strategy Trade (Binance)"}
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </div>

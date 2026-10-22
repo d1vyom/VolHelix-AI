@@ -6,7 +6,8 @@ import { usePathname } from "next/navigation";
 import { BarChart3, FileText, Shield, LayoutDashboard, ChevronLeft, ChevronRight, Activity, Cpu } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect } from "react";
-import { getExchangeAccount } from "../lib/api";
+import { useMarket } from "./MarketProvider";
+import { formatMoney } from "@/lib/market";
 
 const navItems = [
   { href: "/", label: "Trading Terminal", icon: LayoutDashboard, key: "dashboard" },
@@ -25,21 +26,8 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const [internalCollapsed, setInternalCollapsed] = useState(collapsed);
   const isCollapsed = onToggle !== undefined ? collapsed : internalCollapsed;
-  const [utaBalance, setUtaBalance] = useState<string>("$10.00K");
-
-  useEffect(() => {
-    let isMounted = true;
-    getExchangeAccount()
-      .then((acc) => {
-        if (!isMounted) return;
-        const val = acc.buying_power || acc.portfolio_value || 10000;
-        setUtaBalance(`$${(val / 1000).toFixed(2)}K`);
-      })
-      .catch(() => {});
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  const {account,market}=useMarket();
+  const utaBalance = account ? `$${formatMoney(account.buying_power)}` : 'Unavailable';
 
   useEffect(() => {
     if (pathname?.startsWith("/terminal") && !internalCollapsed) {
@@ -62,7 +50,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       initial={{ width: isCollapsed ? 68 : 240 }}
       animate={{ width: isCollapsed ? 68 : 240 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
-      className="fixed left-0 top-0 z-40 h-screen bg-[#121214] border-r border-[#26282f] flex flex-col overflow-hidden select-none"
+      className="workspace-sidebar fixed left-0 top-0 z-40 h-screen bg-[#121214] border-r border-[#26282f] flex flex-col overflow-hidden select-none"
     >
       {/* Brand Header */}
       <div className="flex items-center justify-between h-14 px-3 border-b border-[#26282f]">
@@ -148,7 +136,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
             <div className="flex items-center justify-between text-[#878996]">
               <span className="flex items-center gap-1">
                 <Activity className="w-3 h-3 text-[#f7a600]" />
-                Binance Spot
+                Binance {market}
               </span>
               <span className="text-[#f7a600] font-bold">{utaBalance}</span>
             </div>
@@ -156,10 +144,10 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
             <div className="space-y-1">
               <div className="flex justify-between text-[10px] text-[#5e6673]">
                 <span>Risk Level (DD)</span>
-                <span>0.0% / 5.0%</span>
+                <span>See order preview</span>
               </div>
               <div className="w-full h-1 bg-[#121214] rounded-full overflow-hidden">
-                <div className="h-full bg-[#20b26c] rounded-full w-[4%]" />
+                <div className="h-full bg-[#26282f] rounded-full" />
               </div>
             </div>
 
@@ -170,7 +158,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
             >
               <span className="text-[#878996] hover:text-[#f5f5f5]">Deterministic Gate</span>
               <span className="px-1 py-0.2 rounded bg-[#20b26c]/15 text-[#20b26c] font-bold">
-                10/10 ARMED
+                PREVIEW REQUIRED
               </span>
             </Link>
           </div>
@@ -178,7 +166,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
           <Link
             href="/audit"
             className="flex justify-center p-2 rounded bg-[#18191f] border border-[#26282f] hover:border-[#f7a600]/50 transition-colors"
-            title="Deterministic Gate: 10/10 Armed (Click for Audit)"
+            title="View server risk checks in order preview"
           >
             <Cpu className="w-4 h-4 text-[#f7a600]" />
           </Link>

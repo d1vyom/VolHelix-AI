@@ -96,7 +96,7 @@ export const CandlestickChart = memo(function CandlestickChart({
 
   // Live price to use for permanent line
   const activeLivePrice = useMemo(() => {
-    if (!effectiveBars || effectiveBars.length === 0) return currentPrice || 76500.0;
+    if (!effectiveBars || effectiveBars.length === 0) return currentPrice ?? Number.NaN;
     const lastClose = effectiveBars[effectiveBars.length - 1].close;
     if (currentPrice && currentPrice > 0) {
       const deviation = Math.abs(currentPrice - lastClose) / (lastClose || 1);
@@ -211,7 +211,7 @@ export const CandlestickChart = memo(function CandlestickChart({
   if (!data || data.length === 0) {
     return (
       <div className="h-68 w-full flex items-center justify-center text-[#878996] font-mono text-xs">
-        Loading real-time market data...
+        Candles unavailable / awaiting production data
       </div>
     );
   }

@@ -4,9 +4,12 @@ import {
   FootprintBar, TapeEntry, DomAnalytics, HeatmapFrame,
   VolumeProfileSnapshot, FlowMetrics, StreamHealth
 } from "./flowTypes";
-import { getTape, getFootprint, getDom, getMetrics } from "./flowApi";
+import { getTape, getFootprint, getDom, getMetrics, getVolumeProfile, getHeatmap } from "./flowApi";
+
+import type { Market } from "../market";
 
 export interface FlowState {
+  market: Market;
   symbol: string;
   bars: Record<string, FootprintBar[]>;
   tape: TapeEntry[];
@@ -19,6 +22,7 @@ export interface FlowState {
 
 class FlowStore {
   private state: FlowState = {
+    market:"spot",
     symbol: "",
     bars: {},
     tape: [],
@@ -29,7 +33,8 @@ class FlowStore {
     health: null
   };
   private listeners: Set<() => void> = new Set();
-  private isHydrating = false;
+  private generation=0;
+  private controller:AbortController|null=null;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -48,54 +53,31 @@ class FlowStore {
     }
   }
 
-  async hydrate(symbol: string) {
-    if (this.isHydrating && this.state.symbol === symbol) return;
-    this.isHydrating = true;
-    
-    // reset state for new symbol
-    if (this.state.symbol !== symbol) {
-      this.state = {
-        symbol,
-        bars: {},
-        tape: [],
-        dom: null,
-        heatmapFrames: [],
-        metrics: null,
-        profile: null,
-        health: null
-      };
-      this.emit();
-    }
-
-    try {
-      const [tapeRes, domRes, metricsRes, fpRes] = await Promise.all([
-        getTape(symbol, 200),
-        getDom(symbol, 20),
-        getMetrics(symbol),
-        getFootprint(symbol, "1m", 60)
-      ]);
-
-      this.state = {
-        ...this.state,
-        tape: tapeRes?.entries || [],
-        dom: domRes,
-        metrics: metricsRes,
-        bars: {
-          ...this.state.bars,
-          "1m": fpRes?.bars || []
-        }
-      };
-      this.emit();
-    } catch (e) {
-      console.error("Hydration failed", e);
-    } finally {
-      this.isHydrating = false;
-    }
+  reset(market:Market,symbol:string) {
+    this.generation++;this.controller?.abort();
+    this.state={market,symbol,bars:{},tape:[],dom:null,heatmapFrames:[],metrics:null,profile:null,health:null};this.emit();
+  }
+  async hydrate(market:Market,symbol:string) {
+    if(this.state.market!==market||this.state.symbol!==symbol)return;
+    this.controller?.abort();const controller=new AbortController();this.controller=controller;
+    const generation=this.generation, initial=this.state;
+    const [tape,dom,metrics,footprint,profile,heatmap]=await Promise.all([
+      getTape(symbol,200,undefined,market,controller.signal),getDom(symbol,20,undefined,market,controller.signal),getMetrics(symbol,market,controller.signal),getFootprint(symbol,'1m',60,undefined,market,controller.signal),getVolumeProfile(symbol,'SESSION',undefined,undefined,undefined,market,controller.signal),getHeatmap(symbol,undefined,undefined,market,controller.signal)
+    ]);
+    if(controller.signal.aborted||generation!==this.generation)return;
+    this.state={...this.state,
+      tape:this.state.tape===initial.tape ? tape?.entries||[] : this.state.tape,
+      dom:this.state.dom===initial.dom ? dom : this.state.dom,
+      metrics:this.state.metrics===initial.metrics ? metrics : this.state.metrics,
+      health:this.state.health===initial.health ? metrics?.health||this.state.health : this.state.health,
+      bars:this.state.bars===initial.bars ? {'1m':footprint?.bars||[]} : this.state.bars,
+      profile,heatmapFrames:this.state.heatmapFrames===initial.heatmapFrames ? heatmap?.frames||[] : this.state.heatmapFrames
+    };this.emit();
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   dispatch(action: { type: string, payload: any }) {
-    if (action.payload?.symbol && action.payload.symbol !== this.state.symbol) {
+    if (action.payload?.symbol !== this.state.symbol || action.payload?.market !== this.state.market) {
       return; // Ignore events for other symbols
     }
 
@@ -136,7 +118,7 @@ class FlowStore {
         break;
       }
       case "METRICS": {
-        this.state = { ...this.state, metrics: action.payload };
+        this.state = { ...this.state, metrics: action.payload, health: action.payload.health || this.state.health };
         break;
       }
       case "HEALTH": {

@@ -5,7 +5,7 @@
  */
 
 export type AggressorSide = "BUY" | "SELL";
-export type StreamStatus = "LIVE" | "DEGRADED" | "DISCONNECTED" | "DISABLED";
+export type StreamStatus = "WAITING" | "STALE" | "LIVE" | "DEGRADED" | "DISCONNECTED" | "DISABLED";
 export type SnapshotSource = "REST" | "PARTIAL_STREAM" | "MAINTAINED";
 export type ProfileMode = "SESSION" | "VISIBLE" | "FIXED_RANGE";
 export type DivergenceType = "BEARISH" | "BULLISH";
