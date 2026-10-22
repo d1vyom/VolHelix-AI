@@ -156,3 +156,45 @@ def test_reconcile_account_mismatch_retains_unknown_and_original_reservation(mon
     assert response.json()['detail']['outcome'] == 'UNKNOWN'
     assert order_intents.lookup('spot', 'account-pinned')['status'] == 'DISPATCHING'
     client.place_order.assert_not_called(); client.get_order_by_client_id.assert_not_called()
+
+
+def test_ticket_retry_account_a_b_a_preserves_original_unknown_until_confirmed(monkeypatch):
+    from types import SimpleNamespace
+    original = Client(); original.trading_client = SimpleNamespace(API_KEY='test-only-account-A')
+    changed = Client(); changed.trading_client = SimpleNamespace(API_KEY='test-only-account-B')
+    original.place_order = Mock(side_effect=TimeoutError())
+    original.get_order_by_client_id = Mock(side_effect=TimeoutError())
+    changed.place_order = Mock(side_effect=AssertionError('Wrong account cannot create'))
+    changed.get_order_by_client_id = Mock(side_effect=AssertionError('Wrong account cannot query'))
+    bind_clients(monkeypatch, original)
+    request = OrderRequest(symbol='SOLUSDT', qty=1, order_type='LIMIT', limit_price=100, client_order_id='ticket-account-retry')
+    first = api.post('/api/exchange/order', json=request.model_dump())
+    assert first.json()['detail']['outcome'] == 'UNKNOWN'
+    before = order_intents.lookup('spot', request.client_order_id)
+    bind_clients(monkeypatch, changed)
+    retry = api.post('/api/exchange/order', json=request.model_dump())
+    assert retry.status_code == 502 and retry.json()['detail']['outcome'] == 'UNKNOWN'
+    assert order_intents.lookup('spot', request.client_order_id) == before
+    changed.place_order.assert_not_called(); changed.get_order_by_client_id.assert_not_called()
+    assert original.place_order.call_count == 1
+    bind_clients(monkeypatch, original)
+    original.get_order_by_client_id = Mock(return_value=ack('FILLED', 1, 1, 99))
+    recovered = api.post('/api/exchange/order', json=request.model_dump())
+    assert recovered.status_code == 200 and recovered.json()['outcome'] == 'ACKNOWLEDGED'
+    assert recovered.json()['exchange_status'] == 'FILLED' and recovered.json()['entry_price'] == 99
+    assert original.place_order.call_count == 1
+    assert order_intents.lookup('spot', request.client_order_id)['payload'] == request.model_dump_json()
+
+
+def test_ticket_payload_conflict_does_not_prove_original_unknown_was_never_dispatched(monkeypatch):
+    client = Client(); bind_clients(monkeypatch, client)
+    client.place_order = Mock(side_effect=TimeoutError())
+    client.get_order_by_client_id = Mock(side_effect=TimeoutError())
+    request = OrderRequest(symbol='SOLUSDT', qty=1, client_order_id='original-unknown')
+    assert api.post('/api/exchange/order', json=request.model_dump()).json()['detail']['outcome'] == 'UNKNOWN'
+    before = order_intents.lookup('spot', request.client_order_id)
+    queries = client.get_order_by_client_id.call_count
+    conflict = api.post('/api/exchange/order', json=request.model_copy(update={'qty':2}).model_dump())
+    assert conflict.status_code == 409 and conflict.json()['detail']['outcome'] == 'UNKNOWN'
+    assert order_intents.lookup('spot', request.client_order_id) == before
+    assert client.place_order.call_count == 1 and client.get_order_by_client_id.call_count == queries

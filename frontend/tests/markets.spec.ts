@@ -219,6 +219,25 @@ test('saved uncertain intent clears only when durable reconciliation proves reje
   expect(await page.evaluate(()=>sessionStorage.getItem('volhelix.pending-intent.v1'))).toBeNull();
 });
 
+test('ticket retry through account A to B to A retains original payload until actual acknowledgement',async({page})=>{
+  await fixtures(page);let account='A';const sent:Record<string,unknown>[]=[];
+  await page.route('**/api/exchange/order',async route=>{
+    sent.push(route.request().postDataJSON());
+    const recovered=account==='A'&&sent.length>1;
+    await route.fulfill({status:recovered?200:502,contentType:'application/json',body:JSON.stringify(recovered?{success:true,outcome:'ACKNOWLEDGED',market:'spot',client_order_id:sent[0].client_order_id,exchange_status:'FILLED',executed_qty:0.001}:{detail:{outcome:'UNKNOWN',market:'spot',client_order_id:sent[0].client_order_id,message:account==='B'?'Execution account identity mismatch':'Exchange outcome unavailable'}})});
+  });
+  await page.goto('/');await page.getByLabel('Order quantity').fill('0.001');await page.getByLabel('Order type').selectOption('LIMIT');await page.getByLabel('Limit price').fill('59950');
+  await page.getByRole('button',{name:'Preview testnet order'}).click();await page.getByRole('button',{name:'Confirm testnet order'}).click();
+  await expect(page.getByRole('button',{name:'Reconcile / retry same intent'})).toBeVisible();
+  account='B';await page.getByRole('button',{name:'Reconcile / retry same intent'}).click();
+  await expect.poll(()=>sent.length).toBe(2);await expect(page.getByRole('button',{name:'Preview testnet order'})).toBeDisabled();
+  expect(await page.evaluate(()=>JSON.parse(sessionStorage.getItem('volhelix.pending-intent.v1')!).intent)).toEqual(sent[0]);expect(sent[1]).toEqual(sent[0]);
+  account='A';await page.getByRole('button',{name:'Reconcile / retry same intent'}).click();
+  await expect(page.getByRole('status').filter({hasText:'FILLED'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Preview testnet order'})).toBeEnabled();
+  expect(sent[2]).toEqual(sent[0]);expect(await page.evaluate(()=>sessionStorage.getItem('volhelix.pending-intent.v1'))).toBeNull();
+});
+
 for(const initialStatus of ['UNKNOWN','DISPATCHING'])test(`intent-only ${initialStatus} rows reconcile original server identity without session payload or trade-only actions`,async({page})=>{
   await fixtures(page);let resolved=false;const calls:{url:string;body:string|null}[]=[];const wrongCalls:string[]=[];
   await page.route('**/api/exchange/orders?**',route=>{const market=new URL(route.request().url()).searchParams.get('market');return route.fulfill({contentType:'application/json',body:JSON.stringify(market==='futures'?[resolved?{id:'futures:ETHUSDT:88',trade_id:'futures:ETHUSDT:88',client_order_id:'lost-server-intent',market:'futures',symbol:'ETHUSDT',qty:0.2,side:'BUY',type:'LIMIT',status:'FILLED',executed_qty:0.2,filled_avg_price:2200}:{id:'futures:lost-server-intent',client_order_id:'lost-server-intent',market:'futures',symbol:'ETHUSDT',qty:0.2,side:'BUY',type:'LIMIT',status:initialStatus,executed_qty:0,reduce_only:false,limit_price:2200}]:[])});});

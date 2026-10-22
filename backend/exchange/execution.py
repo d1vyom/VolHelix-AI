@@ -18,7 +18,7 @@ class OrderRejected(OrderExecutionError):
     outcome = 'REJECTED'
 
 class OrderOutcomeUnknown(OrderExecutionError):
-    """A single reconciliation has already failed; retain the client order ID."""
+    """The original execution cannot be resolved; retain its client order ID."""
 
 class MarketDataUnavailable(OrderNotDispatched):
     """A finite positive production quote could not be obtained."""
@@ -161,7 +161,8 @@ async def submit_order(request: OrderRequest, *, client) -> OrderResult:
         await asyncio.to_thread(order_intents.bind_account,client,request.market,False)
         existing=await asyncio.to_thread(order_intents.get,request)
     except ValueError as exc:
-        raise OrderNotDispatched(str(exc)) from exc
+        # Until both checks succeed, a prior dispatch under this ID is unresolved.
+        raise OrderOutcomeUnknown(str(exc)) from exc
     if existing:
         return await _reuse_intent(request,existing,client)
     try:
