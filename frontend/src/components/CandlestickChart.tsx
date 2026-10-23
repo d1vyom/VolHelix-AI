@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useMemo, useCallback, useEffect, memo } from "react";
-import { formatMoney } from "@/lib/market";
+import { formatPrice } from "@/lib/market";
 import { ExchangeBar } from "../lib/api";
 import { ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 
@@ -313,12 +313,12 @@ export const CandlestickChart = memo(function CandlestickChart({
       {hoveredBar && (
         <div className="absolute top-1.5 left-3 z-10 flex flex-wrap items-center gap-3 text-[11px] pointer-events-none">
           <span className="text-[#878996]">Time (IST): <strong className="text-[#f5f5f5]">{hoveredBar.time}</strong></span>
-          <span className="text-[#878996]">O: <strong className="text-[#f5f5f5]">${formatMoney(hoveredBar.open)}</strong></span>
-          <span className="text-[#878996]">H: <strong className="text-[#f5f5f5]">${formatMoney(hoveredBar.high)}</strong></span>
-          <span className="text-[#878996]">L: <strong className="text-[#f5f5f5]">${formatMoney(hoveredBar.low)}</strong></span>
-          <span className="text-[#878996]">C: <strong className="text-[#f5f5f5]">${formatMoney(hoveredBar.close)}</strong></span>
+          <span className="text-[#878996]">O: <strong className="text-[#f5f5f5]">${formatPrice(hoveredBar.open)}</strong></span>
+          <span className="text-[#878996]">H: <strong className="text-[#f5f5f5]">${formatPrice(hoveredBar.high)}</strong></span>
+          <span className="text-[#878996]">L: <strong className="text-[#f5f5f5]">${formatPrice(hoveredBar.low)}</strong></span>
+          <span className="text-[#878996]">C: <strong className="text-[#f5f5f5]">${formatPrice(hoveredBar.close)}</strong></span>
           <span className={`font-bold ${isUp ? "text-[#20b26c]" : "text-[#ef4444]"}`}>
-            {isUp ? "+" : ""}${formatMoney(change)} ({isUp ? "+" : ""}{changePct.toFixed(2)}%)
+            {isUp ? "+" : ""}${formatPrice(change)} ({isUp ? "+" : ""}{changePct.toFixed(2)}%)
           </span>
           <span className="text-[#878996]">Vol: <strong className="text-[#20b26c]">{(hoveredBar.volume / 1000).toFixed(1)}K</strong></span>
         </div>
@@ -386,7 +386,7 @@ export const CandlestickChart = memo(function CandlestickChart({
               fontSize={10}
               fontFamily="monospace"
             >
-              ${formatMoney(tick.price)}
+              ${formatPrice(tick.price)}
             </text>
           </g>
         ))}
@@ -520,7 +520,7 @@ export const CandlestickChart = memo(function CandlestickChart({
             fontWeight="bold"
             fontFamily="monospace"
           >
-            {formatMoney(activeLivePrice)}
+            {formatPrice(activeLivePrice)}
           </text>
           {/* Live Candle Closing Countdown */}
           <text
@@ -637,7 +637,7 @@ export const CandlestickChart = memo(function CandlestickChart({
                   fontWeight="bold"
                   fontFamily="monospace"
                 >
-                  {formatMoney(cursorPrice)}
+                  {formatPrice(cursorPrice)}
                 </text>
               </g>
             )}

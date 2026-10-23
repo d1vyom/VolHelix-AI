@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { MarketSelector } from './MarketSelector';
 import { useMarket } from './MarketProvider';
-import { formatMoney } from '@/lib/market';
+import { formatMoney, formatPrice } from '@/lib/market';
 export function Header() {
   const {market,symbol,quote,account,error,refresh}=useMarket();
   return <header className="workspace-header sticky top-0 z-30 border-b border-[#26282f] bg-[#121214] p-3 font-mono text-xs">
@@ -15,7 +15,7 @@ export function Header() {
     <MarketSelector />
     <div className="flex flex-wrap items-center gap-3">
       <strong data-testid="selected-market">{market} · {symbol}</strong>
-      <span data-testid="header-price" className="text-[#f7a600]">{quote ? `$${formatMoney(quote.price)}` : 'Quote unavailable'}</span>
+      <span data-testid="header-price" className="text-[#f7a600]">{quote ? `$${formatPrice(quote.price)}` : 'Quote unavailable'}</span>
       <span>Testnet cash: {account ? `$${formatMoney(account.cash)}` : 'Unavailable'}</span>
       <span className="text-[#878996]">Production data / Testnet orders</span>
     </div>

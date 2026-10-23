@@ -1,13 +1,10 @@
 import { formatMoney } from "../market";
+export { formatPrice } from "../market";
 export function formatCompactNumber(num: number): string {
   if (num >= 1e9) return (num / 1e9).toFixed(2) + "B";
   if (num >= 1e6) return (num / 1e6).toFixed(2) + "M";
   if (num >= 1e3) return (num / 1e3).toFixed(2) + "K";
   return formatMoney(num);
-}
-
-export function formatPrice(price: number): string {
-  return formatMoney(price);
 }
 
 export function formatQty(qty: number, precision: number = 4): string {

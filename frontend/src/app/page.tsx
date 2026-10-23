@@ -6,7 +6,7 @@ import { useMarket } from "@/components/MarketProvider";
 import { ExecutionFees } from '@/components/ExecutionFees';
 import { OrderTicket } from "@/components/OrderTicket";
 import { MarketDepth } from "@/components/MarketDepth";
-import { formatMoney, readBars, readOrders, readPositions, reconcileOrderIntent } from "@/lib/market";
+import { formatMoney, formatPrice, readBars, readOrders, readPositions, reconcileOrderIntent } from "@/lib/market";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Tooltip,
@@ -322,7 +322,7 @@ export default function BybitTradingTerminal() {
         showToast(res.reason || 'Scan unavailable; execution not confirmed');
       } else if (res.executed) {
         const detail = res.tp_reason ? ` [${res.tp_reason}]` : "";
-        showToast(`Master Strategy Triggered on ${res.symbol || selectedTicker}! TP: $${res.take_profit_price?.toFixed(2)}${detail} | SL: $${res.stop_loss_price?.toFixed(2)}`);
+        showToast(`Master Strategy Triggered on ${res.symbol || selectedTicker}! TP: $${formatPrice(res.take_profit_price)}${detail} | SL: $${formatPrice(res.stop_loss_price)}`);
         await refreshAccountAndPositions();
       } else if (res && !res.executed) {
         showToast(`Scan Complete for ${selectedTicker}: Criteria not met right now (${res.reason || "Score < 70%"}). Holding cash safely.`);
@@ -361,7 +361,7 @@ export default function BybitTradingTerminal() {
         <strong>{market.toUpperCase()} · {selectedTicker}</strong>
         <span>Equity: {account ? `$${formatMoney(account.equity)}` : 'Unavailable'}</span>
         <span>Buying power: {account ? `$${formatMoney(account.buying_power)}` : 'Unavailable'}</span>
-        <span>Last: {formatMoney(midPrice)}</span>
+        <span>Last: {formatPrice(midPrice)}</span>
         {readError&&<p role="status" className="w-full text-[#f7a600]">{readError}</p>}
       </div>
 
@@ -429,8 +429,8 @@ export default function BybitTradingTerminal() {
                 <span className="px-1.5 py-0.5 rounded bg-[#26282f] text-[#f7a600] font-semibold">
                   Production candles
                 </span>
-                <span>Bid: <strong className="text-[#20b26c]">{marketState.depth?.bids[0] ? formatMoney(marketState.depth.bids[0][0]) : "Unavailable"}</strong></span>
-                <span>Ask: <strong className="text-[#ef454a]">{marketState.depth?.asks[0] ? formatMoney(marketState.depth.asks[0][0]) : "Unavailable"}</strong></span>
+                <span>Bid: <strong className="text-[#20b26c]">{marketState.depth?.bids[0] ? formatPrice(marketState.depth.bids[0][0]) : "Unavailable"}</strong></span>
+                <span>Ask: <strong className="text-[#ef454a]">{marketState.depth?.asks[0] ? formatPrice(marketState.depth.asks[0][0]) : "Unavailable"}</strong></span>
               </div>
             </div>
 
@@ -544,8 +544,8 @@ export default function BybitTradingTerminal() {
                                 </span>
                               </td>
                               <td className="py-2.5 px-2 text-right text-[#f5f5f5] font-semibold">{pos.qty}<ExecutionFees record={pos} /></td>
-                              <td className="py-2.5 px-2 text-right text-[#878996]">${formatMoney(pos.avg_entry_price)}</td>
-                              <td className="py-2.5 px-2 text-right text-[#f5f5f5] font-bold">${formatMoney(pos.current_price)}</td>
+                              <td className="py-2.5 px-2 text-right text-[#878996]">${formatPrice(pos.avg_entry_price)}</td>
+                              <td className="py-2.5 px-2 text-right text-[#f5f5f5] font-bold">${formatPrice(pos.current_price)}</td>
                               <td className="py-2.5 px-2 text-right text-[#878996]">${formatMoney(pos.market_value)}</td>
                               <td className={`py-2.5 px-2 text-right font-bold ${
                                 (pos.unrealized_pl ?? 0) >= 0 ? "text-[#20b26c]" : "text-[#ef454a]"
@@ -646,7 +646,7 @@ export default function BybitTradingTerminal() {
                                     {ord.type || "MARKET"}
                                   </td>
                                   <td className="py-2 px-2 text-right text-[#f5f5f5]">
-                                    {ord.limit_price ? `$${formatMoney(ord.limit_price)}` : (ord.stop_price ? `Stop $${formatMoney(ord.stop_price)}` : "Market")}
+                                    {ord.limit_price ? `$${formatPrice(ord.limit_price)}` : (ord.stop_price ? `Stop $${formatPrice(ord.stop_price)}` : "Market")}
                                   </td>
                                   <td className="py-2.5 px-2 text-right">
                                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${statusBg}`}>
@@ -722,7 +722,7 @@ export default function BybitTradingTerminal() {
                               </td>
                               <td className="py-2 px-2 text-right text-[#f5f5f5]">{ord.qty}</td>
                               <td className="py-2 px-2 text-right text-[#878996]">
-                                {ord.filled_avg_price ? `$${formatMoney(ord.filled_avg_price)}` : "-"}
+                                {ord.filled_avg_price ? `$${formatPrice(ord.filled_avg_price)}` : "-"}
                               </td>
                               <td className="py-2 px-2 text-right">
                                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
@@ -874,10 +874,10 @@ export default function BybitTradingTerminal() {
                                 </td>
                                 <td className="py-2 px-2 text-right text-[#f5f5f5]">{qty}</td>
                                 <td className="py-2 px-2 text-right text-[#878996]">
-                                  {formatMoney(entryPrice)}
+                                  {formatPrice(entryPrice)}
                                 </td>
                                 <td className="py-2 px-2 text-right text-[#f5f5f5] font-semibold">
-                                  {formatMoney(exitPrice)}
+                                  {formatPrice(exitPrice)}
                                 </td>
                                 <td className={`py-2 px-2 text-right font-bold ${isWin ? "text-[#20b26c]" : "text-[#ef454a]"}`}>
                                   {pnl==null?'Gross P&L unavailable':`${isWin?'+':''}$${formatMoney(pnl)}`}<ExecutionFees record={t} />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { MotionConfig } from "framer-motion";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
@@ -21,7 +22,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <MarketProvider><div className="flex min-h-screen bg-[#121214]">
+    <MotionConfig reducedMotion="user"><MarketProvider><div className="flex min-h-screen bg-[#121214]">
       <Sidebar collapsed={collapsed} onToggle={setCollapsed} />
       <div
         className={`app-content min-w-0 flex-1 flex flex-col min-h-screen transition-all duration-200 ${
@@ -39,6 +40,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
-    </div></MarketProvider>
+    </div></MarketProvider></MotionConfig>
   );
 }

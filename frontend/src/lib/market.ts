@@ -53,3 +53,9 @@ export function formatMoney(value: number | null | undefined) {
     ? value.toLocaleString('en-US', { maximumSignificantDigits: 8 })
     : value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+// Instrument reads currently omit tick metadata; retain all representable price digits.
+const priceFormat = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 17 });
+export function formatPrice(value: number | null | undefined) {
+  return value != null && Number.isFinite(value) ? priceFormat.format(value) : '—';
+}

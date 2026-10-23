@@ -6,6 +6,7 @@ import { fixtures, captureFixture } from './fixtures';
 let server: HttpServer; let io: Server;
 let subscriptions: {market:string;symbol:string}[]=[]; let released=0;
 let streamPrice=61234.56;
+let adjacentPrices:number[]=[];
 let acknowledge: (()=>void)|undefined;
 test.beforeAll(async()=>{
   server=createServer();io=new Server(server,{cors:{origin:true}});
@@ -17,7 +18,7 @@ test.beforeAll(async()=>{
         setTimeout(()=>{
           const px=streamPrice;
           socket.emit('flow:health',{...selection,status:'STALE',connected:true,streams:[],lag_ms:20000,reconnects:0,book_resyncs:0,gap_events:0});
-          socket.emit('flow:dom',{...selection,best_bid:px,best_ask:px*1.00001,spread:px*0.00001,spread_bps:0.1,mid:px*1.000005,bid_depth_n:1,ask_depth_n:2,book_imbalance:-0.33,walls:[],levels:[{price:px,bid_size:1,ask_size:0,bid_notional:px,ask_notional:0,is_wall:false,is_poc:false,traded_buy:0,traded_sell:0,depth_pct:0.5}]});
+          socket.emit('flow:dom',{...selection,best_bid:px,best_ask:px*1.00001,spread:px*0.00001,spread_bps:0.1,mid:px*1.000005,bid_depth_n:1,ask_depth_n:2,book_imbalance:-0.33,walls:[],levels:[px,...adjacentPrices].map(price=>({price,bid_size:1,ask_size:0,bid_notional:price,ask_notional:0,is_wall:false,is_poc:false,traded_buy:0,traded_sell:0,depth_pct:0.5}))});
           socket.emit('flow:tape',{...selection,entries:[{ts:Date.now(),price:px,qty:1,quote_qty:px,side:'BUY',is_whale:false,size_bucket:'S',price_tick:'UP',aggressive_streak:1}]});
           socket.emit('flow:tape',{...selection,market:selection.market==='spot'?'futures':'spot',entries:[{ts:Date.now(),price:999999.99,qty:1,quote_qty:999999.99,side:'BUY',size_bucket:'S'}]});
         },100);
@@ -80,4 +81,17 @@ test('subcent DOM stages the exact nonzero limit without sending an order',async
   await expect(page.getByLabel('Limit price')).toHaveValue('0.00000123');expect(orders).toEqual([]);
   await captureFixture(page,'terminal-subcent-dom-390');
   streamPrice=61234.56;
+});
+
+for(const [a,b] of [[1.2345,1.2346],[12.345,12.346]])test(`fine DOM levels ${a} and ${b} display the exact staged price`,async({page})=>{
+  streamPrice=a;adjacentPrices=[b];subscriptions=[];acknowledge=undefined;
+  await fixtures(page);await page.goto('/terminal');
+  await expect.poll(()=>subscriptions.length).toBe(1);acknowledge!();
+  const mutations:string[]=[];page.on('request',r=>{if(r.method()==='POST')mutations.push(r.url());});
+  for(const price of [a,b]){
+    const level=page.getByRole('button',{name:`Stage limit at ${price}`,exact:true});
+    await expect(level).toBeVisible();await expect(level).toContainText(String(price));
+    await level.click();await expect(page.getByLabel('Limit price')).toHaveValue(String(price));
+  }
+  expect(mutations).toEqual([]);adjacentPrices=[];streamPrice=61234.56;
 });

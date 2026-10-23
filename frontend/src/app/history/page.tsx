@@ -15,7 +15,7 @@ import {
 } from "recharts";
 import { getTrades } from "../../lib/api";
 import { ExecutionFees } from '@/components/ExecutionFees';
-import { formatMoney } from '@/lib/market';
+import { formatMoney, formatPrice } from '@/lib/market';
 import { TradeRecord } from "../../lib/types";
 
 function TradeHistoryContent() {
@@ -341,16 +341,19 @@ function TradeHistoryContent() {
                     <td className="py-3.5 px-3 text-[11px]">
                       {tp && sl ? (
                         <div className="flex items-center gap-2">
-                          <span className="text-[#0ecb81] font-bold">TP: ${formatMoney(tp)}</span>
+                          <span className="text-[#0ecb81] font-bold">TP: ${formatPrice(tp)}</span>
                           <span className="text-[#5e6673]">|</span>
-                          <span className="text-[#f6465d] font-bold">SL: ${formatMoney(sl)}</span>
+                          <span className="text-[#f6465d] font-bold">SL: ${formatPrice(sl)}</span>
                         </div>
                       ) : (
                         <span className="text-[#848e9c]">Dynamic Anchor</span>
                       )}
                     </td>
                     <td className="py-3.5 px-3 text-right text-[#eaecef]">
-                      ${t.entry_price ? t.entry_price.toLocaleString() : (t.proposal?.net_premium ? t.proposal.net_premium.toLocaleString() : "—")}
+                      {t.entry_price != null ? `$${formatPrice(t.entry_price)}` : t.proposal?.net_premium != null ? <>
+                        <span>Entry unavailable</span>
+                        <span className="block text-[10px] text-[#b5b7c0]">Legacy net premium: ${formatPrice(t.proposal.net_premium)}</span>
+                      </> : 'Unavailable'}
                     </td>
                     <td className={`py-3.5 px-3 text-right font-bold ${(pnl ?? 0) >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]"}`}>
                       {pnl == null ? "Gross P&L unavailable" : `${pnl >= 0 ? "+" : ""}$${formatMoney(pnl)}`}<ExecutionFees record={t} />

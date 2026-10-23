@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useMarket } from "@/components/MarketProvider";
-import { formatMoney } from "@/lib/market";
+import { formatPrice } from "@/lib/market";
 import dynamic from "next/dynamic";
 import { BarChart3, Gauge, Activity, TrendingUp, Layers, Zap } from "lucide-react";
 import { motion } from "framer-motion";
@@ -189,7 +189,7 @@ export default function VolatilityLab() {
               {selectedTicker} Illustrative Volatility Surface (Moneyness vs DTE)
             </h3>
             <p className="text-xs font-mono text-[#848e9c] mt-0.5">
-              Production {market} quote: <span className="text-[#f0b90b] font-bold">{spot ? `$${formatMoney(spot)}` : "Quote unavailable"}</span> - Assumed IV {((BASE_IVS[selectedTicker] || 0.22)*100).toFixed(0)}%; theoretical scenario, not observed market IV.
+              Production {market} quote: <span className="text-[#f0b90b] font-bold">{spot ? `$${formatPrice(spot)}` : "Quote unavailable"}</span> - Assumed IV {((BASE_IVS[selectedTicker] || 0.22)*100).toFixed(0)}%; theoretical scenario, not observed market IV.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -251,7 +251,7 @@ export default function VolatilityLab() {
                       )}
                     </div>
                     <div className="text-xs font-mono text-[#848e9c] mt-1 flex items-center gap-2">
-                      <span>Spot: <strong className="text-[#eaecef]">${gauge.spotPrice.toFixed(2)}</strong></span>
+                      <span>Spot: <strong className="text-[#eaecef]">${formatPrice(gauge.spotPrice)}</strong></span>
                       <span>•</span>
                       <span>IV: <strong className="text-[#f0b90b]">{(gauge.currentIV * 100).toFixed(1)}%</strong></span>
                     </div>
