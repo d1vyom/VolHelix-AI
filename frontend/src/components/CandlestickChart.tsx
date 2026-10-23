@@ -133,10 +133,8 @@ export const CandlestickChart = memo(function CandlestickChart({
   const height = 260;
   const paddingTop = 28;
   const paddingBottom = 26;
-  const paddingRight = 92; // room for price + countdown badge
   const chartHeight = height - paddingBottom - paddingTop;
   const svgWidth = 800;
-  const chartWidth = svgWidth - paddingRight;
 
   const priceToY = useCallback((price: number) => {
     if (priceRange <= 0) return chartHeight / 2 + paddingTop;
@@ -150,16 +148,31 @@ export const CandlestickChart = memo(function CandlestickChart({
     return minPrice + normalized * priceRange;
   }, [chartHeight, paddingTop, height, paddingBottom, minPrice, priceRange]);
 
+  // Axis/cursor coordinates are interpolated, not exchange prices. Keep useful
+  // digits at the visible step size without exposing binary interpolation tails.
+  const axisFormat = useMemo(() => {
+    const magnitude = Math.max(Math.abs(minPrice), Math.abs(minPrice + priceRange));
+    const digits = Math.min(17, Math.max(1,
+      Math.floor(Math.log10(magnitude)) - Math.floor(Math.log10(priceRange / 4)) + 2));
+    return new Intl.NumberFormat('en-US', { maximumSignificantDigits: digits });
+  }, [minPrice, priceRange]);
+
   // Horizontal Grid price levels (5 ticks)
   const priceTicks = useMemo(() => {
     const ticks = [];
     const count = 5;
     for (let i = 0; i < count; i++) {
       const p = minPrice + (priceRange / (count - 1)) * i;
-      ticks.push({ price: p, y: priceToY(p) });
+      ticks.push({ price: p, y: priceToY(p), label: axisFormat.format(p) });
     }
     return ticks;
-  }, [minPrice, priceRange, priceToY]);
+  }, [minPrice, priceRange, priceToY, axisFormat]);
+
+  // Budget for the bold 11px monospace live price and the cursor's icon/padding.
+  const labelCharacters = Math.max(formatPrice(activeLivePrice).length,
+    ...priceTicks.map(tick => tick.label.length + 3));
+  const paddingRight = Math.max(92, labelCharacters * 7 + 22);
+  const chartWidth = svgWidth - paddingRight;
 
   // Drag-to-pan handlers
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -380,13 +393,14 @@ export const CandlestickChart = memo(function CandlestickChart({
               strokeWidth={1}
             />
             <text
-              x={chartWidth + 6}
+              x={svgWidth - 6}
               y={tick.y + 3}
               fill="#5e6673"
               fontSize={10}
               fontFamily="monospace"
+              textAnchor="end"
             >
-              ${formatPrice(tick.price)}
+              ${tick.label}
             </text>
           </g>
         ))}
@@ -513,23 +527,25 @@ export const CandlestickChart = memo(function CandlestickChart({
           />
           {/* Live Price Text */}
           <text
-            x={chartWidth + 6}
+            x={svgWidth - 6}
             y={Math.max(paddingTop, Math.min(height - paddingBottom - 26, livePriceY - 13)) + 11}
             fill={liveTextColor}
             fontSize={11}
             fontWeight="bold"
             fontFamily="monospace"
+            textAnchor="end"
           >
             {formatPrice(activeLivePrice)}
           </text>
           {/* Live Candle Closing Countdown */}
           <text
-            x={chartWidth + 6}
+            x={svgWidth - 6}
             y={Math.max(paddingTop, Math.min(height - paddingBottom - 26, livePriceY - 13)) + 22}
             fill={liveTextColor}
             fontSize={9}
             fontWeight="bold"
             fontFamily="monospace"
+            textAnchor="end"
           >
             {countdownFormatted}
           </text>
@@ -630,14 +646,15 @@ export const CandlestickChart = memo(function CandlestickChart({
                 />
                 {/* Cursor Price text */}
                 <text
-                  x={chartWidth + 16}
+                  x={svgWidth - 6}
                   y={Math.max(paddingTop, Math.min(height - paddingBottom - 18, mousePos.y - 9)) + 13}
                   fill="#f5f5f5"
                   fontSize={10}
                   fontWeight="bold"
                   fontFamily="monospace"
+                  textAnchor="end"
                 >
-                  {formatPrice(cursorPrice)}
+                  {axisFormat.format(cursorPrice)}
                 </text>
               </g>
             )}

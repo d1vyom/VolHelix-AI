@@ -64,3 +64,30 @@ for(const reducedMotion of ['reduce','no-preference'] as const)test(`motion pref
   }
   await expect(page.getByRole('heading',{name:'SPOT Execution ledger',exact:true})).toBeVisible();
 });
+
+for(const width of [390,1440])for(const [open,close] of [[1.2345,1.2346],[12.345,12.346],[0.00000122,0.00000124]])test(`chart axis and cursor labels fit outside plot at ${width}px for ${open}/${close}`,async({page},testInfo)=>{
+  await page.setViewportSize({width,height:1000});await fixtures(page);
+  await page.route('**/api/market/quote?**',route=>route.fulfill({json:{market:'spot',symbol:'BTCUSDT',price:close}}));
+  await page.route('**/api/market/bars?**',route=>route.fulfill({json:{market:'spot',symbol:'BTCUSDT',bars:[{time:'2026-10-24T00:00:00Z',open,high:close,low:open,close,volume:10}]}}));
+  await page.goto('/');
+  await expect(page.getByText(`O: $${open}`,{exact:true})).toBeVisible();
+  await expect(page.getByText(`C: $${close}`,{exact:true})).toBeVisible();
+  const chart=page.locator('svg[viewBox="0 0 800 260"]');await expect(chart).toBeVisible();
+  const plotRight=Number(await chart.locator('line[stroke="#1f2128"]').first().getAttribute('x2'));
+  const axis=chart.locator('text[fill="#5e6673"]').filter({hasText:/^\$/});
+  await expect(axis).toHaveCount(5);
+  const labels=await axis.evaluateAll(elements=>elements.map(el=>{const box=(el as SVGTextElement).getBBox();return {text:el.textContent?.trim(),left:box.x,right:box.x+box.width};}));
+  expect(new Set(labels.map(label=>label.text)).size).toBe(5);
+  for(const label of labels){expect.soft(label.left,label.text).toBeGreaterThanOrEqual(plotRight+2);expect.soft(label.right,label.text).toBeLessThanOrEqual(798);}
+  const live=await chart.locator('g.pointer-events-none').first().locator('text').first().evaluate(el=>{const b=(el as SVGTextElement).getBBox();return {left:b.x,right:b.x+b.width};});
+  expect.soft(live.left).toBeGreaterThanOrEqual(plotRight+2);expect.soft(live.right).toBeLessThanOrEqual(798);
+  const rect=await chart.boundingBox();expect(rect).not.toBeNull();
+  await page.mouse.move(rect!.x+rect!.width*0.4,rect!.y+rect!.height*0.55);
+  await expect(chart.locator('circle')).toBeVisible();
+  const cursor=chart.locator('g.pointer-events-none').last().locator('text').last();
+  const cursorBox=await cursor.evaluate(el=>{const b=(el as SVGTextElement).getBBox();return {text:el.textContent?.trim(),left:b.x,right:b.x+b.width};});
+  expect.soft(cursorBox.left).toBeGreaterThanOrEqual(plotRight+16);expect.soft(cursorBox.right).toBeLessThanOrEqual(798);
+  const cursorValue=Number(cursorBox.text?.replaceAll(',',''));expect(cursorValue).toBeGreaterThanOrEqual(open);expect(cursorValue).toBeLessThanOrEqual(close);
+  console.log('Chart geometry',JSON.stringify({width,open,close,plotRight,labels,live,cursor:cursorBox}));
+  await chart.locator('..').screenshot({path:testInfo.outputPath('chart-price-gutter.png')});
+});
