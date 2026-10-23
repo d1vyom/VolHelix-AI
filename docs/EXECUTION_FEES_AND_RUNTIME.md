@@ -85,6 +85,17 @@ pytest collection is scoped to `backend/tests`; script imports perform no I/O.
 
 ## Verification
 
+Final verification update (2026-10-24): the complete current runtime at `a77679d`
+passes 329 isolated backend tests, 59 browser regressions, lint, TypeScript and
+production build; npm audit reports zero vulnerabilities. Current backend and
+frontend Docker images both built successfully. A fresh network-disabled backend
+image import has only MainThread, and the frontend image contains Next 16.4.3 on
+Node 22.23.4 with a production build ID. The earlier frontend build cancellation
+below is historical and has been superseded. Current public Spot/Futures access
+checks time out, so authenticated execution and live-data UI proof remain
+unverified. See [the final verification record](UPGRADE_VERIFICATION.md) for scope,
+exact results and remaining review/integration gates.
+
 - Focused RED/GREEN fee, lifecycle, outcome, runtime and script regressions.
 - Final isolated bare-root `python -m pytest -q`: 313 passed, two existing SDK
   websocket deprecation warnings, 32.70 seconds.

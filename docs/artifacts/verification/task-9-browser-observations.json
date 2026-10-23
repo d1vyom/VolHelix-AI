@@ -1,0 +1,125 @@
+[
+  {
+    "width": 390,
+    "routes": [
+      {
+        "route": "/",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 390,
+        "width": 390
+      },
+      {
+        "route": "/terminal",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 390,
+        "width": 390
+      },
+      {
+        "route": "/volatility",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 390,
+        "width": 390
+      },
+      {
+        "route": "/audit",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 390,
+        "width": 390
+      },
+      {
+        "route": "/history",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 390,
+        "width": 390
+      }
+    ],
+    "pageErrors": [],
+    "consoleErrors": [
+      "WebSocket connection to 'ws://127.0.0.1:8107/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED",
+      "WebSocket connection to 'ws://127.0.0.1:8107/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED"
+    ],
+    "mutatingApiRequests": []
+  },
+  {
+    "width": 768,
+    "routes": [
+      {
+        "route": "/",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 768,
+        "width": 768
+      },
+      {
+        "route": "/terminal",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 768,
+        "width": 768
+      },
+      {
+        "route": "/volatility",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 768,
+        "width": 768
+      },
+      {
+        "route": "/audit",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 768,
+        "width": 768
+      },
+      {
+        "route": "/history",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 768,
+        "width": 768
+      }
+    ],
+    "pageErrors": [],
+    "consoleErrors": [
+      "WebSocket connection to 'ws://127.0.0.1:8107/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED",
+      "WebSocket connection to 'ws://127.0.0.1:8107/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED"
+    ],
+    "mutatingApiRequests": []
+  },
+  {
+    "width": 1440,
+    "routes": [
+      {
+        "route": "/",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 1440,
+        "width": 1440
+      },
+      {
+        "route": "/terminal",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 1440,
+        "width": 1440
+      },
+      {
+        "route": "/volatility",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 1440,
+        "width": 1440
+      },
+      {
+        "route": "/audit",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 1440,
+        "width": 1440
+      },
+      {
+        "route": "/history",
+        "font": "Geist, \"Geist Fallback\", Arial, sans-serif",
+        "scrollWidth": 1440,
+        "width": 1440
+      }
+    ],
+    "pageErrors": [],
+    "consoleErrors": [
+      "WebSocket connection to 'ws://127.0.0.1:8107/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED",
+      "WebSocket connection to 'ws://127.0.0.1:8107/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED"
+    ],
+    "mutatingApiRequests": []
+  }
+]

@@ -1,7 +1,10 @@
 # VolHelix reliability, market discovery, and Futures upgrade
 
 Date: 2026-10-20 (Asia/Kolkata)
-Status: proposed design for review; implementation has not started.
+Status: approved 2026-10-20; Tasks 1-8B implemented and reviewed. Final isolated
+verification recorded 2026-10-24; Task 9 review, whole-branch review and main
+integration remain pending. Public exchange access is currently externally
+blocked; see `docs/UPGRADE_VERIFICATION.md`.
 
 ## Outcome and constraints
 
@@ -29,7 +32,7 @@ risk and conflicts with the guardrails.
 
 ## Initial findings from source inspection
 
-These findings need regression coverage; they are not yet repaired.
+These planning-time findings drove the implemented regression coverage and repairs.
 
 - Manual order submission catches exchange exceptions, then persists an order
   and reports success. Exchange rejection must never become a local fill.
@@ -131,4 +134,5 @@ to GitHub, then integrate the verified result into main as requested. Preserve
 the existing ahead-of-origin commit. Do not manipulate timestamps, author
 identity, or manufacture 60-70 commits. GitHub controls contribution attribution.
 
-Implementation planning follows approval of this written design.
+Implementation progress and remaining delivery gates are recorded in the linked
+implementation plan and `docs/UPGRADE_VERIFICATION.md`.

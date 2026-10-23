@@ -54,3 +54,9 @@ action stays disabled until reconciliation establishes a recorded trade identity
 - [Futures book synchronization](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/How-to-manage-a-local-order-book-correctly): inclusive snapshot bridge and subsequent pu chain. Spot's snapshot-plus-one bridge and sequence rule stay separate.
 
 The deterministic market/lifecycle fixtures live in `backend/tests/test_flow_markets.py`. A separate read-only BTCUSDT Futures stream smoke observed trades, synchronized depth and LIVE health, and awaited clean shutdown without importing the main app or starting the guardian.
+
+That public Futures observation is dated 2026-10-22. Final 2026-10-24 Spot and
+Futures CLI plus standalone hub checks both timed out on public connections;
+both hubs still stopped cleanly with no pending asyncio tasks. The 59 current
+browser regressions use local fixtures and do not establish current public
+connectivity. See [final evidence and limitations](UPGRADE_VERIFICATION.md).

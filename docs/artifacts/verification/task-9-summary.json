@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-24",
+  "runtimeCommit": "a77679d381c559c0e1151dbc188cd953dc934dbc",
+  "scope": "Managed isolated verification, no orders or application lifespan",
+  "backend": {
+    "passed": 329,
+    "warnings": 2,
+    "seconds": 53.09,
+    "command": "D:/Projects/VolHelix-AI/env/Scripts/python.exe -m pytest -q",
+    "unexpectedNetwork": "forbidden",
+    "database": "temporary"
+  },
+  "frontend": {
+    "browserPassed": 59,
+    "browserDuration": "1.3m",
+    "browserData": "offline HTTP and local Socket.IO fixtures",
+    "lintExit": 0,
+    "typescriptExit": 0,
+    "buildExit": 0,
+    "audit": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      },
+      "dependencies": {
+        "prod": 139,
+        "dev": 376,
+        "optional": 89,
+        "peer": 217,
+        "peerOptional": 0,
+        "total": 769
+      }
+    }
+  },
+  "docker": {
+    "backendImage": "volhelix-backend:verify-29ee136",
+    "backendImageId": "sha256:6db11beeaa007916f1b4f33a3f66896f356dd0c76c5051a7d104e82bca5c0eae",
+    "frontendImage": "volhelix-frontend:verify-a77679d",
+    "frontendImageId": "sha256:90374a73f3cba4a2e6b85c24c84f098dedc7eca5b6b2079cabc4daf9a45bc83b",
+    "buildsExit": 0,
+    "rechecksNetwork": "none",
+    "backendImportThreads": [
+      "MainThread"
+    ],
+    "frontendNode": "22.23.4",
+    "frontendNext": "16.4.3",
+    "frontendBuildId": "Rkxt7rXM8f6geMlGs6yYi"
+  },
+  "public": {
+    "spotCliExit": 1,
+    "futuresCliExit": 1,
+    "spotError": "ConnectTimeout",
+    "futuresError": "ConnectTimeout",
+    "independentHttp": "Both production time endpoints timed out at 12 seconds",
+    "hubProbe": "Both public metadata reads ConnectTimeout",
+    "cleanupAwaited": true,
+    "pendingAsyncioTasks": 0,
+    "remainingSymbols": [],
+    "liveScreenshot": false,
+    "authenticatedExecution": "unverified"
+  },
+  "delivery": {
+    "task9Review": "pending",
+    "wholeBranchReview": "pending",
+    "mainIntegration": "pending",
+    "productionDeployment": "out of scope"
+  }
+}
