@@ -1,5 +1,5 @@
 import type { Market } from "./market";
-import { PortfolioSnapshot, TradeRecord, MarketSignal, MarketClockStatus } from "./types";
+import { PortfolioSnapshot, TradeRecord, MarketSignal, MarketClockStatus, ExecutionAccounting } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -76,7 +76,7 @@ export interface ExchangeAccount {
   balances?: Record<string, { free: number; locked: number; total: number; value_usdt?: number }>;
 }
 
-export interface ExchangePosition {
+export interface ExchangePosition extends ExecutionAccounting {
   market?: Market;
   stale?: boolean;
   id?: string;
@@ -84,12 +84,12 @@ export interface ExchangePosition {
   symbol: string;
   qty: number;
   side: "LONG" | "SHORT";
-  current_price: number;
+  current_price: number | null;
   avg_entry_price: number;
-  market_value: number;
+  market_value: number | null;
   cost_basis: number;
-  unrealized_pl: number;
-  unrealized_plpc: number;
+  unrealized_pl: number | null;
+  unrealized_plpc: number | null;
   take_profit_price?: number;
   stop_loss_price?: number;
   strategy?: string;
@@ -341,7 +341,7 @@ export interface OrderFlowData {
   };
   order_flow?: {
     symbol: string;
-    current_price: number;
+    current_price: number | null;
     trend_bias: string;
     nearest_bullish_ob?: { low: number; high: number; strength: number };
     nearest_bearish_ob?: { low: number; high: number; strength: number };

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
 import io from "socket.io-client";
 import { useMarket } from "@/components/MarketProvider";
+import { ExecutionFees } from '@/components/ExecutionFees';
 import { OrderTicket } from "@/components/OrderTicket";
 import { MarketDepth } from "@/components/MarketDepth";
 import { formatMoney, readBars, readOrders, readPositions, reconcileOrderIntent } from "@/lib/market";
@@ -128,19 +129,20 @@ export default function BybitTradingTerminal() {
   }, [tradeHistory]);
 
   const historyMetrics = useMemo(() => {
-    const total = closedTrades.length;
+    const total = closedTrades.filter(t => t.realized_pnl != null).length;
     if (total === 0) {
-      return { total: 0, netPnl: 0, winRate: 0, profitFactor: 0, wins: 0, losses: 0, avgWin: 0, avgLoss: 0 };
+      return { total: 0, grossPnl: null, winRate: 0, profitFactor: null, wins: 0, losses: 0, avgWin: 0, avgLoss: 0 };
     }
     let wins = 0;
     let losses = 0;
     let grossWin = 0;
     let grossLoss = 0;
-    let netPnl = 0;
+    let grossPnl = 0;
 
     closedTrades.forEach((t) => {
-      const pnl = t.realized_pnl ?? 0;
-      netPnl += pnl;
+      const pnl = t.realized_pnl;
+      if (pnl == null) return;
+      grossPnl += pnl;
       if (pnl > 0) {
         wins++;
         grossWin += pnl;
@@ -151,11 +153,11 @@ export default function BybitTradingTerminal() {
     });
 
     const winRate = total > 0 ? (wins / total) * 100 : 0;
-    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? 99.9 : 0;
+    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : null;
     const avgWin = wins > 0 ? grossWin / wins : 0;
     const avgLoss = losses > 0 ? grossLoss / losses : 0;
 
-    return { total, netPnl, winRate, profitFactor, wins, losses, avgWin, avgLoss };
+    return { total, grossPnl, winRate, profitFactor, wins, losses, avgWin, avgLoss };
   }, [closedTrades]);
   const [bars, setBars] = useState<ExchangeBar[]>([]);
   const [logs,setLogs]=useState<AgentLog[]>([]);
@@ -355,7 +357,7 @@ export default function BybitTradingTerminal() {
         )}
       </AnimatePresence>
 
-      <div className="trade-ticket flex flex-wrap justify-between gap-3 font-mono">
+      <div className="account-summary font-mono">
         <strong>{market.toUpperCase()} · {selectedTicker}</strong>
         <span>Equity: {account ? `$${formatMoney(account.equity)}` : 'Unavailable'}</span>
         <span>Buying power: {account ? `$${formatMoney(account.buying_power)}` : 'Unavailable'}</span>
@@ -364,9 +366,9 @@ export default function BybitTradingTerminal() {
       </div>
 
       {/* Main 3-Column Bybit Pro Terminal */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+      <div className="dashboard-workspace grid grid-cols-1 lg:grid-cols-12 gap-3">
         {/* Left Column (8 cols): Chart + Trading Dock */}
-        <div className="lg:col-span-8 space-y-3">
+        <div className="dashboard-analysis lg:col-span-8 space-y-3 min-w-0">
           {/* Bybit Chart Container */}
           <div className="rounded-lg bg-[#18191f] border border-[#26282f] flex flex-col overflow-hidden shadow-lg">
             {/* Chart Toolbar */}
@@ -523,7 +525,7 @@ export default function BybitTradingTerminal() {
                             <th className="py-2 px-2 text-right">Avg Entry</th>
                             <th className="py-2 px-2 text-right">Current Mark</th>
                             <th className="py-2 px-2 text-right">Market Value</th>
-                            <th className="py-2 px-2 text-right">Unrealized P&L</th>
+                            <th className="py-2 px-2 text-right">Unrealized gross P&L</th>
                             <th className="py-2 px-2 text-right">Action</th>
                           </tr>
                         </thead>
@@ -541,14 +543,15 @@ export default function BybitTradingTerminal() {
                                   {pos.side}
                                 </span>
                               </td>
-                              <td className="py-2.5 px-2 text-right text-[#f5f5f5] font-semibold">{pos.qty}</td>
-                              <td className="py-2.5 px-2 text-right text-[#878996]">${pos.avg_entry_price.toFixed(2)}</td>
+                              <td className="py-2.5 px-2 text-right text-[#f5f5f5] font-semibold">{pos.qty}<ExecutionFees record={pos} /></td>
+                              <td className="py-2.5 px-2 text-right text-[#878996]">${formatMoney(pos.avg_entry_price)}</td>
                               <td className="py-2.5 px-2 text-right text-[#f5f5f5] font-bold">${formatMoney(pos.current_price)}</td>
                               <td className="py-2.5 px-2 text-right text-[#878996]">${formatMoney(pos.market_value)}</td>
                               <td className={`py-2.5 px-2 text-right font-bold ${
-                                pos.unrealized_pl >= 0 ? "text-[#20b26c]" : "text-[#ef454a]"
+                                (pos.unrealized_pl ?? 0) >= 0 ? "text-[#20b26c]" : "text-[#ef454a]"
                               }`}>
-                                {pos.unrealized_pl >= 0 ? "+" : ""}${formatMoney(pos.unrealized_pl)} ({formatMoney(pos.unrealized_plpc)}%)
+                                {pos.unrealized_pl == null ? "Unavailable" : `${pos.unrealized_pl >= 0 ? "+" : ""}$${formatMoney(pos.unrealized_pl)} (${formatMoney(pos.unrealized_plpc)}%)`}
+                                <span className="block text-[10px] text-[#b5b7c0]">Fees excluded</span>
                               </td>
                               <td className="py-2.5 px-2 text-right">
                                 <button
@@ -643,7 +646,7 @@ export default function BybitTradingTerminal() {
                                     {ord.type || "MARKET"}
                                   </td>
                                   <td className="py-2 px-2 text-right text-[#f5f5f5]">
-                                    {ord.limit_price ? `$${ord.limit_price.toFixed(2)}` : (ord.stop_price ? `Stop $${ord.stop_price.toFixed(2)}` : "Market")}
+                                    {ord.limit_price ? `$${formatMoney(ord.limit_price)}` : (ord.stop_price ? `Stop $${formatMoney(ord.stop_price)}` : "Market")}
                                   </td>
                                   <td className="py-2.5 px-2 text-right">
                                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${statusBg}`}>
@@ -719,7 +722,7 @@ export default function BybitTradingTerminal() {
                               </td>
                               <td className="py-2 px-2 text-right text-[#f5f5f5]">{ord.qty}</td>
                               <td className="py-2 px-2 text-right text-[#878996]">
-                                {ord.filled_avg_price ? `$${ord.filled_avg_price.toFixed(2)}` : "-"}
+                                {ord.filled_avg_price ? `$${formatMoney(ord.filled_avg_price)}` : "-"}
                               </td>
                               <td className="py-2 px-2 text-right">
                                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
@@ -774,17 +777,17 @@ export default function BybitTradingTerminal() {
                   {/* Quantitative Performance Metrics Grid */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     <div className="p-2.5 rounded-lg bg-[#1c1d22] border border-[#26282f]">
-                      <div className="text-[10px] text-[#878996] uppercase font-semibold">Realized Net P&L</div>
-                      <div className={`text-base font-black mt-0.5 ${historyMetrics.netPnl >= 0 ? "text-[#20b26c]" : "text-[#ef454a]"}`}>
-                        {historyMetrics.netPnl >= 0 ? "+" : ""}${historyMetrics.netPnl.toFixed(2)}
+                      <div className="text-[10px] text-[#878996] uppercase font-semibold">Realized gross P&L</div>
+                      <div className={`text-base font-black mt-0.5 ${(historyMetrics.grossPnl ?? 0) >= 0 ? "text-[#20b26c]" : "text-[#ef454a]"}`}>
+                        {historyMetrics.grossPnl == null ? '—' : `${historyMetrics.grossPnl >= 0 ? '+' : ''}$${formatMoney(historyMetrics.grossPnl)}`}
                       </div>
-                      <div className="text-[9px] text-[#5e6673] mt-0.5">{historyMetrics.total} Closed Trades</div>
+                      <div className="text-[10px] text-[#b5b7c0] mt-1">Fees excluded · Net P&L unavailable</div>
                     </div>
 
                     <div className="p-2.5 rounded-lg bg-[#1c1d22] border border-[#26282f]">
                       <div className="text-[10px] text-[#878996] uppercase font-semibold">Win Rate</div>
                       <div className="text-base font-black text-[#f7a600] mt-0.5">
-                        {historyMetrics.winRate.toFixed(1)}%
+                        {historyMetrics.total ? `${historyMetrics.winRate.toFixed(1)}%` : '—'}
                       </div>
                       <div className="text-[9px] text-[#878996] mt-0.5">
                         {historyMetrics.wins}W / {historyMetrics.losses}L
@@ -794,7 +797,7 @@ export default function BybitTradingTerminal() {
                     <div className="p-2.5 rounded-lg bg-[#1c1d22] border border-[#26282f]">
                       <div className="text-[10px] text-[#878996] uppercase font-semibold">Profit Factor</div>
                       <div className="text-base font-black text-[#f5f5f5] mt-0.5">
-                        {historyMetrics.profitFactor.toFixed(2)}x
+                        {historyMetrics.profitFactor == null ? '—' : `${historyMetrics.profitFactor.toFixed(2)}x`}
                       </div>
                       <div className="text-[9px] text-[#5e6673] mt-0.5">Gross Win / Gross Loss</div>
                     </div>
@@ -802,9 +805,9 @@ export default function BybitTradingTerminal() {
                     <div className="p-2.5 rounded-lg bg-[#1c1d22] border border-[#26282f]">
                       <div className="text-[10px] text-[#878996] uppercase font-semibold">Avg Win / Avg Loss</div>
                       <div className="text-xs font-bold mt-1 flex items-center gap-1.5">
-                        <span className="text-[#20b26c]">+${historyMetrics.avgWin.toFixed(2)}</span>
+                        <span className="text-[#20b26c]">{historyMetrics.wins ? `+$${formatMoney(historyMetrics.avgWin)}` : '—'}</span>
                         <span className="text-[#5e6673]">/</span>
-                        <span className="text-[#ef454a]">-${historyMetrics.avgLoss.toFixed(2)}</span>
+                        <span className="text-[#ef454a]">{historyMetrics.losses ? `-$${formatMoney(historyMetrics.avgLoss)}` : '—'}</span>
                       </div>
                       <div className="text-[9px] text-[#5e6673] mt-0.5">Risk-Reward Ratio</div>
                     </div>
@@ -838,7 +841,7 @@ export default function BybitTradingTerminal() {
                             <th className="py-2 px-2 text-right">Qty</th>
                             <th className="py-2 px-2 text-right">Entry</th>
                             <th className="py-2 px-2 text-right">Exit</th>
-                            <th className="py-2 px-2 text-right">Realized P&L</th>
+                            <th className="py-2 px-2 text-right">Gross P&L / native fees</th>
                             <th className="py-2 px-2 text-right">Exit Time</th>
                             <th className="py-2 px-2 text-right">Status</th>
                           </tr>
@@ -877,7 +880,7 @@ export default function BybitTradingTerminal() {
                                   {formatMoney(exitPrice)}
                                 </td>
                                 <td className={`py-2 px-2 text-right font-bold ${isWin ? "text-[#20b26c]" : "text-[#ef454a]"}`}>
-                                  {pnl==null?'—':`${isWin?'+':''}$${formatMoney(pnl)}`}
+                                  {pnl==null?'Gross P&L unavailable':`${isWin?'+':''}$${formatMoney(pnl)}`}<ExecutionFees record={t} />
                                 </td>
                                 <td className="py-2 px-2 text-right text-[#5e6673] text-[11px]">
                                   {timeDisplay}
@@ -903,7 +906,7 @@ export default function BybitTradingTerminal() {
         </div>
 
         {/* Right Column (4 cols): Order Book + Order Execution Panel */}
-        <div className="lg:col-span-4 space-y-3">
+        <div className="dashboard-orders lg:col-span-4 space-y-3 min-w-0">
           <MarketDepth />
           {closing ? <OrderTicket key={`close:${closing.trade_id||closing.id}`} close={closing} onDismiss={()=>setClosing(null)} onUpdated={()=>{void refreshAccountAndPositions();marketState.refresh();}} /> : <OrderTicket key={`${market}:${selectedTicker}`} onUpdated={()=>{void refreshAccountAndPositions();marketState.refresh();}} />}
           <div className="trade-ticket">

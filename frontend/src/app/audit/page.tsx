@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense, useMemo } from "react";
+import { useEffect, useState, Suspense, useMemo, useCallback } from "react";
 import { ShieldCheck, Search, ChevronDown, ChevronUp, Copy, Check, Terminal, BrainCircuit } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -22,13 +22,17 @@ function AuditTrailContent() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchAudit = async () => {
+  const fetchAudit = useCallback(async (signal?: AbortSignal) => {
       try {
-        const res = await fetch("/api/audit");
+        const res = await fetch("/api/audit", {signal, cache:'no-store'});
         const ct = res.headers.get("content-type");
-        const data = (res.ok && ct && ct.includes("application/json")) ? await res.json() : [];
+        if (!res.ok || !ct?.includes("application/json")) throw new Error('Audit unavailable');
+        const data = await res.json();
+        if(signal?.aborted)return;
+        setError('');
         
         if (Array.isArray(data) && data.length > 0) {
           setAuditRecords(data);
@@ -39,12 +43,17 @@ function AuditTrailContent() {
           setAuditRecords([]);
         }
       } catch {
-        setAuditRecords([]);
+        if(!signal?.aborted)setError('Audit unavailable. Retained records, if any, are stale.');
+      } finally {
+        if(!signal?.aborted)setLoading(false);
       }
-    };
+    }, []);
 
-    fetchAudit();
-  }, []);
+  useEffect(() => {
+    const controller=new AbortController();
+    const timer=setTimeout(()=>void fetchAudit(controller.signal),0);
+    return ()=>{clearTimeout(timer);controller.abort();};
+  }, [fetchAudit]);
 
   const filteredRecords = useMemo(() => {
     if (!searchQuery) return auditRecords;
@@ -65,7 +74,7 @@ function AuditTrailContent() {
   };
 
   return (
-    <div className="space-y-6 select-none">
+    <div className="workspace-page space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -85,6 +94,7 @@ function AuditTrailContent() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#848e9c]" />
           <input
             type="text"
+            aria-label="Search audit records"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by Ticker, Strategy or ID..."
@@ -92,10 +102,12 @@ function AuditTrailContent() {
           />
         </div>
       </div>
+      {error && <div role="status" className="trade-ticket text-sm text-[#f7a600]">{error}<button disabled={loading} type="button" onClick={()=>{setLoading(true);void fetchAudit();}} className="text-left underline">Retry audit</button></div>}
+      {loading && <p role="status" className="text-xs text-[#b5b7c0]">Loading audit trail…</p>}
 
       {/* Audit Records List */}
       <div className="space-y-4">
-        {filteredRecords.length === 0 && (
+        {!error && !loading && filteredRecords.length === 0 && (
           <div className="p-10 rounded-2xl bg-[#181a20] border border-dashed border-[#2b313a] text-center text-xs font-mono text-[#848e9c]">
             No audit records yet. Every Master Strategy decision is logged here with its full risk gate matrix.
           </div>

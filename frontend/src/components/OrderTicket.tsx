@@ -12,6 +12,7 @@ export function OrderTicket({onUpdated,close,onDismiss}:{onUpdated?:()=>void;clo
   const [qty,setQty]=useState(''); const [price,setPrice]=useState(''); const [attempt,setAttempt]=useState<Attempt|null>(null);
   const [busy,setBusy]=useState(false); const [notice,setNotice]=useState(''); const [unknown,setUnknown]=useState(false);
   const dialog=useRef<HTMLDialogElement>(null); const alive=useRef(true);
+  const previewButton=useRef<HTMLButtonElement>(null);
   useEffect(()=>{alive.current=true;return ()=>{alive.current=false;};},[]);
   useEffect(()=>{
     const timer=setTimeout(()=>{
@@ -57,12 +58,18 @@ export function OrderTicket({onUpdated,close,onDismiss}:{onUpdated?:()=>void;clo
         <label>Order quantity<input aria-label="Order quantity" type="number" min="0.000000000001" step="any" required value={qty} disabled={unknown||busy} onChange={e=>setQty(e.target.value)} /></label>
         {orderType==='LIMIT'&&<label>Limit price<input aria-label="Limit price" type="number" min="0.000000000001" step="any" required value={price} disabled={unknown||busy} onChange={e=>setPrice(e.target.value)} /></label>}
       </>}
-      <button className="gold-button" disabled={busy||unknown||spotSell} type="submit">{busy?'Checking…':'Preview testnet order'}</button>
+      <button ref={previewButton} className="gold-button" disabled={busy||unknown||spotSell} type="submit">{busy?'Checking…':'Preview testnet order'}</button>
       {onDismiss&&<button type="button" onClick={onDismiss}>Back to positions</button>}
     </form>
     {notice&&<p role="status" className="break-words text-[#f7a600]">{notice}</p>}
     {unknown&&<button type="button" className="gold-button" disabled={busy} onClick={submit}>Reconcile / retry same intent</button>}
-    <dialog ref={dialog} onCancel={event=>{if(busy)event.preventDefault();}} className="confirmation-dialog" aria-label="Confirm testnet order">
+    <dialog ref={dialog} onClose={()=>previewButton.current?.focus()} onKeyDown={event=>{
+      if(event.key!=='Tab')return;
+      const controls=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+      const first=controls[0],last=controls.at(-1);
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
+    }} onCancel={event=>{if(busy)event.preventDefault();}} className="confirmation-dialog" aria-label="Confirm testnet order">
       {attempt&&<><h2 className="font-bold text-lg">Review {attempt.close?'position close':'testnet order'}</h2>
         <p>{attempt.intent.market} · {attempt.intent.symbol} · {attempt.intent.side} · {attempt.intent.order_type}</p>
         <dl><dt>Quantity</dt><dd>{attempt.preview.quantity || attempt.intent.qty}</dd><dt>Preview price</dt><dd>{attempt.preview.price || 'Unavailable'}</dd><dt>Notional</dt><dd>{attempt.preview.notional || 'Unavailable'}</dd><dt>Client intent ID</dt><dd className="break-all">{attempt.intent.client_order_id}</dd></dl>

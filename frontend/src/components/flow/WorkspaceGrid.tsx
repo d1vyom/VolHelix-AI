@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { FlowMetricsStrip } from "./FlowMetricsStrip";
@@ -15,12 +15,12 @@ const VolumeProfile = dynamic(() => import("./VolumeProfile").then(mod => mod.Vo
 const getLayout = (id: string) => {
   if (typeof window === "undefined") return undefined;
   const val = localStorage.getItem(id);
-  return val ? JSON.parse(val) : undefined;
+  try { return val ? JSON.parse(val) : undefined; } catch { return undefined; }
 };
 
 const saveLayout = (id: string, layout: unknown) => {
   if (typeof window !== "undefined") {
-    localStorage.setItem(id, JSON.stringify(layout));
+    try { localStorage.setItem(id, JSON.stringify(layout)); } catch { /* Storage may be unavailable. */ }
   }
 };
 
@@ -37,7 +37,14 @@ function ResizeHandle({ direction = "horizontal" }: { direction?: "horizontal" |
   return <PanelResizeHandle className="w-1 h-full bg-[#1C1C1E] hover:bg-[#007AFF] transition-colors cursor-col-resize" />;
 }
 
+const subscribeNarrow = (notify: () => void) => {
+  const query = window.matchMedia('(max-width: 1100px)');
+  query.addEventListener('change', notify);
+  return () => query.removeEventListener('change', notify);
+};
+
 export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
+  const narrow = useSyncExternalStore(subscribeNarrow, () => window.matchMedia('(max-width: 1100px)').matches, () => false);
   const [preset, setPreset] = useState<WorkspacePreset>(() => {
     if (typeof window !== "undefined") {
       try {
@@ -62,6 +69,12 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
   };
 
   const renderPreset = () => {
+    if (narrow) return <div className="compact-flow-grid">
+      <div className="compact-flow-chart">{preset === 'LIQUIDITY' ? <LiquidityHeatmap symbol={symbol} /> : <FootprintChart symbol={symbol} />}</div>
+      {preset !== 'LIQUIDITY' && <div className="compact-flow-cvd"><CVDPanel symbol={symbol} /></div>}
+      {preset !== 'ANALYSIS' && <><div className="compact-flow-dom"><DOMLadder symbol={symbol} /></div><div className="compact-flow-tape"><TimeAndSales symbol={symbol} /></div></>}
+      {preset !== 'ORDER_FLOW' && <div className="compact-flow-profile"><VolumeProfile symbol={symbol} /></div>}
+    </div>;
     switch (preset) {
       case "ORDER_FLOW":
         return (
@@ -70,7 +83,7 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
             defaultLayout={getLayout("volhelix.workspace.v1.orderflow")}
             onLayoutChange={(l) => saveLayout("volhelix.workspace.v1.orderflow", l)}
           >
-            <Panel defaultSize={65} minSize={30}>
+            <Panel defaultSize={52} minSize={30}>
               <PanelGroup orientation="vertical">
                 <Panel defaultSize={75} minSize={30}>
                   <FootprintChart symbol={symbol} />
@@ -82,12 +95,12 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
               </PanelGroup>
             </Panel>
             <ResizeHandle direction="horizontal" />
-            <Panel defaultSize={35} minSize={20}>
-              <PanelGroup orientation="horizontal">
+            <Panel defaultSize={48} minSize={30}>
+              <PanelGroup orientation="vertical">
                 <Panel defaultSize={60} minSize={30}>
                   <DOMLadder symbol={symbol} />
                 </Panel>
-                <ResizeHandle direction="horizontal" />
+                <ResizeHandle direction="vertical" />
                 <Panel defaultSize={40} minSize={20}>
                   <TimeAndSales symbol={symbol} />
                 </Panel>
@@ -108,15 +121,15 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
             </Panel>
             <ResizeHandle direction="horizontal" />
             <Panel defaultSize={35} minSize={20}>
-              <PanelGroup orientation="horizontal">
+              <PanelGroup orientation="vertical">
                 <Panel defaultSize={50} minSize={20}>
                   <DOMLadder symbol={symbol} />
                 </Panel>
-                <ResizeHandle direction="horizontal" />
+                <ResizeHandle direction="vertical" />
                 <Panel defaultSize={25} minSize={10}>
                   <TimeAndSales symbol={symbol} />
                 </Panel>
-                <ResizeHandle direction="horizontal" />
+                <ResizeHandle direction="vertical" />
                 <Panel defaultSize={25} minSize={10}>
                   <VolumeProfile symbol={symbol} />
                 </Panel>
@@ -156,7 +169,7 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#121214] text-neutral-100 p-1.5 gap-1.5 overflow-hidden">
+    <div className="flow-workspace flex flex-col h-full w-full bg-[#121214] text-neutral-100 p-1.5 gap-1.5 overflow-hidden">
       {/* Metrics Strip */}
       <div className="shrink-0 rounded overflow-hidden">
         <FlowMetricsStrip />
@@ -165,6 +178,7 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
       <div className="shrink-0 flex items-center justify-end gap-2 px-1">
         <span className="text-xs text-neutral-400 uppercase tracking-wider font-bold">Workspace:</span>
         <select
+          aria-label="Workspace layout"
           value={preset}
           onChange={(e) => handlePresetChange(e.target.value as WorkspacePreset)}
           className="bg-[#1C1C1E] text-white px-2 py-1 text-xs rounded border border-[#2C2C2E] outline-none focus:border-[#f7a600] font-mono cursor-pointer"
@@ -176,7 +190,7 @@ export function WorkspaceGrid({ symbol }: WorkspaceGridProps) {
       </div>
 
       {/* Grid Area */}
-      <div className="grow min-h-0 rounded overflow-hidden">
+      <div className="flow-grid-area grow min-h-0 rounded overflow-hidden">
         {renderPreset()}
       </div>
     </div>

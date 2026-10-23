@@ -6,11 +6,12 @@ from backend.marketdata.models import BookSnapshot
 from backend.engine.flow_models import HeatmapFrame, HeatmapSnapshot
 from backend.engine.footprint import round_to_tick
 from backend.config import settings
+from backend.marketdata.price_grid import grouped_tick_size
 
 class HeatmapEngine:
     def __init__(self, symbol: str, tick_size: float):
         self.symbol = symbol.upper()
-        self.tick_group = tick_size * settings.FLOW_TICK_GROUP_MULTIPLIER
+        self.tick_group = grouped_tick_size(tick_size, settings.FLOW_TICK_GROUP_MULTIPLIER)
         self.bin_ms = settings.FLOW_HEATMAP_BIN_MS
         self.window_sec = settings.FLOW_HEATMAP_WINDOW_SEC
         

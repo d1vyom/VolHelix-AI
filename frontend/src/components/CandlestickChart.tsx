@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useMemo, useCallback, useEffect, memo } from "react";
+import { formatMoney } from "@/lib/market";
 import { ExchangeBar } from "../lib/api";
 import { ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 
@@ -210,7 +211,7 @@ export const CandlestickChart = memo(function CandlestickChart({
 
   if (!data || data.length === 0) {
     return (
-      <div className="h-68 w-full flex items-center justify-center text-[#878996] font-mono text-xs">
+      <div className="market-chart-empty h-68 w-full flex items-center justify-center text-[#878996] font-mono text-xs">
         Candles unavailable / awaiting production data
       </div>
     );
@@ -312,12 +313,12 @@ export const CandlestickChart = memo(function CandlestickChart({
       {hoveredBar && (
         <div className="absolute top-1.5 left-3 z-10 flex flex-wrap items-center gap-3 text-[11px] pointer-events-none">
           <span className="text-[#878996]">Time (IST): <strong className="text-[#f5f5f5]">{hoveredBar.time}</strong></span>
-          <span className="text-[#878996]">O: <strong className="text-[#f5f5f5]">${hoveredBar.open >= 10 ? hoveredBar.open.toFixed(2) : hoveredBar.open.toFixed(4)}</strong></span>
-          <span className="text-[#878996]">H: <strong className="text-[#f5f5f5]">${hoveredBar.high >= 10 ? hoveredBar.high.toFixed(2) : hoveredBar.high.toFixed(4)}</strong></span>
-          <span className="text-[#878996]">L: <strong className="text-[#f5f5f5]">${hoveredBar.low >= 10 ? hoveredBar.low.toFixed(2) : hoveredBar.low.toFixed(4)}</strong></span>
-          <span className="text-[#878996]">C: <strong className="text-[#f5f5f5]">${hoveredBar.close >= 10 ? hoveredBar.close.toFixed(2) : hoveredBar.close.toFixed(4)}</strong></span>
+          <span className="text-[#878996]">O: <strong className="text-[#f5f5f5]">${formatMoney(hoveredBar.open)}</strong></span>
+          <span className="text-[#878996]">H: <strong className="text-[#f5f5f5]">${formatMoney(hoveredBar.high)}</strong></span>
+          <span className="text-[#878996]">L: <strong className="text-[#f5f5f5]">${formatMoney(hoveredBar.low)}</strong></span>
+          <span className="text-[#878996]">C: <strong className="text-[#f5f5f5]">${formatMoney(hoveredBar.close)}</strong></span>
           <span className={`font-bold ${isUp ? "text-[#20b26c]" : "text-[#ef4444]"}`}>
-            {isUp ? "+" : ""}${change >= 10 || change <= -10 ? change.toFixed(2) : change.toFixed(4)} ({isUp ? "+" : ""}{changePct.toFixed(2)}%)
+            {isUp ? "+" : ""}${formatMoney(change)} ({isUp ? "+" : ""}{changePct.toFixed(2)}%)
           </span>
           <span className="text-[#878996]">Vol: <strong className="text-[#20b26c]">{(hoveredBar.volume / 1000).toFixed(1)}K</strong></span>
         </div>
@@ -385,7 +386,7 @@ export const CandlestickChart = memo(function CandlestickChart({
               fontSize={10}
               fontFamily="monospace"
             >
-              ${tick.price >= 100 ? tick.price.toFixed(0) : (tick.price >= 10 ? tick.price.toFixed(2) : tick.price.toFixed(4))}
+              ${formatMoney(tick.price)}
             </text>
           </g>
         ))}
@@ -519,7 +520,7 @@ export const CandlestickChart = memo(function CandlestickChart({
             fontWeight="bold"
             fontFamily="monospace"
           >
-            {activeLivePrice >= 100 ? activeLivePrice.toFixed(2) : (activeLivePrice >= 10 ? activeLivePrice.toFixed(2) : activeLivePrice.toFixed(4))}
+            {formatMoney(activeLivePrice)}
           </text>
           {/* Live Candle Closing Countdown */}
           <text
@@ -636,7 +637,7 @@ export const CandlestickChart = memo(function CandlestickChart({
                   fontWeight="bold"
                   fontFamily="monospace"
                 >
-                  {cursorPrice >= 100 ? cursorPrice.toFixed(2) : (cursorPrice >= 10 ? cursorPrice.toFixed(2) : cursorPrice.toFixed(4))}
+                  {formatMoney(cursorPrice)}
                 </text>
               </g>
             )}

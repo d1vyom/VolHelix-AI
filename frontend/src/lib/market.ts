@@ -47,4 +47,9 @@ export async function readBars(market: Market, symbol: string, interval: string,
   const result=await request<{bars: (ExchangeBar & {open_time?: number})[]}>(`${marketPath('bars',market,symbol)}&interval=${interval.toLowerCase()}`,{signal});
   return result.bars.map(bar=>({...bar,time:bar.time || new Date(bar.open_time!).toISOString()}));
 }
-export function formatMoney(value: number | null | undefined) { return value != null && Number.isFinite(value) ? value.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'; }
+export function formatMoney(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return value !== 0 && Math.abs(value) < 1
+    ? value.toLocaleString('en-US', { maximumSignificantDigits: 8 })
+    : value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}

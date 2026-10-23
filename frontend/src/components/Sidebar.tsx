@@ -109,6 +109,8 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
             <Link
               key={item.key}
               href={item.href}
+              aria-label={item.label}
+              aria-current={isActive ? 'page' : undefined}
               className={`relative flex items-center px-3 py-2 rounded-md transition-all duration-150 group cursor-pointer ${
                 isActive
                   ? "bg-[#f7a600] text-[#121214] font-bold shadow-[0_0_10px_rgba(247,166,0,0.3)]"

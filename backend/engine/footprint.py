@@ -1,18 +1,15 @@
-import math
 from typing import Dict, Tuple
 from backend.engine.flow_models import FootprintBar, FootprintCell
 from backend.marketdata.models import Trade
 from backend.config import settings
-
-def round_to_tick(price: float, tick_group: float) -> float:
-    return round(math.floor(price / tick_group) * tick_group, 8)
+from backend.marketdata.price_grid import grouped_tick_size, round_to_tick
 
 class FootprintEngine:
     def __init__(self, symbol: str, interval: str, tick_size: float):
         self.symbol = symbol.upper()
         self.interval = interval
         self.tick_size = tick_size
-        self.tick_group = tick_size * settings.FLOW_TICK_GROUP_MULTIPLIER
+        self.tick_group = grouped_tick_size(tick_size, settings.FLOW_TICK_GROUP_MULTIPLIER)
         self.interval_ms = self._parse_interval(interval)
         self.current_bar: FootprintBar | None = None
         self.cells_dict: Dict[float, FootprintCell] = {}

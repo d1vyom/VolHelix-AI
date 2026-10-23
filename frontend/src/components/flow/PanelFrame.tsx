@@ -25,10 +25,10 @@ export function PanelFrame({
   className = "h-full w-full",
 }: PanelFrameProps) {
   return (
-    <div className={`flex flex-col bg-[#1C1C1E] border border-[#2C2C2E] rounded-md overflow-hidden ${className}`}>
+    <div className={`flow-panel flex flex-col bg-[#1C1C1E] border border-[#2C2C2E] rounded-md overflow-hidden ${className}`}>
       {/* Header */}
       <div className="flex items-center justify-between px-2 py-1.5 bg-[#2C2C2E]/30 border-b border-[#2C2C2E] shrink-0">
-        <div className="flex items-center gap-2">
+        <div className="flow-panel-title flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold text-neutral-200 tracking-wide">{title}</span>
           <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-[#3A3A3C] text-neutral-300 rounded">
             {symbol}
@@ -67,7 +67,7 @@ export function PanelFrame({
       </div>
       
       {/* Content Body */}
-      <div className="flex-1 relative min-h-0 overflow-hidden">
+      <div className="flex flex-col flex-1 relative min-h-0 overflow-hidden">
         {children}
       </div>
     </div>

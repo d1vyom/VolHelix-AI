@@ -25,10 +25,9 @@ export function CVDPanel({ symbol }: { symbol: string }) {
       timeStr: formatTimestampIST(bar.open_time),
       cvd: bar.cumulative_delta,
       delta: bar.delta,
-      vwap: state.metrics?.vwap || null, // We could pull historical vwap if we had it per bar, for now just delta
       isForming: !bar.is_closed,
     }));
-  }, [state.bars, state.metrics?.vwap]);
+  }, [state.bars]);
 
   return (
     <PanelFrame title="CVD & Delta" symbol={symbol} health={state.health}>

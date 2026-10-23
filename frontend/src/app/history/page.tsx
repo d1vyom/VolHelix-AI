@@ -14,6 +14,8 @@ import {
   Tooltip,
 } from "recharts";
 import { getTrades } from "../../lib/api";
+import { ExecutionFees } from '@/components/ExecutionFees';
+import { formatMoney } from '@/lib/market';
 import { TradeRecord } from "../../lib/types";
 
 function TradeHistoryContent() {
@@ -72,20 +74,21 @@ function TradeHistoryContent() {
   }, [trades, statusFilter]);
 
   const stats = useMemo(() => {
-    const total = trades.length;
+    const known = trades.filter(t => t.realized_pnl != null);
+    const total = known.length;
     const wins = trades.filter((t) => (t.realized_pnl || 0) > 0);
     const losses = trades.filter((t) => (t.realized_pnl || 0) < 0);
-    const totalPnL = trades.reduce((sum, t) => sum + (t.realized_pnl || 0), 0);
+    const totalPnL = known.reduce((sum, t) => sum + (t.realized_pnl || 0), 0);
     const winRate = total > 0 ? (wins.length / total) * 100 : 0;
     const grossProfit = wins.reduce((sum, t) => sum + Math.max(0, t.realized_pnl || 0), 0);
     const grossLoss = Math.abs(losses.reduce((sum, t) => sum + Math.min(0, t.realized_pnl || 0), 0));
-    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 99.9 : 0;
+    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : null;
 
     return {
       total,
       wins: wins.length,
       losses: losses.length,
-      totalPnL,
+      totalPnL: total ? totalPnL : null,
       winRate,
       profitFactor,
       avgWin: wins.length > 0 ? grossProfit / wins.length : 0,
@@ -96,7 +99,7 @@ function TradeHistoryContent() {
   // Quantitative analytics computed from real ledger rows only.
   const strategyChartData = useMemo(() => {
     const groups: Record<string, { total: number; wins: number; pnl: number }> = {};
-    trades.forEach((t) => {
+    trades.filter(t => t.realized_pnl != null).forEach((t) => {
       const rawType = t.proposal?.strategy_type || "UNCLASSIFIED";
       const name = rawType === "MASTER_ORDER_FLOW" ? "Master Flow" : rawType.replace(/_/g, " ");
       if (!groups[name]) {
@@ -118,15 +121,15 @@ function TradeHistoryContent() {
   }, [trades]);
 
   return (
-    <div className="space-y-6 select-none">
+    <div className="workspace-page space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#eaecef] flex items-center gap-2.5">
+          <h1 className="text-xl font-bold tracking-tight text-[#eaecef] flex items-center gap-2.5">
             <span className="p-2 rounded-xl bg-[#f0b90b]/10 border border-[#f0b90b]/30 text-[#f0b90b]">
               <BarChart className="w-5 h-5" />
           </span>
-          {market.toUpperCase()} Trade Ledger & Quantitative Analytics
+          {market.toUpperCase()} Execution ledger
         </h1>
         <p className="text-xs text-[#848e9c] font-mono mt-1">
           Binance Testnet {market} execution records
@@ -150,7 +153,7 @@ function TradeHistoryContent() {
 
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#181a20] border border-[#2b313a] text-xs font-mono text-[#eaecef]">
             <Award className="w-3.5 h-3.5 text-[#f0b90b]" />
-            <span>Profit Factor: <strong className="text-[#f0b90b]">{stats.profitFactor.toFixed(2)}</strong></span>
+            <span>Profit Factor: <strong className="text-[#f0b90b]">{stats.profitFactor == null ? '—' : stats.profitFactor.toFixed(2)}</strong></span>
           </div>
         </div>
       </div>
@@ -159,19 +162,20 @@ function TradeHistoryContent() {
       {/* 4 Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-5 rounded-2xl bg-[#181a20] border border-[#2b313a] shadow-xl">
-          <div className="text-xs font-mono text-[#848e9c] mb-1">CUMULATIVE REALIZED P&L</div>
-          <div className={`text-3xl font-extrabold font-mono ${stats.totalPnL >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]"}`}>
-            {stats.totalPnL >= 0 ? "+" : ""}${stats.totalPnL.toFixed(2)}
+          <div className="text-xs font-mono text-[#848e9c] mb-1">REALIZED GROSS P&L</div>
+          <div className={`text-3xl font-extrabold font-mono ${(stats.totalPnL ?? 0) >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]"}`}>
+            {stats.totalPnL == null ? "—" : `${stats.totalPnL >= 0 ? "+" : ""}$${formatMoney(stats.totalPnL)}`}
           </div>
           <div className="text-[11px] font-mono text-[#848e9c] mt-2">
-            Reported realized P&L; execution fees excluded
+            Fees excluded · Net P&L unavailable
+            <span className="block mt-1">Known results: {stats.total} / {trades.length} records</span>
           </div>
         </div>
 
         <div className="p-5 rounded-2xl bg-[#181a20] border border-[#2b313a] shadow-xl">
           <div className="text-xs font-mono text-[#848e9c] mb-1">SYSTEM WIN RATE</div>
           <div className="text-3xl font-extrabold font-mono text-[#0ecb81]">
-            {stats.winRate.toFixed(1)}%
+            {stats.total ? `${stats.winRate.toFixed(1)}%` : '—'}
           </div>
           <div className="text-[11px] font-mono text-[#848e9c] mt-2 flex items-center gap-2">
             <span className="text-[#0ecb81] font-semibold">{stats.wins} Wins</span>
@@ -183,7 +187,7 @@ function TradeHistoryContent() {
         <div className="p-5 rounded-2xl bg-[#181a20] border border-[#2b313a] shadow-xl">
           <div className="text-xs font-mono text-[#848e9c] mb-1">PROFIT FACTOR</div>
           <div className="text-3xl font-extrabold font-mono text-[#f0b90b]">
-            {stats.profitFactor.toFixed(2)}
+            {stats.profitFactor == null ? '—' : stats.profitFactor.toFixed(2)}
           </div>
           <div className="text-[11px] font-mono text-[#848e9c] mt-2">
             Gross Gain / Gross Loss
@@ -193,12 +197,12 @@ function TradeHistoryContent() {
         <div className="p-5 rounded-2xl bg-[#181a20] border border-[#2b313a] shadow-xl">
           <div className="text-xs font-mono text-[#848e9c] mb-1">AVG WIN / AVG LOSS</div>
           <div className="text-2xl font-extrabold font-mono text-[#eaecef] flex items-center gap-2">
-            <span className="text-[#0ecb81] text-lg">+${stats.avgWin.toFixed(0)}</span>
+            <span className="text-[#0ecb81] text-lg">{stats.wins ? `+$${formatMoney(stats.avgWin)}` : '—'}</span>
             <span className="text-[#5e6673] text-sm">/</span>
-            <span className="text-[#f6465d] text-lg">-${stats.avgLoss.toFixed(0)}</span>
+            <span className="text-[#f6465d] text-lg">{stats.losses ? `-$${formatMoney(stats.avgLoss)}` : '—'}</span>
           </div>
           <div className="text-[11px] font-mono text-[#848e9c] mt-2">
-            Payoff Ratio: {(stats.avgLoss > 0 ? stats.avgWin / stats.avgLoss : 0).toFixed(2)}x
+            Payoff ratio: {stats.avgLoss > 0 && stats.wins ? `${(stats.avgWin / stats.avgLoss).toFixed(2)}x` : '—'}
           </div>
         </div>
       </div>
@@ -210,11 +214,11 @@ function TradeHistoryContent() {
         transition={{ duration: 0.3 }}
         className="p-6 rounded-2xl bg-[#181a20] border border-[#2b313a] shadow-xl"
       >
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <h3 className="font-semibold text-[#eaecef] flex items-center gap-2 text-base">
               <TrendingUp className="w-4 h-4 text-[#f0b90b]" />
-              Master Flow Win Rate & Alpha Distribution
+              Gross win rate by strategy
             </h3>
             <p className="text-xs font-mono text-[#848e9c] mt-0.5">
               Historical win rate across executed Master Strategy positions
@@ -246,7 +250,7 @@ function TradeHistoryContent() {
                   }}
                   labelStyle={{ color: "#f0b90b", fontWeight: 700 }}
                 />
-                <Bar dataKey="winRate" name="Win Rate %" fill="#f0b90b" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="winRate" name="Win Rate %" fill="#f0b90b" radius={[6, 6, 0, 0]} isAnimationActive={false} />
               </RechartsBarChart>
             </ResponsiveContainer>
           </div>
@@ -267,7 +271,7 @@ function TradeHistoryContent() {
               Executed Trade Ledger
             </h3>
             <p className="text-xs font-mono text-[#848e9c] mt-0.5">
-              Forensic record of completed and active crypto spot positions on Binance Testnet
+              Tracked positions and execution accounting on Binance Testnet
             </p>
           </div>
 
@@ -290,7 +294,7 @@ function TradeHistoryContent() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-xs font-mono">
+          <table className="w-full min-w-[1000px] text-xs font-mono">
             <thead>
               <tr className="border-b border-[#2b313a] text-[#848e9c] uppercase tracking-wider text-[10px]">
                 <th className="text-left py-3 px-3">Trade / Order ID</th>
@@ -298,7 +302,7 @@ function TradeHistoryContent() {
                 <th className="text-left py-3 px-3">Strategy</th>
                 <th className="text-left py-3 px-3">Dynamic TP / SL</th>
                 <th className="text-right py-3 px-3">Entry Price / Size</th>
-                <th className="text-right py-3 px-3">Realized P&L</th>
+                <th className="text-right py-3 px-3">Gross P&L / native fees</th>
                 <th className="text-right py-3 px-3">Date / Time</th>
                 <th className="text-right py-3 px-3">Status</th>
               </tr>
@@ -313,7 +317,7 @@ function TradeHistoryContent() {
               )}
 
               {filteredTrades.map((t) => {
-                const pnl = t.realized_pnl || 0;
+                const pnl = t.realized_pnl;
                 const tp = t.take_profit_price || t.proposal?.take_profit;
                 const sl = t.stop_loss_price || t.proposal?.stop_loss;
                 const displayId = t.trade_id.length > 14 ? `${t.trade_id.slice(0, 8)}...` : t.trade_id;
@@ -337,9 +341,9 @@ function TradeHistoryContent() {
                     <td className="py-3.5 px-3 text-[11px]">
                       {tp && sl ? (
                         <div className="flex items-center gap-2">
-                          <span className="text-[#0ecb81] font-bold">TP: ${tp.toFixed(2)}</span>
+                          <span className="text-[#0ecb81] font-bold">TP: ${formatMoney(tp)}</span>
                           <span className="text-[#5e6673]">|</span>
-                          <span className="text-[#f6465d] font-bold">SL: ${sl.toFixed(2)}</span>
+                          <span className="text-[#f6465d] font-bold">SL: ${formatMoney(sl)}</span>
                         </div>
                       ) : (
                         <span className="text-[#848e9c]">Dynamic Anchor</span>
@@ -348,8 +352,8 @@ function TradeHistoryContent() {
                     <td className="py-3.5 px-3 text-right text-[#eaecef]">
                       ${t.entry_price ? t.entry_price.toLocaleString() : (t.proposal?.net_premium ? t.proposal.net_premium.toLocaleString() : "—")}
                     </td>
-                    <td className={`py-3.5 px-3 text-right font-bold ${pnl >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]"}`}>
-                      {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
+                    <td className={`py-3.5 px-3 text-right font-bold ${(pnl ?? 0) >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]"}`}>
+                      {pnl == null ? "Gross P&L unavailable" : `${pnl >= 0 ? "+" : ""}$${formatMoney(pnl)}`}<ExecutionFees record={t} />
                     </td>
                     <td className="py-3.5 px-3 text-right text-[#848e9c]">
                       {t.entry_time ? `${new Date(t.entry_time).toLocaleDateString()} ${new Date(t.entry_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : "—"}
@@ -357,9 +361,9 @@ function TradeHistoryContent() {
                     <td className="py-3.5 px-3 text-right">
                       <span
                         className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                          t.status === "TAKE_PROFIT" || (t.status === "CLOSED" && pnl > 0)
+                          t.status === "TAKE_PROFIT" || (t.status === "CLOSED" && (pnl ?? 0) > 0)
                             ? "bg-[#0ecb81]/15 text-[#0ecb81] border-[#0ecb81]/30"
-                            : t.status === "STOPPED_OUT" || pnl < 0
+                            : t.status === "STOPPED_OUT" || (pnl ?? 0) < 0
                             ? "bg-[#f6465d]/15 text-[#f6465d] border-[#f6465d]/30"
                             : t.status === "OPEN"
                             ? "bg-[#3b82f6]/15 text-[#3b82f6] border-[#3b82f6]/30"

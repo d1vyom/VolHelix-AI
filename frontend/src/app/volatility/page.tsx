@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useMarket } from "@/components/MarketProvider";
+import { formatMoney } from "@/lib/market";
 import dynamic from "next/dynamic";
 import { BarChart3, Gauge, Activity, TrendingUp, Layers, Zap } from "lucide-react";
 import { motion } from "framer-motion";
@@ -68,8 +69,8 @@ export default function VolatilityLab() {
   // Dynamically compute calibrated strike prices centered around the asset's real spot price
   const strikes = useMemo(() => {
     if(!spot)return [];
-    const step = spot > 10000 ? 500 : spot > 1000 ? 25 : spot > 100 ? 2.5 : spot > 10 ? 1 : 0.05;
-    const center = Math.round(spot / step) * step;
+    const step = spot < 1 ? spot * 0.025 : spot > 10000 ? 500 : spot > 1000 ? 25 : spot > 100 ? 2.5 : spot > 10 ? 1 : 0.05;
+    const center = spot < 1 ? spot : Math.round(spot / step) * step;
     return [
       center - 3 * step,
       center - 2 * step,
@@ -156,7 +157,7 @@ export default function VolatilityLab() {
   };
 
   return (
-    <div className="space-y-6 select-none">
+    <div className="workspace-page space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -188,7 +189,7 @@ export default function VolatilityLab() {
               {selectedTicker} Illustrative Volatility Surface (Moneyness vs DTE)
             </h3>
             <p className="text-xs font-mono text-[#848e9c] mt-0.5">
-              Production {market} quote: <span className="text-[#f0b90b] font-bold">{spot ? `$${spot.toFixed(2)}` : "Quote unavailable"}</span> - Assumed IV {((BASE_IVS[selectedTicker] || 0.22)*100).toFixed(0)}%; theoretical scenario, not observed market IV.
+              Production {market} quote: <span className="text-[#f0b90b] font-bold">{spot ? `$${formatMoney(spot)}` : "Quote unavailable"}</span> - Assumed IV {((BASE_IVS[selectedTicker] || 0.22)*100).toFixed(0)}%; theoretical scenario, not observed market IV.
             </p>
           </div>
           <div className="flex items-center gap-2">

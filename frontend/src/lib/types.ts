@@ -74,14 +74,30 @@ export interface TradeProposal {
   confidence?: number;
 }
 
-export interface TradeRecord {
+export interface ExecutionAccounting {
+  base_asset?: string;
+  executed_qty?: number;
+  closed_qty?: number;
+  entry_fees?: Record<string, number>;
+  exit_fees?: Record<string, number>;
+  exit_order_fees?: Record<string, Record<string, number>>;
+  exit_order_fees_known?: Record<string, boolean | null>;
+  fees_known?: boolean | null;
+  exit_fees_known?: boolean | null;
+  dust_qty?: number;
+  dust_reason?: string | null;
+  pnl_basis?: string;
+  net_realized_pnl?: number | null;
+}
+
+export interface TradeRecord extends ExecutionAccounting {
   trade_id: string;
   proposal: TradeProposal;
   status: TradeStatus;
   entry_time?: string;
   exit_time?: string;
-  realized_pnl?: number;
-  unrealized_pnl?: number;
+  realized_pnl?: number | null;
+  unrealized_pnl?: number | null;
   take_profit_price?: number;
   stop_loss_price?: number;
   exit_price?: number;
@@ -114,10 +130,12 @@ export interface PortfolioSnapshot {
   timestamp: string;
   equity: number;
   buying_power: number;
-  daily_pnl: number;
-  daily_pnl_pct?: number;
-  total_pnl: number;
-  total_pnl_pct?: number;
+  account_available: boolean;
+  daily_risk_available?: boolean;
+  daily_pnl: number | null;
+  daily_pnl_pct?: number | null;
+  total_pnl: number | null;
+  total_pnl_pct?: number | null;
   open_positions: number;
   open_position_count?: number;
   balances?: Record<string, CryptoAssetBalance>;

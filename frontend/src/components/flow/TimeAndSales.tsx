@@ -2,7 +2,7 @@ import { memo, useRef, useEffect, useState, useMemo } from "react";
 import { useFlowStore } from "@/lib/flow/useFlowStore";
 import { PanelFrame } from "./PanelFrame";
 import { TapeEntry } from "@/lib/flow/flowTypes";
-import { formatTimestampIST, formatCompactNumber } from "@/lib/flow/flowFormat";
+import { formatTimestampIST, formatCompactNumber, formatPrice } from "@/lib/flow/flowFormat";
 
 const ROW_HEIGHT = 24;
 
@@ -15,13 +15,13 @@ const TapeRow = memo(({ entry }: { entry: TapeEntry }) => {
   
   return (
     <div 
-      className={`flex items-center w-full px-2 py-0.5 text-xs font-mono border-b border-[#2C2C2E]/50 ${bgClass}`}
+      className={`tape-row items-center w-full px-2 py-0.5 text-xs font-mono border-b border-[#2C2C2E]/50 ${bgClass}`}
       style={{ height: ROW_HEIGHT }}
     >
-      <div className="w-[80px] text-neutral-400 shrink-0">{formatTimestampIST(entry.ts)}</div>
-      <div className={`flex-1 font-semibold ${colorClass}`}>{entry.price.toFixed(2)}</div>
-      <div className="w-[70px] text-right text-neutral-300 shrink-0">{formatCompactNumber(entry.qty)}</div>
-      <div className="w-[60px] text-right text-neutral-400 shrink-0">{formatCompactNumber(entry.quote_qty)}</div>
+      <div className="min-w-0 text-neutral-400 shrink-0">{formatTimestampIST(entry.ts)}</div>
+      <div className={`flex-1 font-semibold text-right ${colorClass}`}>{formatPrice(entry.price)}</div>
+      <div className="min-w-0 text-right text-neutral-300 shrink-0">{formatCompactNumber(entry.qty)}</div>
+      <div className="min-w-0 text-right text-neutral-400 shrink-0">{formatCompactNumber(entry.quote_qty)}</div>
     </div>
   );
 });
@@ -93,11 +93,11 @@ export function TimeAndSales({ symbol }: { symbol: string }) {
   return (
     <PanelFrame title="Time & Sales" symbol={symbol} health={state.health}>
       {/* Header columns */}
-      <div className="flex items-center w-full px-2 py-1 text-[10px] font-mono text-neutral-500 uppercase tracking-wider bg-[#2C2C2E] shrink-0 border-b border-[#3A3A3C]">
-        <div className="w-[80px] shrink-0">Time</div>
+      <div className="tape-row items-center w-full px-2 py-1 text-[10px] font-mono text-neutral-500 uppercase tracking-wider bg-[#2C2C2E] shrink-0 border-b border-[#3A3A3C]">
+        <div className="min-w-0 shrink-0">Time</div>
         <div className="flex-1">Price</div>
-        <div className="w-[70px] text-right shrink-0">Size</div>
-        <div className="w-[60px] text-right shrink-0">USD</div>
+        <div className="min-w-0 text-right shrink-0">Size</div>
+        <div className="min-w-0 text-right shrink-0">USDT</div>
       </div>
 
       {/* Virtualized List Container */}
@@ -136,18 +136,18 @@ export function TimeAndSales({ symbol }: { symbol: string }) {
       )}
 
       {/* Footer Strip */}
-      <div className="h-6 bg-[#2C2C2E] shrink-0 border-t border-[#3A3A3C] flex items-center px-2 text-[10px] font-mono text-neutral-400 gap-4">
-        <div>RATE: {state.metrics?.trade_rate?.toFixed(1) || 0}/s</div>
-        <div>VOL/S: {formatCompactNumber(state.metrics?.volume_rate || 0)}</div>
+      <div className="tape-footer min-h-8 bg-[#2C2C2E] shrink-0 border-t border-[#3A3A3C] flex items-center px-2 text-[10px] font-mono text-neutral-400 gap-4">
+        <div>RATE: {state.metrics?.trade_rate?.toFixed(1) ?? "—"}/s</div>
+        <div>VOL/S: {state.metrics?.volume_rate != null ? formatCompactNumber(state.metrics.volume_rate) : "—"}</div>
         <div className="flex-1 flex justify-end items-center gap-2">
           <span>1M B/S</span>
-          <div className="w-16 h-1.5 bg-[#3A3A3C] rounded-full overflow-hidden flex">
+          {state.metrics?.buy_sell_ratio != null ? <div className="w-12 h-1.5 bg-[#3A3A3C] rounded-full overflow-hidden flex">
             <div 
               className="bg-[#34C759] h-full" 
-              style={{ width: `${Math.min(100, Math.max(0, (state.metrics?.buy_sell_ratio || 1) / 2 * 100))}%` }} 
+              style={{ width: `${Math.min(100, Math.max(0, state.metrics.buy_sell_ratio / (1 + state.metrics.buy_sell_ratio) * 100))}%` }}
             />
             <div className="bg-[#FF453A] flex-1" />
-          </div>
+          </div> : <span>—</span>}
         </div>
       </div>
     </PanelFrame>

@@ -1,9 +1,9 @@
 import time
-import math
 from typing import Dict, List, Tuple
 from collections import deque
 from backend.marketdata.models import BookDelta, BookSnapshot, LadderLevel
 from backend.config import settings
+from backend.marketdata.price_grid import grouped_tick_size, round_to_tick
 
 class LocalOrderBook:
     """Maintains a local L2 order book using diff-depth updates and snapshots."""
@@ -129,22 +129,19 @@ class LocalOrderBook:
 
     def get_ladder(self, levels: int = 20, tick_group_multiplier: float = 1.0) -> list[LadderLevel]:
         """Project the book into a ladder."""
-        bucket_size = self.tick_size * tick_group_multiplier
+        bucket_size = grouped_tick_size(self.tick_size, tick_group_multiplier)
         
         bids_src = self.bids if self.is_synced and settings.FLOW_USE_DIFF_DEPTH else self.partial_bids
         asks_src = self.asks if self.is_synced and settings.FLOW_USE_DIFF_DEPTH else self.partial_asks
         
         grouped_bids: Dict[float, float] = {}
         for p, q in bids_src.items():
-            bucket = math.floor(p / bucket_size) * bucket_size
-            # round to fix floating point issues
-            bucket = round(bucket, 8)
+            bucket = round_to_tick(p, bucket_size)
             grouped_bids[bucket] = grouped_bids.get(bucket, 0.0) + q
             
         grouped_asks: Dict[float, float] = {}
         for p, q in asks_src.items():
-            bucket = math.ceil(p / bucket_size) * bucket_size
-            bucket = round(bucket, 8)
+            bucket = round_to_tick(p, bucket_size, up=True)
             grouped_asks[bucket] = grouped_asks.get(bucket, 0.0) + q
 
         sorted_bids = sorted(grouped_bids.items(), key=lambda x: x[0], reverse=True)[:levels]

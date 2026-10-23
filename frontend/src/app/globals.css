@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@theme {
+@theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --animate-fade-in: fadeIn 0.2s ease-out forwards;
@@ -24,12 +24,8 @@
 body {
   background-color: #121214;
   color: #f5f5f5;
-  background-image: 
-    radial-gradient(circle at 50% 0%, rgba(247, 166, 0, 0.05) 0%, transparent 45%),
-    radial-gradient(circle at 100% 30%, rgba(32, 178, 108, 0.03) 0%, transparent 40%),
-    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.02) 1px, transparent 0);
-  background-size: 100% 100%, 100% 100%, 20px 20px;
-  background-attachment: fixed;
+  font-family: var(--font-geist-sans), Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
 }
@@ -114,4 +110,87 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
   .workspace-header { position:relative; }
   .market-selector { width:100%; }
   main { min-width:0; }
+}
+/* Terminal rhythm: restrained charcoal surfaces, readable numbers, amber actions. */
+.workspace-header { row-gap:10px; padding:14px 20px; }
+.workspace-header strong { font-weight:600; }
+.market-selector { flex-shrink:0; }
+.market-selector button { min-height:36px; }
+.market-selector input { min-height:38px; }
+.workspace-page h1 { line-height:1.35; }
+.workspace-page h1 > span { flex-shrink:0; }
+.account-summary { display:flex; flex-wrap:wrap; align-items:center; gap:12px 28px; padding:14px 16px; background:#18191f; border:1px solid #26282f; border-radius:6px; font-size:12px; color:#b5b7c0; }
+.account-summary strong { color:#f5f5f5; }
+.account-summary strong::after { content:' / Testnet'; color:#878996; font-weight:400; }
+.trade-ticket { border-radius:6px; padding:18px; gap:14px; }
+.trade-ticket h2 { line-height:1.6; }
+.trade-ticket .gold-button { width:100%; }
+.trade-ticket input, .trade-ticket select { min-height:40px; }
+.execution-fees { margin-top:6px; min-width:170px; line-height:1.6; }
+.terminal-layout { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:12px; padding:12px; align-items:start; }
+.terminal-workspace { min-width:0; height:760px; height:min(800px,calc(100vh - 150px)); min-height:620px; }
+.terminal-ticket { min-width:0; }
+.terminal-page > [role=status] { padding:10px 16px; font-size:12px; border-bottom:1px solid #26282f; }
+.flow-workspace { padding:0; gap:10px; }
+.flow-panel { background:#18191f; border-color:#26282f; border-radius:5px; }
+.flow-panel-title { min-width:0; gap:6px; }
+.flow-panel-title > span:first-child { font-size:12px; white-space:nowrap; }
+.flow-panel-title > span:nth-child(2) { display:none; }
+.flow-panel-title > span:last-child { font-size:9px; }
+.dom-row { display:grid; grid-template-columns:minmax(48px,1fr) minmax(82px,1.4fr) minmax(48px,1fr) minmax(60px,1fr); gap:4px; padding-left:8px; padding-right:8px; }
+.dom-row > * { width:auto; }
+.tape-row { display:grid; grid-template-columns:64px minmax(82px,1.5fr) minmax(45px,1fr) minmax(45px,1fr); gap:6px; font-size:11px; }
+.tape-footer { flex-wrap:wrap; height:auto; padding-top:5px; padding-bottom:5px; gap:8px; }
+.compact-flow-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; }
+.compact-flow-chart { grid-column:1/-1; height:320px; }
+.compact-flow-cvd { grid-column:1/-1; height:220px; }
+.compact-flow-dom, .compact-flow-tape, .compact-flow-profile { min-width:0; height:340px; }
+@media (max-width:1100px) {
+  .terminal-layout { grid-template-columns:minmax(0,1fr); }
+  .terminal-workspace { height:auto; min-height:0; }
+  .flow-grid-area { overflow:visible; }
+  .flow-workspace { height:auto; overflow:visible; }
+  .terminal-ticket { order:-1; }
+  .terminal-ticket .trade-ticket form { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; align-items:end; }
+  .terminal-ticket .trade-ticket form > * { margin:0; }
+  .workspace-header { padding:12px 16px; }
+  .workspace-page [class*="p-6"] { padding:20px; }
+}
+@media (min-width:768px) and (max-width:1100px) {
+  .workspace-sidebar { width:68px !important; }
+  .workspace-sidebar nav a { padding-left:16px; }
+  .workspace-sidebar nav a span, .workspace-sidebar nav > p, .workspace-sidebar > div:last-child, .workspace-sidebar > div:first-child button { display:none; }
+  .app-content { padding-left:68px !important; }
+}
+@media (max-width:767px) {
+  .market-chart-empty { height:200px; padding:16px; text-align:center; }
+  .workspace-header { padding:12px 16px; }
+  .workspace-header > div { column-gap:12px; line-height:1.7; }
+  .workspace-page h1 { font-size:20px; }
+  .workspace-page [class*="p-6"] { padding:16px; }
+  .workspace-page [class*="p-5"] { padding:16px; }
+  .workspace-page [class*="text-3xl"] { font-size:24px; }
+  .account-summary { gap:10px 20px; }
+  .account-summary strong { width:100%; }
+  .dashboard-analysis { display:contents; }
+  .dashboard-analysis > div:first-child { order:0; }
+  .dashboard-orders { order:1; }
+  .dashboard-analysis > div:last-child { order:2; }
+  .terminal-heading { padding:12px 16px; }
+  .terminal-heading h1 { font-size:16px; }
+  .terminal-layout { padding:12px; }
+  .terminal-ticket .trade-ticket form { grid-template-columns:1fr 1fr; }
+  .terminal-ticket .trade-ticket form > button, .terminal-ticket .trade-ticket form > p { grid-column:1/-1; }
+  .compact-flow-grid { grid-template-columns:minmax(0,1fr); }
+  .compact-flow-chart { height:280px; }
+  .compact-flow-cvd { height:180px; }
+  .compact-flow-dom, .compact-flow-tape, .compact-flow-profile { height:300px; }
+  .confirmation-dialog { padding:20px; }
+  .confirmation-dialog > div:last-child { flex-wrap:wrap; }
+}
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; scroll-behavior:auto !important; }
+}
+@media (min-width:768px) and (max-width:1100px) {
+  .workspace-sidebar > div:first-child a > div:not(:first-child) { display:none; }
 }

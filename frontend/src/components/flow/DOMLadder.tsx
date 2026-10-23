@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useMemo, memo } from "react";
 import { useFlowStore } from "@/lib/flow/useFlowStore";
 import { PanelFrame } from "./PanelFrame";
 import { LadderLevel } from "@/lib/flow/flowTypes";
-import { formatCompactNumber } from "@/lib/flow/flowFormat";
+import { formatCompactNumber, formatPrice } from "@/lib/flow/flowFormat";
 import { Crosshair } from "lucide-react";
 import { useMarket } from "../MarketProvider";
 
@@ -30,7 +30,7 @@ const LadderRow = memo(({
 
   return (
     <button type="button" aria-label={`Stage limit at ${level.price}`} onClick={()=>onStage(level.price)}
-      className={`flex items-center w-full text-xs font-mono border-b border-[#2C2C2E]/30 relative cursor-pointer ${bgClass}`}
+      className={`dom-row items-center w-full text-xs font-mono border-b border-[#2C2C2E]/30 relative cursor-pointer ${bgClass}`}
       style={{ height: ROW_HEIGHT }}
     >
       {/* Background depth bar (Ask side - Red) */}
@@ -50,26 +50,26 @@ const LadderRow = memo(({
       )}
 
       {/* Columns */}
-      <div className="w-[40px] shrink-0 text-center text-[#FF9F0A]"></div> {/* Sell Working */}
+
       
-      <div className="w-[60px] shrink-0 text-right pr-2 text-neutral-300 relative z-10">
+      <div className="min-w-0 text-right pr-2 text-neutral-300 relative z-10">
         {level.bid_size > 0 ? formatCompactNumber(level.bid_size) : ""}
         {level.is_wall && isBid && <div className="absolute left-1 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-[#34C759] shadow-[0_0_4px_#34C759]" title="Bid Wall" />}
       </div>
       
       <div className={`flex-1 text-center font-bold relative z-10 ${priceColor}`}>
-        {level.price.toFixed(2)}
+        {formatPrice(level.price)}
       </div>
       
-      <div className="w-[60px] shrink-0 text-left pl-2 text-neutral-300 relative z-10">
+      <div className="min-w-0 text-left pl-2 text-neutral-300 relative z-10">
         {level.ask_size > 0 ? formatCompactNumber(level.ask_size) : ""}
         {level.is_wall && isAsk && <div className="absolute right-1 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-[#FF453A] shadow-[0_0_4px_#FF453A]" title="Ask Wall" />}
       </div>
       
-      <div className="w-[40px] shrink-0 text-center text-[#34C759]"></div> {/* Buy Working */}
+
       
       {/* Traded Volume column */}
-      <div className="w-[70px] shrink-0 flex items-center justify-end px-1 text-[10px] text-neutral-400 gap-1 relative z-10">
+      <div className="min-w-0 flex items-center justify-end px-1 text-[10px] text-neutral-400 gap-1 relative z-10">
         {level.traded_sell > 0 && <span className="text-[#FF453A]">{formatCompactNumber(level.traded_sell)}</span>}
         {(level.traded_buy > 0 || level.traded_sell > 0) && <span className="text-neutral-600">|</span>}
         {level.traded_buy > 0 && <span className="text-[#34C759]">{formatCompactNumber(level.traded_buy)}</span>}
@@ -120,20 +120,20 @@ export function DOMLadder({ symbol }: { symbol: string }) {
           <button 
             onClick={() => setAutoCenter(!autoCenter)}
             className={`p-1 rounded flex items-center justify-center transition-colors ${autoCenter ? "bg-[#007AFF]/20 text-[#007AFF]" : "hover:bg-[#3A3A3C] text-neutral-500"}`}
-            title="Auto-center on mid price"
+            title="Auto-center on mid price" aria-label="Auto-center on mid price" aria-pressed={autoCenter}
           >
             <Crosshair className="w-3 h-3" />
           </button>
         </div>
 
         {/* Columns Header */}
-        <div className="flex items-center w-full px-2 py-1 text-[9px] font-mono text-neutral-500 uppercase tracking-wider bg-[#1C1C1E] shrink-0 border-b border-[#2C2C2E]">
-          <div className="w-[40px] text-center shrink-0" title="Sell Working Orders">W.S</div>
-          <div className="w-[60px] text-right shrink-0">Bids</div>
+        <div className="dom-row items-center w-full px-2 py-1 text-[10px] font-mono text-neutral-500 uppercase tracking-wider bg-[#1C1C1E] shrink-0 border-b border-[#2C2C2E]">
+
+          <div className="min-w-0 text-right">Bids</div>
           <div className="flex-1 text-center">Price</div>
-          <div className="w-[60px] text-left shrink-0">Asks</div>
-          <div className="w-[40px] text-center shrink-0" title="Buy Working Orders">W.B</div>
-          <div className="w-[70px] text-center shrink-0" title="Recent Traded Volume">Traded</div>
+          <div className="min-w-0 text-left">Asks</div>
+
+          <div className="min-w-0 text-center" title="Recent Traded Volume">Traded</div>
         </div>
 
         {/* Content Container */}

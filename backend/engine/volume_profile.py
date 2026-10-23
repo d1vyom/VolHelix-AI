@@ -2,6 +2,7 @@ from typing import List, Dict, Literal
 from backend.marketdata.models import Trade
 from backend.engine.flow_models import VolumeProfileSnapshot, VolumeProfileLevel
 from backend.config import settings
+from backend.marketdata.price_grid import grouped_tick_size
 from backend.engine.footprint import round_to_tick
 
 def compute_profile_from_trades(symbol: str, trades: List[Trade], mode: Literal["SESSION", "VISIBLE", "FIXED_RANGE"], start_ts: int, end_ts: int, tick_group: float) -> VolumeProfileSnapshot:
@@ -94,7 +95,7 @@ def compute_profile_from_trades(symbol: str, trades: List[Trade], mode: Literal[
 class VolumeProfileEngine:
     def __init__(self, symbol: str, tick_size: float):
         self.symbol = symbol.upper()
-        self.tick_group = tick_size * settings.FLOW_TICK_GROUP_MULTIPLIER
+        self.tick_group = grouped_tick_size(tick_size, settings.FLOW_TICK_GROUP_MULTIPLIER)
         self.session_start_ts = 0
         self.levels_dict: Dict[float, VolumeProfileLevel] = {}
         self.naked_pocs: List[float] = []

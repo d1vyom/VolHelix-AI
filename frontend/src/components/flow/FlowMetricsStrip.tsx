@@ -1,12 +1,12 @@
 import { useFlowStore } from "@/lib/flow/useFlowStore";
 import { StreamHealthBadge } from "./StreamHealthBadge";
-import { formatCompactNumber } from "@/lib/flow/flowFormat";
+import { formatCompactNumber, formatPrice } from "@/lib/flow/flowFormat";
 
 
 function MetricTile({ label, value, tooltip, colorClass = "text-neutral-200" }: { label: string; value: React.ReactNode; tooltip: string; colorClass?: string }) {
   return (
     <div className="flex flex-col px-3 py-1 border-r border-[#2C2C2E] last:border-r-0 min-w-0 shrink-0 group" title={tooltip}>
-      <span className="text-[10px] text-neutral-500 font-medium uppercase tracking-wider whitespace-nowrap">{label}</span>
+      <span className="text-[10px] text-neutral-400 font-medium uppercase tracking-wider whitespace-nowrap">{label}</span>
       <span className={`text-xs font-mono font-bold whitespace-nowrap ${colorClass}`}>
         {value !== undefined && value !== null ? value : "—"}
       </span>
@@ -24,7 +24,7 @@ export function FlowMetricsStrip() {
       {/* Price */}
       <MetricTile 
         label="Price" 
-        value={metrics?.price?.toFixed(2) || "—"} 
+        value={metrics?.price != null ? formatPrice(metrics.price) : "—"}
         tooltip="Last traded price" 
         colorClass="text-neutral-100" 
       />
@@ -48,7 +48,7 @@ export function FlowMetricsStrip() {
       {/* CVD Slope */}
       <MetricTile 
         label="CVD Slope/m" 
-        value={metrics?.cvd_slope ? `${metrics.cvd_slope > 0 ? "+" : ""}${formatCompactNumber(metrics.cvd_slope)}/m` : "—"} 
+        value={metrics?.cvd_slope != null ? `${metrics.cvd_slope > 0 ? "+" : ""}${formatCompactNumber(metrics.cvd_slope)}/m` : "—"}
         tooltip="Rate of change of CVD over the last 30 minutes"
         colorClass={!metrics ? "" : metrics.cvd_slope > 0 ? "text-[#34C759]" : metrics.cvd_slope < 0 ? "text-[#FF453A]" : "text-neutral-400"}
       />
@@ -56,7 +56,7 @@ export function FlowMetricsStrip() {
       {/* Buy/Sell Ratio */}
       <MetricTile 
         label="B/S Ratio (1m)" 
-        value={metrics?.buy_sell_ratio ? `${metrics.buy_sell_ratio.toFixed(2)}x` : "—"} 
+        value={metrics?.buy_sell_ratio != null ? `${metrics.buy_sell_ratio.toFixed(2)}x` : "—"}
         tooltip="Rolling 1-minute aggressor buy volume vs sell volume"
         colorClass={!metrics ? "" : metrics.buy_sell_ratio > 1.2 ? "text-[#34C759]" : metrics.buy_sell_ratio < 0.8 ? "text-[#FF453A]" : "text-neutral-200"}
       />
@@ -104,9 +104,9 @@ export function FlowMetricsStrip() {
       {/* Absorption */}
       <MetricTile 
         label="Absorption" 
-        value={metrics?.absorption_flag ? metrics.absorption_flag.replace("_ABSORBED", "") : "NONE"} 
+        value={metrics?.absorption_flag ? metrics.absorption_flag.replace("_ABSORBED", "") : metrics ? "NONE" : "—"}
         tooltip="Detects if aggressive market orders are being absorbed by passive limit orders"
-        colorClass={!metrics ? "" : metrics.absorption_flag === "BUY_ABSORBED" ? "text-[#FF453A]" : metrics.absorption_flag === "SELL_ABSORBED" ? "text-[#34C759]" : "text-neutral-500"}
+        colorClass={!metrics ? "" : metrics.absorption_flag === "BUY_ABSORBED" ? "text-[#FF453A]" : metrics.absorption_flag === "SELL_ABSORBED" ? "text-[#34C759]" : "text-neutral-400"}
       />
       
       <div className="flex-1" /> {/* Spacer */}

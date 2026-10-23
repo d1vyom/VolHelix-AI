@@ -55,3 +55,4 @@ Thumbs.db
 
 # Isolated verification artifacts
 /tmp/
+/test-results/

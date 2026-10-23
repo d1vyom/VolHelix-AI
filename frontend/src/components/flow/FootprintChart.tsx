@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState } from "react";
 import { useFlowStore } from "@/lib/flow/useFlowStore";
 import { PanelFrame } from "./PanelFrame";
-import { formatCompactNumber, formatTimestampIST } from "@/lib/flow/flowFormat";
+import { formatCompactNumber, formatTimestampIST, formatPrice } from "@/lib/flow/flowFormat";
 
 export function FootprintChart({ symbol }: { symbol: string }) {
   const state = useFlowStore();
@@ -70,10 +70,11 @@ export function FootprintChart({ symbol }: { symbol: string }) {
     // Footer height for delta/vol stats
     const footerH = 40;
     const chartH = h - footerH;
+    const axisWidth = Math.min(110, Math.max(66, formatPrice(maxPrice).length * 6 + 12));
     
     // Bar width
     const minColWidth = 70;
-    const colWidth = Math.max(minColWidth, (w - 60) / Math.max(1, allBars.length));
+    const colWidth = Math.max(minColWidth, (w - axisWidth) / Math.max(1, allBars.length));
     
     // Price to Y
     const getY = (price: number) => {
@@ -161,15 +162,15 @@ export function FootprintChart({ symbol }: { symbol: string }) {
     
     // Draw Y axis labels
     ctx.fillStyle = "#1C1C1E";
-    ctx.fillRect(w - 50, 0, 50, h);
+    ctx.fillRect(w - axisWidth, 0, axisWidth, h);
     ctx.fillStyle = "#8E8E93";
-    ctx.textAlign = "left";
+    ctx.textAlign = "right";
     
     const tickSteps = 10;
     const yTickRange = renderRange / tickSteps;
     for(let i=0; i<=tickSteps; i++) {
       const p = minPrice + i * yTickRange;
-      ctx.fillText(p.toFixed(2), w - 45, getY(p));
+      ctx.fillText(formatPrice(p), w - 6, getY(p));
     }
     
     // Current price highlight
@@ -177,14 +178,14 @@ export function FootprintChart({ symbol }: { symbol: string }) {
       const p = state.metrics.price;
       const py = getY(p);
       ctx.fillStyle = "#007AFF";
-      ctx.fillRect(w - 50, py - 8, 50, 16);
+      ctx.fillRect(w - axisWidth, py - 8, axisWidth, 16);
       ctx.fillStyle = "#FFF";
-      ctx.fillText(p.toFixed(2), w - 45, py);
+      ctx.fillText(formatPrice(p), w - 6, py);
       
       ctx.strokeStyle = "rgba(0, 122, 255, 0.3)";
       ctx.beginPath();
       ctx.moveTo(0, py);
-      ctx.lineTo(w - 50, py);
+      ctx.lineTo(w - axisWidth, py);
       ctx.stroke();
     }
     
@@ -195,6 +196,7 @@ export function FootprintChart({ symbol }: { symbol: string }) {
       <div className="flex flex-col h-full w-full bg-[#121214]">
         <div className="flex items-center px-2 py-1 text-[10px] font-mono text-neutral-400 bg-[#2C2C2E] border-b border-[#3A3A3C] shrink-0 gap-4">
           <select 
+            aria-label="Footprint cluster mode"
             value={clusterMode}
             onChange={(e) => setClusterMode(e.target.value as "BID_ASK" | "DELTA" | "VOLUME")}
             className="bg-transparent text-white outline-none cursor-pointer"

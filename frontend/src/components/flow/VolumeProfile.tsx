@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from "react";
 import { useFlowStore } from "@/lib/flow/useFlowStore";
 import { PanelFrame } from "./PanelFrame";
+import { formatPrice } from "@/lib/flow/flowFormat";
 import { VolumeProfileSnapshot } from "@/lib/flow/flowTypes";
 
 export function VolumeProfile({ symbol }: { symbol: string }) {
@@ -30,10 +31,7 @@ export function VolumeProfile({ symbol }: { symbol: string }) {
       <div className="flex flex-col h-full w-full bg-[#1C1C1E]">
         {/* Header/Controls */}
         <div className="flex items-center px-2 py-1 text-[10px] font-mono text-neutral-400 bg-[#2C2C2E] border-b border-[#3A3A3C] shrink-0 gap-4">
-          <div className="flex gap-2">
-            <span className="text-white cursor-pointer hover:text-[#007AFF]">SESSION</span>
-            <span className="cursor-pointer hover:text-[#007AFF]">VISIBLE</span>
-          </div>
+          <span>Session profile</span>
           <div className="flex-1" />
           {profile && <div>TOTAL: {profile.total_volume.toFixed(0)}</div>}
         </div>
@@ -70,7 +68,9 @@ function ProfileSVG({ profile, width, height }: { profile: VolumeProfileSnapshot
 
   // Max volume for width scaling
   const maxVol = Math.max(...levels.map(l => l.total_volume));
-  const wScaling = maxVol > 0 ? (width - 60) / maxVol : 1; // Leave 60px for price labels
+  const axisWidth = Math.min(110, Math.max(60, formatPrice(maxPrice).length * 6 + 12));
+  const plotWidth = Math.max(0, width - axisWidth);
+  const wScaling = maxVol > 0 ? plotWidth / maxVol : 1;
 
   // Map price to Y coordinate
   const getY = (price: number) => {
@@ -86,7 +86,7 @@ function ProfileSVG({ profile, width, height }: { profile: VolumeProfileSnapshot
         <rect
           x={0}
           y={getY(vah)}
-          width={width - 50}
+          width={plotWidth}
           height={Math.max(1, getY(val) - getY(vah))}
           fill="#007AFF"
           fillOpacity={0.05}
@@ -128,7 +128,7 @@ function ProfileSVG({ profile, width, height }: { profile: VolumeProfileSnapshot
         <line
           x1={0}
           y1={getY(poc_price)}
-          x2={width - 50}
+          x2={plotWidth}
           y2={getY(poc_price)}
           stroke="#FF9F0A"
           strokeWidth={1}
@@ -155,14 +155,14 @@ function ProfileSVG({ profile, width, height }: { profile: VolumeProfileSnapshot
         {/* Draw a few price ticks */}
         {[maxPrice, (maxPrice+minPrice)/2, minPrice].map((p, i) => (
           p > 0 && (
-            <text key={i} x={width - 45} y={getY(p) + 3}>
-              {p.toFixed(2)}
+            <text key={i} x={width - 5} textAnchor="end" y={getY(p) + 3}>
+              {formatPrice(p)}
             </text>
           )
         ))}
         {poc_price > 0 && (
-          <text x={width - 45} y={getY(poc_price) + 3} fill="#FF9F0A" fontWeight="bold">
-            {poc_price.toFixed(2)}
+          <text x={width - 5} textAnchor="end" y={getY(poc_price) + 3} fill="#FF9F0A" fontWeight="bold">
+            {formatPrice(poc_price)}
           </text>
         )}
       </g>
