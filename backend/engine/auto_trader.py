@@ -60,39 +60,57 @@ class AutoTrader:
         self._guardian_thread: Optional[threading.Thread] = None
         self._guardian_stop_event: threading.Event = threading.Event()
         self._event_loop = None
-        self._event_futures = set()
+        self._event_tasks = set()
+        self._event_lock = threading.Lock()
         self._event_slots = threading.BoundedSemaphore(32)
 
     def bind_event_loop(self, loop) -> None:
         """Bind notifications to the application loop owned by lifespan."""
-        self._event_loop=loop
+        with self._event_lock:
+            self._event_loop=loop
 
     def _schedule_event(self, factory) -> None:
-        loop=self._event_loop
-        if loop is None or not loop.is_running() or not self._event_slots.acquire(blocking=False):
-            return
-        coroutine=factory()
-        try:
-            future=asyncio.run_coroutine_threadsafe(coroutine,loop)
-        except Exception:
-            coroutine.close()
-            self._event_slots.release()
-            return
-        self._event_futures.add(future)
         def finished(done):
-            self._event_futures.discard(done)
+            self._event_tasks.discard(done)
             self._event_slots.release()
             if not done.cancelled() and done.exception():
                 logger.warning('Trading notification unavailable; execution remains in ledger')
-        future.add_done_callback(finished)
+
+        def start():
+            # A queued admission may arrive after shutdown has closed the loop binding.
+            if self._event_loop is not loop:
+                self._event_slots.release()
+                return
+            try:
+                task=loop.create_task(factory())
+            except Exception:
+                self._event_slots.release()
+                logger.warning('Trading notification unavailable; execution remains in ledger')
+                return
+            self._event_tasks.add(task)
+            task.add_done_callback(finished)
+
+        # Serialize admission with shutdown, including work submitted by trading threads.
+        with self._event_lock:
+            loop=self._event_loop
+            if loop is None or not loop.is_running() or not self._event_slots.acquire(blocking=False):
+                return
+            try:
+                loop.call_soon_threadsafe(start)
+            except RuntimeError:
+                self._event_slots.release()
 
     async def stop_events(self) -> None:
         """Cancel and await bounded notifications after the trading threads stop."""
-        self._event_loop=None
-        pending=list(self._event_futures)
-        for future in pending:
-            future.cancel()
-        await asyncio.gather(*(asyncio.wrap_future(future) for future in pending),return_exceptions=True)
+        with self._event_lock:
+            self._event_loop=None
+        # Drain accepted callbacks so their slots are released before a later binding.
+        await asyncio.sleep(0)
+        pending=list(self._event_tasks)
+        for task in pending:
+            if not task.cancelling():
+                task.cancel()
+        await asyncio.gather(*pending,return_exceptions=True)
 
     def _get_binance_client(self) -> BinanceClient:
         if self._binance_client is None:

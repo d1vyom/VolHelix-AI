@@ -216,7 +216,7 @@ with patch.object(threading.Thread, "start", lambda self: None):
     trader_module = importlib.import_module("backend.engine.auto_trader")
 _collection_patches.setattr(trader_module, "threading", SimpleNamespace(
     Thread=InertThread, Event=threading.Event, current_thread=threading.current_thread,
-    BoundedSemaphore=threading.BoundedSemaphore,
+    BoundedSemaphore=threading.BoundedSemaphore, Lock=threading.Lock,
 ))
 
 

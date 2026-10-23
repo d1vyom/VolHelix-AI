@@ -54,8 +54,9 @@ failures return 503; missing bid/ask/spread are null. Failed signal reads have
 
 Application lifespan owns guardian startup, scanner/guardian stop/join, and
 notification cleanup. Importing the application starts no trading threads.
-Trading notifications use at most 32 application-loop futures; lifecycle shutdown
-cancels and awaits them. Generic logging writes only to console/rotating files,
+Trading notifications admit at most 32 queued or running application-loop tasks;
+lifecycle shutdown closes admission, cancels and awaits the actual tasks through
+their asynchronous cleanup. Generic logging writes only to console/rotating files,
 without synchronous HTTP calls back into the API. History, audit, and the two
 legacy caches retain at most 1000 entries; audit list aliases are preserved.
 Existing sync legacy read endpoints run in FastAPI's thread pool.
@@ -87,6 +88,10 @@ pytest collection is scoped to `backend/tests`; script imports perform no I/O.
 - Focused RED/GREEN fee, lifecycle, outcome, runtime and script regressions.
 - Final isolated bare-root `python -m pytest -q`: 313 passed, two existing SDK
   websocket deprecation warnings, 32.70 seconds.
+- Task 8A review fixes (2026-10-23): same-amount terminal fee coverage recovery,
+  residual-close replay, and notification cancellation cleanup regressions.
+  Updated isolated bare-root suite: 318 passed, the same two SDK warnings,
+  30.73 seconds. Both original independent review probes also pass.
 - First full run exposed three older incomplete order fixtures; explicit actual
   zero-commission details/query responses repaired those fixtures while retaining
   their assertions. The no-network guard prevented external requests.

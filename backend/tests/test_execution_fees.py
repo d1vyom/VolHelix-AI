@@ -181,3 +181,60 @@ def test_sub_epsilon_inventory_is_retained_as_dust_after_actual_exit():
     t=run(trade_log.apply_exit(t.trade_id,OrderResult(order_id='13',client_order_id='tiny',
         exchange_status='FILLED',executed_qty=1,orig_qty=1,entry_price=100,current_price=100)))
     assert t.proposal.qty==.00000000001 and t.status.value=='OPEN'
+
+
+def test_terminal_exit_same_fee_map_recovery_restores_coverage_idempotently():
+    from backend.tests.test_market_lifecycle import record
+    from backend.exchange.schemas import OrderResult
+    t=record(); t.base_asset='SOL'; t.fees_known=True
+    run(trade_log.save_trade(t))
+    def result(qty,status,known,fees):
+        return OrderResult(order_id='13',client_order_id='equal-fees',exchange_status=status,
+            executed_qty=qty,orig_qty=1,entry_price=110,current_price=110,
+            fees_known=known,fees=fees,base_asset='SOL')
+    run(trade_log.apply_exit(t.trade_id,result(.4,'PARTIALLY_FILLED',True,{'USDT':.04})))
+    t=run(trade_log.apply_exit(t.trade_id,result(.6,'CANCELED',False,{})))
+    assert t.exit_fees=={'USDT':.04} and t.exit_fees_known is False
+    recovered=result(.6,'CANCELED',True,{'USDT':.04})
+    t=run(trade_log.apply_exit(t.trade_id,recovered))
+    assert t.exit_fees_known is True and t.exit_order_fees_known=={'equal-fees':True}
+    assert t.proposal.qty==.4 and t.closed_qty==.6 and t.realized_pnl==6
+    before=t.model_dump()
+    assert run(trade_log.apply_exit(t.trade_id,recovered)).model_dump()==before
+
+
+def test_entry_same_fee_map_recovers_coverage_after_zero_commission_fill():
+    from backend.exchange.lifecycle import persist_entry
+    req=OrderRequest(symbol='SOLUSDT',qty=1)
+    t=run(persist_entry(req,parse_acknowledgement(filled('.04',asset='USDT',qty=.4,status='PARTIALLY_FILLED'),req,100)))
+    unknown=parse_acknowledgement(dict(ack('CANCELED',1,.6),fees_known=False),req,100)
+    t=run(trade_log.update_execution(t,unknown))
+    assert t.fees_known is False
+    recovered=parse_acknowledgement(filled('.04',asset='USDT',qty=.6,status='CANCELED'),req,100)
+    t=run(trade_log.update_execution(t,recovered))
+    assert t.fees_known is True and t.entry_fees=={'USDT':.04}
+    assert t.proposal.qty==.6 and t.executed_qty==.6 and t.realized_pnl==0
+
+
+def test_same_exit_fees_recovery_allows_only_remaining_tracked_close():
+    from backend.exchange.lifecycle import reconcile_intent
+    c=Client(); c.account['balances']['SOL']={'free':1,'total':1,'value_usdt':100}
+    c.place_order=Mock(return_value=filled('0'))
+    _,t=run(execute_entry(OrderRequest(symbol='SOLUSDT',qty=1,client_order_id='equal-fee-close'),client=c))
+    c.place_order=Mock(return_value=dict(ack('PARTIALLY_FILLED',1,.4,oid='13'),
+        fills=[{'qty':'.4','price':'100','commission':'.04','commissionAsset':'USDT'}]))
+    t=run(close_trade_position(t,client=c))
+    exit_id=t.exit_client_order_id
+    c.get_order_by_client_id=Mock(return_value=ack('CANCELED',1,.6,oid='13'))
+    c.get_order_fills=Mock(side_effect=TimeoutError())
+    _,t=run(reconcile_intent('spot',exit_id,client=c))
+    assert t.exit_fees_known is False and t.proposal.qty==.4
+    c.get_order_fills=Mock(return_value=[
+        {'qty':'.4','price':'100','commission':'.04','commissionAsset':'USDT'},
+        {'qty':'.2','price':'100','commission':'0','commissionAsset':'USDT'}])
+    c.place_order=Mock(return_value=dict(ack(qty=.4,executed=.4,oid='14'),
+        fills=[{'qty':'.4','price':'100','commission':'0','commissionAsset':'USDT'}]))
+    t=run(close_trade_position(t,client=c))
+    assert c.place_order.call_count==1 and c.place_order.call_args.kwargs['quantity']==.4
+    assert t.proposal.qty==0 and t.closed_qty==1 and t.realized_pnl==0
+    assert t.exit_fees_known is True and t.exit_fees=={'USDT':.04}

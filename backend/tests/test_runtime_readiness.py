@@ -131,9 +131,66 @@ def test_trading_notifications_use_bounded_owned_loop_tasks(monkeypatch):
         for i in range(100):
             trader._emit_fill_event(str(i),'SOLUSDT',100,'confirmed fill')
         await asyncio.sleep(.01)
-        assert 0<len(trader._event_futures)<=32
+        assert 0<len(trader._event_tasks)<=32
         await trader.stop_events()
-        assert not trader._event_futures
+        assert not trader._event_tasks
+    asyncio.run(scenario())
+
+
+def test_stop_events_waits_for_notification_async_finally():
+    from backend.engine.auto_trader import auto_trader
+    async def scenario():
+        trader=auto_trader
+        trader.bind_event_loop(asyncio.get_running_loop())
+        entered=asyncio.Event(); cleaning=asyncio.Event(); release=asyncio.Event(); cleaned=asyncio.Event()
+        async def notification():
+            try:
+                entered.set()
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                await release.wait()
+                cleaned.set()
+        trader._schedule_event(notification)
+        await asyncio.wait_for(entered.wait(),1)
+        stopping=asyncio.create_task(trader.stop_events())
+        await asyncio.wait_for(cleaning.wait(),1)
+        try:
+            done,_=await asyncio.wait({stopping},timeout=.05)
+            assert not done, 'shutdown returned before actual notification cleanup'
+        finally:
+            release.set()
+            await stopping
+            await asyncio.wait_for(cleaned.wait(),1)
+        assert cleaned.is_set()
+    asyncio.run(scenario())
+
+
+def test_notification_admission_racing_shutdown_does_not_leak_slots_or_start_work():
+    from backend.engine.auto_trader import auto_trader
+    async def scenario():
+        trader=auto_trader
+        loop=asyncio.get_running_loop()
+        started=[]
+        async def notification():
+            started.append(True)
+            await asyncio.Event().wait()
+        trader.bind_event_loop(loop)
+        # Exercise cross-thread admissions immediately followed by loop-owned shutdown.
+        await asyncio.to_thread(lambda: [trader._schedule_event(notification) for _ in range(100)])
+        await trader.stop_events()
+        started.clear()
+        trader._schedule_event(notification)
+        await asyncio.sleep(0)
+        assert not started
+        # Every accepted slot must be reusable after a new lifespan binding.
+        trader.bind_event_loop(loop)
+        for _ in range(100):
+            trader._schedule_event(notification)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert len(started)==32
+        await trader.stop_events()
     asyncio.run(scenario())
 
 def test_missing_daily_pnl_model_cannot_claim_risk_data_available():

@@ -174,7 +174,10 @@ class TradeLog:
             trade.executed_qty=trade.executed_qty or trade.proposal.qty+trade.closed_qty
             terminal_key=result.client_order_id+':terminal'
             was_terminal=bool(trade.exit_executions.get(terminal_key))
-            if was_terminal and not (result.fees_known is True and trade.exit_order_fees.get(result.client_order_id)!=result.fees):
+            if was_terminal and not (result.fees_known is True and (
+                trade.exit_order_fees_known.get(result.client_order_id) is not True
+                or trade.exit_order_fees.get(result.client_order_id)!=result.fees
+            )):
                 return trade
             previous=trade.exit_executions.get(result.client_order_id,0)
             delta=result.executed_qty-previous
