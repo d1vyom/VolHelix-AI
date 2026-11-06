@@ -27,6 +27,14 @@ class StrategyType(str, Enum):
     MASTER_ORDER_FLOW = "MASTER_ORDER_FLOW"
     CASH = "CASH"                      # Hold USDT, no trade
 
+    # Persistence compatibility only. StrategyBuilder never generates these.
+    SPOT_LONG = "SPOT_LONG"
+    SPOT_SHORT = "SPOT_SHORT"
+    DCA_BUY = "DCA_BUY"
+    BREAKOUT_LONG = "BREAKOUT_LONG"
+    MEAN_REVERSION = "MEAN_REVERSION"
+    MOMENTUM = "MOMENTUM"
+
 
 class TradeStatus(str, Enum):
     PENDING = "PENDING"

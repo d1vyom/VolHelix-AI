@@ -1,3 +1,5 @@
+import math
+from decimal import Decimal, ROUND_FLOOR, ROUND_CEILING
 import numpy as np
 from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
@@ -78,9 +80,9 @@ def detect_order_blocks(bars: List[Dict], atr_period: int = 14) -> List[OrderBlo
             order_blocks.append(OrderBlock(
                 id=f"OB-BULL-{i}-{curr.get('time', i)}",
                 block_type="BULLISH",
-                low=round(ob_low, 2),
-                high=round(ob_high, 2),
-                mean_threshold=round(mid, 2),
+                low=ob_low,
+                high=ob_high,
+                mean_threshold=mid,
                 volume=float(curr.get('volume', 0)),
                 timestamp=str(curr.get('time', '')),
                 mitigated=mitigated,
@@ -103,9 +105,9 @@ def detect_order_blocks(bars: List[Dict], atr_period: int = 14) -> List[OrderBlo
             order_blocks.append(OrderBlock(
                 id=f"OB-BEAR-{i}-{curr.get('time', i)}",
                 block_type="BEARISH",
-                low=round(ob_low, 2),
-                high=round(ob_high, 2),
-                mean_threshold=round(mid, 2),
+                low=ob_low,
+                high=ob_high,
+                mean_threshold=mid,
                 volume=float(curr.get('volume', 0)),
                 timestamp=str(curr.get('time', '')),
                 mitigated=mitigated,
@@ -144,10 +146,10 @@ def detect_fair_value_gaps(bars: List[Dict]) -> List[FairValueGap]:
             fvgs.append(FairValueGap(
                 id=f"FVG-BULL-{i}",
                 gap_type="BULLISH",
-                top=round(gap_top, 2),
-                bottom=round(gap_bottom, 2),
-                midpoint=round(mid, 2),
-                size=round(gap_size, 2),
+                top=gap_top,
+                bottom=gap_bottom,
+                midpoint=mid,
+                size=gap_size,
                 timestamp=str(c2.get('time', '')),
                 filled=filled,
                 fill_pct=round(fill_pct, 2)
@@ -166,10 +168,10 @@ def detect_fair_value_gaps(bars: List[Dict]) -> List[FairValueGap]:
             fvgs.append(FairValueGap(
                 id=f"FVG-BEAR-{i}",
                 gap_type="BEARISH",
-                top=round(gap_top, 2),
-                bottom=round(gap_bottom, 2),
-                midpoint=round(mid, 2),
-                size=round(gap_size, 2),
+                top=gap_top,
+                bottom=gap_bottom,
+                midpoint=mid,
+                size=gap_size,
                 timestamp=str(c2.get('time', '')),
                 filled=filled,
                 fill_pct=round(fill_pct, 2)
@@ -190,7 +192,7 @@ def compute_liquidity_heatmap(bars: List[Dict], order_book: Optional[Dict] = Non
 
     swing_high = max(highs[-20:]) if len(highs) >= 20 else max(highs)
     levels.append(LiquidityLevel(
-        price=round(swing_high, 2),
+        price=swing_high,
         volume=float(max_vol * 1.5),
         side="BSL",
         intensity=0.95
@@ -198,7 +200,7 @@ def compute_liquidity_heatmap(bars: List[Dict], order_book: Optional[Dict] = Non
 
     swing_low = min(lows[-20:]) if len(lows) >= 20 else min(lows)
     levels.append(LiquidityLevel(
-        price=round(swing_low, 2),
+        price=swing_low,
         volume=float(max_vol * 1.5),
         side="SSL",
         intensity=0.95
@@ -210,7 +212,7 @@ def compute_liquidity_heatmap(bars: List[Dict], order_book: Optional[Dict] = Non
             v = float(bid.get("size", 100))
             if p > 0:
                 levels.append(LiquidityLevel(
-                    price=round(p, 2),
+                    price=p,
                     volume=v,
                     side="BID",
                     intensity=min(1.0, round(v / 500.0, 2))
@@ -220,7 +222,7 @@ def compute_liquidity_heatmap(bars: List[Dict], order_book: Optional[Dict] = Non
             v = float(ask.get("size", 100))
             if p > 0:
                 levels.append(LiquidityLevel(
-                    price=round(p, 2),
+                    price=p,
                     volume=v,
                     side="ASK",
                     intensity=min(1.0, round(v / 500.0, 2))
@@ -285,7 +287,7 @@ def analyze_order_flow(symbol: str, bars: List[Dict], order_book: Optional[Dict]
     return OrderFlowAnalysis(
         symbol=symbol,
         timestamp=datetime.now().isoformat(),
-        current_price=round(current_price, 2),
+        current_price=current_price,
         trend_bias=trend_bias,
         order_blocks=order_blocks[-10:],
         fair_value_gaps=fvgs[-10:],
@@ -300,14 +302,20 @@ def calculate_master_strategy_tp_sl(
     current_price: float,
     order_flow: OrderFlowAnalysis,
     gamma_profile: Optional[BaseModel] = None,
-    trend_bias: str = "BULLISH"
+    trend_bias: str = "BULLISH",
+    tick_size: str | float | None = None
 ) -> Dict:
     """
     Dynamically decide Take Profit and Stop Loss levels strictly driven by
     institutional Order Blocks (OB), Fair Value Gaps (FVG), and Gamma Profile Walls (GEX).
     """
-    if current_price <= 0:
-        current_price = 575.0
+    if not math.isfinite(current_price) or current_price <= 0:
+        raise ValueError('A finite positive market price is required')
+    tick = Decimal(str(tick_size)) if tick_size is not None else None
+    if tick is not None and (not tick.is_finite() or tick <= 0):
+        raise ValueError('A finite positive exchange tick is required')
+    # Legacy analytical callers may omit metadata; execution adapters always supply it.
+    buffer = float(tick) if tick is not None else 0.0
 
     call_wall = getattr(gamma_profile, "call_wall", 0.0) if gamma_profile else 0.0
     put_wall = getattr(gamma_profile, "put_wall", 0.0) if gamma_profile else 0.0
@@ -325,19 +333,19 @@ def calculate_master_strategy_tp_sl(
             structural_support = current_price * 0.982
             sl_reason = "Dynamic 1.8% Structural Risk Buffer"
 
-        sl_price = round(min(structural_support - 0.25, current_price * 0.985), 2)
+        sl_price = min(structural_support - buffer, current_price * 0.985)
 
         # Take Profit: Target nearest unfilled FVG imbalance or Call Wall (with minimum expansion)
         unfilled_targets = [f.bottom for f in order_flow.unfilled_fvgs if f.bottom >= current_price * 1.02]
         if unfilled_targets:
             fvg_target = min(unfilled_targets)
-            tp_price = round(fvg_target, 2)
+            tp_price = fvg_target
             tp_reason = f"FVG Imbalance Fill (${tp_price:.2f})"
         elif call_wall >= current_price * 1.025:
-            tp_price = round(call_wall, 2)
+            tp_price = call_wall
             tp_reason = f"Gamma Call Wall Ceiling (${tp_price:.2f})"
         else:
-            tp_price = round(current_price * 1.04, 2)
+            tp_price = current_price * 1.04
             tp_reason = "Dynamic 4.0% Target Expansion"
 
     else:
@@ -352,34 +360,36 @@ def calculate_master_strategy_tp_sl(
             structural_resist = current_price * 1.018
             sl_reason = "Dynamic 1.8% Structural Risk Buffer"
 
-        sl_price = round(max(structural_resist + 0.25, current_price * 1.018), 2)
+        sl_price = max(structural_resist + buffer, current_price * 1.018)
 
         unfilled_targets = [f.top for f in order_flow.unfilled_fvgs if f.top <= current_price * 0.98]
         if unfilled_targets:
             fvg_target = max(unfilled_targets)
-            tp_price = round(fvg_target, 2)
+            tp_price = fvg_target
             tp_reason = f"FVG Imbalance Fill (${tp_price:.2f})"
         elif put_wall > 0 and put_wall <= current_price * 0.975:
-            tp_price = round(put_wall, 2)
+            tp_price = put_wall
             tp_reason = f"Gamma Put Wall Floor (${tp_price:.2f})"
         else:
-            tp_price = round(current_price * 0.96, 2)
+            tp_price = current_price * 0.96
             tp_reason = "Dynamic 4.0% Target Expansion"
 
-    # Enforce standard tick-relative constraints (Defect 3 Fix)
-    # Using a proxy tick size for BTC if not provided, assuming 0.1 or derived from price
-    # For a $60,000 asset, 1% is $600.
-    if tp_price <= current_price:
-        tp_price = round(current_price * 1.035, 2)
-    if sl_price >= current_price:
-        sl_price = round(current_price * 0.982, 2)
-
-    tp_pct = round(((tp_price - current_price) / current_price) * 100, 2)
-    sl_pct = round(((current_price - sl_price) / current_price) * 100, 2)
-    rr_ratio = round(tp_pct / sl_pct if sl_pct > 0 else 2.0, 2)
+    is_long = trend_bias in ("BULLISH", "NEUTRAL")
+    if tick is not None:
+        rounding = ROUND_FLOOR if is_long else ROUND_CEILING
+        sl_price = float((Decimal(str(sl_price)) / tick).to_integral_value(rounding=rounding) * tick)
+        tp_price = float((Decimal(str(tp_price)) / tick).to_integral_value(rounding=rounding) * tick)
+    valid = 0 < sl_price < current_price < tp_price if is_long else 0 < tp_price < current_price < sl_price
+    if not valid or not all(math.isfinite(value) for value in (sl_price, tp_price)):
+        raise ValueError('Exchange tick and market structure cannot provide positive directional protection')
+    risk = current_price - sl_price if is_long else sl_price - current_price
+    reward = tp_price - current_price if is_long else current_price - tp_price
+    tp_pct = round(reward / current_price * 100, 2)
+    sl_pct = round(risk / current_price * 100, 2)
+    rr_ratio = round(reward / risk, 2)
 
     return {
-        "entry_price": round(current_price, 2),
+        "entry_price": current_price,
         "take_profit_price": tp_price,
         "stop_loss_price": sl_price,
         "take_profit_pct": tp_pct,
@@ -394,15 +404,16 @@ def evaluate_master_strategy_setup(
     current_price: float,
     order_flow: OrderFlowAnalysis,
     gamma_profile: Optional[BaseModel] = None,
-    flow: Optional[Dict] = None
+    flow: Optional[Dict] = None,
+    tick_size: str | float | None = None
 ) -> Dict:
     """
     Strict institutional confluence gate for the Master Strategy (OB + FVG + GEX).
     Calculates a confluence score (0.0 to 1.0).
     A trade is ONLY marked valid (is_valid=True) if score >= 0.70 with valid OB and FVG conditions.
     """
-    if current_price <= 0:
-        current_price = order_flow.current_price
+    if not math.isfinite(current_price) or current_price <= 0:
+        raise ValueError("A finite positive market price is required")
 
     trend_bias = order_flow.trend_bias or "NEUTRAL"
     reasons = []
@@ -525,7 +536,8 @@ def evaluate_master_strategy_setup(
         current_price=current_price,
         order_flow=order_flow,
         gamma_profile=gamma_profile,
-        trend_bias=trend_bias
+        trend_bias=trend_bias,
+        tick_size=tick_size
     )
 
     rr_score = 0.10 if levels["risk_reward_ratio"] >= 1.8 else 0.05

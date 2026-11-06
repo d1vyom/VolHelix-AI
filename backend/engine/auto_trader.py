@@ -375,36 +375,22 @@ class AutoTrader:
                     current_price = p_info.get("price", 0.0)
 
                 # Phase 9: Flow Confluence
-                from backend.marketdata.hub import MarketDataHub
-                from backend.engine.flow_confluence import evaluate_flow_confluence
-                hub = MarketDataHub()
-                flow_eval = None
-                metrics = hub.get_metrics(sym)
-                
-                # Fetch bars for the primary interval if available
-                # Assuming 1m is the base interval in FLOW_FOOTPRINT_INTERVALS
-                bars = hub.get_footprint_bars(sym, "1m")
-                
-                if metrics:
-                    side_bias = "BUY" if order_flow.trend_bias in ["BULLISH", "NEUTRAL"] else "SELL"
-                    flow_eval = evaluate_flow_confluence(sym, metrics, bars, side_bias)
-                    if not settings.FLOW_CONFLUENCE_ENABLED:
-                        # Shadow Mode logging
-                        shadow_eval = evaluate_master_strategy_setup(
-                            symbol=sym, current_price=current_price, order_flow=order_flow, gamma_profile=None, flow=flow_eval
-                        )
-                        orig_eval = evaluate_master_strategy_setup(
-                            symbol=sym, current_price=current_price, order_flow=order_flow, gamma_profile=None, flow=None
-                        )
-                        logger.info(f"SHADOW: {sym} old_score={orig_eval['score']} new_score={shadow_eval['score']} old_valid={orig_eval['is_valid']} new_valid={shadow_eval['is_valid']}")
-
+                from backend.engine.flow_confluence import shared_flow_confluence
+                side_bias = "BUY" if order_flow.trend_bias in ["BULLISH", "NEUTRAL"] else "SELL"
+                flow_eval = shared_flow_confluence(sym, side_bias)
+                from backend.exchange.models import execution_price_tick
+                tick_size = execution_price_tick(client.get_execution_info(sym))
                 eval_res = evaluate_master_strategy_setup(
                     symbol=sym,
                     current_price=current_price,
                     order_flow=order_flow,
                     gamma_profile=None,
-                    flow=flow_eval
+                    flow=flow_eval,
+                    tick_size=tick_size
                 )
+
+                if not settings.FLOW_CONFLUENCE_ENABLED:
+                    logger.info(f"SHADOW: {sym} old_score={eval_res['score']} new_score={eval_res['score']} old_valid={eval_res['is_valid']} new_valid={eval_res['is_valid']} flow_score={flow_eval['score']} flow_veto={flow_eval['veto']} reasons={flow_eval['reasons']}")
 
                 cand = None
                 if eval_res.get("is_valid"):

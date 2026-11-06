@@ -5,7 +5,7 @@ import asyncio
 import math
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
 
 try:
@@ -19,7 +19,7 @@ from backend.models.trade import TradeRecord, TradeProposal
 from backend.models.market import OptionLeg, StrategyType, TradeStatus
 from backend.exchange.models import Market
 from backend.exchange.registry import get_exchange_client
-from backend.exchange.lifecycle import execute_entry, reconcile_trade, cancel_trade_order, close_trade_position
+from backend.exchange.lifecycle import execute_entry, reconcile_trade, cancel_trade_order, close_trade_position, preview_close_position
 from backend.store.portfolio_store import portfolio_store
 from backend.store.trade_log import trade_log
 from backend.store.postmortem_store import postmortem_store
@@ -467,26 +467,46 @@ class ClosePositionRequest(BaseModel):
     symbol: str
     market: Market = 'spot'
     trade_id: Optional[str] = None
+    client_order_id: Optional[str] = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,36}$')
+
+
+@router.post("/api/exchange/close-position/preview")
+async def preview_tracked_close(req: ClosePositionRequest):
+    trade = await trade_log.find_trade(req.trade_id, req.market, _normalize_symbol(req.symbol)) if req.trade_id else None
+    if not trade:
+        raise HTTPException(status_code=404, detail='Tracked position not found in selected market')
+    try:
+        client = await asyncio.to_thread(get_exchange_client, req.market)
+        return await preview_close_position(trade, client=client)
+    except Exception as exc:
+        return {'approved': False, 'checks': {}, 'reason': str(exc), 'market': req.market}
 
 
 @router.post("/api/exchange/close-position")
 @router.post("/api/alpaca/close-position")
 async def close_exchange_position(req: ClosePositionRequest):
     symbol=_normalize_symbol(req.symbol)
-    trades=[t for t in await trade_log.get_open_trades() if t.market==req.market and t.proposal.symbol==symbol and (not req.trade_id or t.trade_id==req.trade_id)]
+    if req.client_order_id and not req.trade_id:
+        raise HTTPException(status_code=422, detail='Stable close identity requires one trade_id')
+    if req.client_order_id:
+        # Completed positions remain addressable for original-attempt recovery.
+        trade = await trade_log.find_trade(req.trade_id, req.market, symbol)
+        trades = [trade] if trade else []
+    else:
+        trades=[t for t in await trade_log.get_open_trades() if t.market==req.market and t.proposal.symbol==symbol and (not req.trade_id or t.trade_id==req.trade_id)]
     if not trades:
         raise HTTPException(status_code=404,detail='No recorded exposure in selected market')
     try:
         client=await asyncio.to_thread(get_exchange_client,req.market)
         closed=[]
         for trade in trades:
-            closed.append(await close_trade_position(trade,client=client))
+            closed.append(await close_trade_position(trade,client=client,client_order_id=req.client_order_id))
     except OrderExecutionError as exc:
-        raise HTTPException(status_code=502, detail=execution_error_detail(exc, req.market)) from exc
+        raise HTTPException(status_code=502, detail=execution_error_detail(exc, req.market, req.client_order_id)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502,detail=str(exc)) from exc
     _invalidate_cache()
-    return {'success':True,'market':req.market,'symbol':symbol,
+    return {'success':True,'outcome':'ACKNOWLEDGED','client_order_id':req.client_order_id,'market':req.market,'symbol':symbol,
             'status':'CLOSED' if all(t.status==TradeStatus.CLOSED for t in closed) else 'OPEN',
             'qty':sum(t.proposal.qty for t in closed),'exit_price':closed[-1].exit_price,
             'realized_pnl':sum(t.realized_pnl for t in closed),'trades':[t.model_dump() for t in closed]}

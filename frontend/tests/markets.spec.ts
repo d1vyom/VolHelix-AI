@@ -109,7 +109,7 @@ test('stale tracked positions remain visible and close the actual market symbol 
   expect(closes).toHaveLength(0);
   await expect(page.getByRole('dialog')).toContainText('ETHUSDT');
   await page.getByRole('button',{name:'Confirm testnet order'}).click();
-  await expect.poll(()=>closes).toEqual([{market:'spot',symbol:'ETHUSDT',trade_id:'spot:ETHUSDT:42'}]);
+  await expect.poll(()=>closes).toEqual([expect.objectContaining({market:'spot',symbol:'ETHUSDT',trade_id:'spot:ETHUSDT:42',client_order_id:expect.any(String)})]);
 });
 
 test('changing chart interval preserves tracked positions and failed sync stays unavailable',async({page})=>{

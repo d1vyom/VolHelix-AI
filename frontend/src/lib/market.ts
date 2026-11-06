@@ -5,7 +5,7 @@ export interface MarketQuote { market: Market; symbol: string; price: number; ti
 export interface Depth { market: Market; symbol: string; bids: [number, number][]; asks: [number, number][] }
 export interface PositionSnapshot { market: Market; available: boolean; error?: string; positions: ExchangePosition[] }
 export interface OrderIntent { market: Market; symbol: string; qty: number; side: 'BUY'|'SELL'; order_type: 'MARKET'|'LIMIT'; limit_price?: number; client_order_id: string; reduce_only?: boolean }
-export interface Preview { approved: boolean; reason: string; checks: Record<string, boolean>; market?: Market; quantity?: string; price?: string; notional?: string; risk_coverage?: string; coverage_started_at?: string; testnet?: boolean }
+export interface Preview { approved: boolean; reason: string; checks: Record<string, boolean>; market?: Market; quantity?: string; retained_quantity?: string; entry_cancellation_required?: boolean; price?: string; notional?: string; risk_coverage?: string; coverage_started_at?: string; testnet?: boolean }
 const base = process.env.NEXT_PUBLIC_API_URL || '';
 interface ExecutionReply {
   success?:boolean; outcome?:string; status?:string; exchange_status?:string; executed_qty?:number;

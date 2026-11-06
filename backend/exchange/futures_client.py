@@ -110,7 +110,8 @@ class FuturesClient:
         bars = self.get_klines(symbol,interval='1h',limit=100)
         if not bars:
             return {'account':account,'score':0,'is_valid':False}
-        setup = evaluate_master_strategy_setup(symbol,self.get_price(symbol)['price'],analyze_order_flow(symbol,bars))
+        from backend.exchange.models import execution_price_tick
+        setup = evaluate_master_strategy_setup(symbol,self.get_price(symbol)['price'],analyze_order_flow(symbol,bars),tick_size=execution_price_tick(self.get_execution_info(symbol)))
         levels = setup.get('levels',{})
         return dict(setup,account=account,stop_loss=levels.get('stop_loss_price'),take_profit=levels.get('take_profit_price'))
 

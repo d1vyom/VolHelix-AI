@@ -5,6 +5,7 @@ Market data  → Production Binance API (api.binance.com, real prices, no key ne
 Trading      → Testnet Binance API (testnet.binance.vision, paper trading, no real money)
 """
 import time
+import math
 from datetime import datetime
 from typing import List, Optional, Dict, Tuple, Any
 
@@ -203,24 +204,36 @@ class BinanceClient:
             else:
                 tickers = self.get_all_tickers()
             tickers_map = {t["symbol"]: t["price"] for t in tickers}
+            eligible = set()
+            if any(asset != 'USDT' and amounts['total'] > 0 for asset, amounts in balances.items()):
+                eligible = _get_client_cache('spot_position_symbols', ttl_seconds=300)
+                if eligible is None:
+                    metadata = self.market_client.get_exchange_info()
+                    eligible = {row['symbol'] for row in metadata['symbols']
+                                if row['status'] == 'TRADING' and row['quoteAsset'] == 'USDT'
+                                and row.get('isSpotTradingAllowed', True)}
+                    _set_client_cache('spot_position_symbols', eligible)
 
             for asset, amounts in balances.items():
                 if asset != "USDT" and amounts["total"] > 0:
                     symbol = f"{asset}USDT"
-                    curr_price = tickers_map.get(symbol, 0.0)
-                    if curr_price > 0:
-                        market_value = amounts["total"] * curr_price
-                        # Only track watched symbols to avoid arbitrary testnet airdrop/gift balances
-                        if symbol in settings.WATCHED_SYMBOLS:
-                            positions.append({
-                                "symbol": symbol,
-                                "asset": asset,
-                                "qty": amounts["total"],
-                                "free_qty": amounts["free"],
-                                "locked_qty": amounts["locked"],
-                                "current_price": curr_price,
-                                "market_value": round(market_value, 2),
-                            })
+                    if symbol not in eligible:
+                        continue
+                    curr_price = float(tickers_map.get(symbol, 0.0))
+                    if not math.isfinite(curr_price) or curr_price <= 0:
+                        if strict:
+                            raise ValueError(f'Production valuation unavailable for {symbol}')
+                        continue
+                    market_value = amounts["total"] * curr_price
+                    positions.append({
+                        "symbol": symbol,
+                        "asset": asset,
+                        "qty": amounts["total"],
+                        "free_qty": amounts["free"],
+                        "locked_qty": amounts["locked"],
+                        "current_price": curr_price,
+                        "market_value": round(market_value, 2),
+                    })
         except Exception as e:
             logger.error(f"get_positions error: {e}")
             if strict:
@@ -456,7 +469,10 @@ class BinanceClient:
             return {'account':account,'score':0,'is_valid':False}
         current = float(self.get_price(symbol).get('price',0))
         analysis = analyze_order_flow(symbol,bars)
-        setup = evaluate_master_strategy_setup(symbol,current,analysis)
+        from backend.engine.flow_confluence import shared_flow_confluence
+        from backend.exchange.models import execution_price_tick
+        side = 'BUY' if analysis.trend_bias in ('BULLISH', 'NEUTRAL') else 'SELL'
+        setup = evaluate_master_strategy_setup(symbol,current,analysis,flow=shared_flow_confluence(symbol,side),tick_size=execution_price_tick(self.get_execution_info(symbol)))
         levels = setup.get('levels', {})
         return dict(setup,account=account,stop_loss=levels.get('stop_loss_price'),take_profit=levels.get('take_profit_price'))
 

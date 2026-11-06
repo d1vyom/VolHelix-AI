@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime
 
 from backend.exchange.schemas import OrderRequest, OrderResult
-from backend.exchange.execution import submit_order, parse_acknowledgement, recover_fees, passes_exchange_filters, OrderExecutionError, OrderNotDispatched, OrderRejected, OrderOutcomeUnknown, _reuse_intent
+from backend.exchange.execution import submit_order, parse_acknowledgement, recover_fees, passes_exchange_filters, OrderExecutionError, OrderNotDispatched, OrderRejected, OrderOutcomeUnknown, _reuse_intent, preview_order
 from decimal import Decimal, ROUND_DOWN
 from backend.models.trade import TradeRecord, TradeProposal
 from backend.models.market import TradeStatus
@@ -83,8 +83,83 @@ async def cancel_trade_order(trade, *, client):
     return reconciled
 
 
-async def close_trade_position(trade, *, client, exit_type=TradeStatus.CLOSED):
+async def close_quantity(trade, *, client):
+    """One sizing contract for tracked Spot previews and actual reductions."""
+    quantity = Decimal(str(trade.proposal.qty))
+    info = await asyncio.to_thread(client.get_execution_info, trade.proposal.symbol)
+    price = Decimal(str((await asyncio.to_thread(client.get_price, trade.proposal.symbol))['price']))
+    if not price.is_finite() or price <= 0 or info.get('status') != 'TRADING':
+        raise OrderNotDispatched('Verified close price and execution metadata required')
+    if trade.market == 'spot':
+        for rule in info.get('filters', []):
+            if rule['filterType'] in ('LOT_SIZE', 'MARKET_LOT_SIZE'):
+                step = Decimal(str(rule.get('stepSize', 0)))
+                if step > 0:
+                    quantity = (quantity / step).to_integral_value(rounding=ROUND_DOWN) * step
+    request = OrderRequest(market=trade.market, symbol=trade.proposal.symbol,
+        side='SELL' if trade.proposal.side == 'BUY' else 'BUY',
+        qty=float(quantity) if quantity > 0 else 1, reduce_only=True)
+    if quantity <= 0 or not passes_exchange_filters(request, info, quantity, price, quantity * price):
+        quantity = Decimal(0)
+    return quantity, info, price
+
+
+async def preview_close_position(trade, *, client):
+    """Read tracked inventory only; preview never cancels or submits an order."""
+    trade = await trade_log.get_trade_by_id(trade.trade_id) or trade
+    quantity, _, price = await close_quantity(trade, client=client)
+    pending = trade.exchange_status not in TERMINAL
+    if quantity > 0:
+        request = OrderRequest(market=trade.market, symbol=trade.proposal.symbol,
+            side='SELL' if trade.proposal.side == 'BUY' else 'BUY', qty=float(quantity), reduce_only=True)
+        verdict = await preview_order(request, client=client)
+    else:
+        verdict = {'approved': pending, 'checks': {'tradable_quantity': pending},
+            'reason': 'Cancel pending entry; final fills will be reconciled before closing' if pending
+                      else 'Below Spot quantity step or minimum notional; retained inventory'}
+    if trade.market == 'spot' and (trade.fees_known is False or trade.exit_fees_known is False
+            or (trade.fees_known is None and hasattr(client, 'get_order_fills'))):
+        verdict.update(approved=False, reason='Actual commissions must be reconciled before close preview')
+        verdict['checks']['known_commissions'] = False
+    verdict.update(market=trade.market, symbol=trade.proposal.symbol, testnet=True,
+        quantity=str(quantity), price=str(price), notional=str(quantity * price),
+        retained_quantity=str(Decimal(str(trade.proposal.qty)) - quantity),
+        entry_cancellation_required=pending, trade_id=trade.trade_id)
+    return verdict
+
+
+async def _close_not_dispatched(trade, client, reason):
+    await asyncio.to_thread(order_intents.bind_account, client, trade.market)
+    recorded = await asyncio.to_thread(order_intents.record_close_not_dispatched,
+        trade.trade_id, trade.market, trade.proposal.symbol, trade.exit_client_order_id, reason)
+    if not recorded:
+        raise OrderOutcomeUnknown('Concurrent close dispatch exists; reconcile the original intent')
+    raise OrderNotDispatched(reason)
+
+
+async def close_trade_position(trade, *, client, exit_type=TradeStatus.CLOSED, client_order_id=None):
+    try:
+        await asyncio.to_thread(order_intents.bind_account, client, trade.market, False)
+    except ValueError as exc:
+        raise OrderOutcomeUnknown(str(exc)) from exc
+    if client_order_id:
+        outcome = await asyncio.to_thread(order_intents.close_outcome, trade.market, client_order_id)
+        if outcome:
+            if outcome['trade_id'] != trade.trade_id or outcome['symbol'] != trade.proposal.symbol:
+                raise OrderOutcomeUnknown('Close identity conflict; reconcile its original tracked position')
+            raise OrderNotDispatched(outcome['reason'])
+        owner = await trade_log.find_exit_intent(trade.market, client_order_id)
+        intent = await asyncio.to_thread(order_intents.lookup, trade.market, client_order_id)
+        if (owner and owner.trade_id != trade.trade_id) or (intent and not owner):
+            raise OrderOutcomeUnknown('Close identity conflict; reconcile its original tracked position')
+        if intent:
+            _, updated = await reconcile_intent(trade.market, client_order_id, client=client)
+            return updated
     trade=await trade_log.get_trade_by_id(trade.trade_id) or trade
+    try:
+        trade=await trade_log.prepare_exit(trade.trade_id, client_order_id=client_order_id)
+    except ValueError as exc:
+        raise OrderOutcomeUnknown(str(exc)) from exc
     if trade.exchange_status not in TERMINAL:
         trade=await cancel_trade_order(trade,client=client)
         if trade.exchange_status not in TERMINAL:
@@ -104,6 +179,8 @@ async def close_trade_position(trade, *, client, exit_type=TradeStatus.CLOSED):
             raise OrderOutcomeUnknown('Actual exit commission unavailable; retained tracked holdings')
     trade=await trade_log.prepare_exit(trade.trade_id)
     if trade.proposal.qty<=0:
+        if client_order_id:
+            await _close_not_dispatched(trade, client, 'No remaining exposure after entry cancellation/reconciliation; no exit dispatched')
         return trade
     client_id=trade.exit_client_order_id
     await asyncio.to_thread(order_intents.bind_account,client,trade.market)
@@ -121,23 +198,22 @@ async def close_trade_position(trade, *, client, exit_type=TradeStatus.CLOSED):
             except Exception as exc:
                 raise OrderExecutionError('Exit reconciliation unavailable; retained exposure') from exc
     else:
-        quantity=Decimal(str(trade.proposal.qty))
-        if trade.market=='spot':
-            info=await asyncio.to_thread(client.get_execution_info,trade.proposal.symbol)
-            for rule in info.get('filters',[]):
-                if rule['filterType'] in ('LOT_SIZE','MARKET_LOT_SIZE'):
-                    step=Decimal(str(rule.get('stepSize',0)))
-                    if step>0:
-                        quantity=(quantity/step).to_integral_value(rounding=ROUND_DOWN)*step
-            price=Decimal(str((await asyncio.to_thread(client.get_price,trade.proposal.symbol))['price']))
-            probe=OrderRequest(symbol=trade.proposal.symbol,side='SELL',qty=float(quantity) if quantity>0 else 1,reduce_only=True)
-            if quantity<=0 or not passes_exchange_filters(probe,info,quantity,price,quantity*price):
-                return await trade_log.mark_dust(trade.trade_id,'Below Spot quantity step or minimum notional; retained inventory')
+        try:
+            quantity, info, price = await close_quantity(trade, client=client)
+        except OrderNotDispatched as exc:
+            await _close_not_dispatched(trade, client, str(exc))
+        if quantity <= 0:
+            trade = await trade_log.mark_dust(trade.trade_id,'Below quantity step or minimum notional; retained inventory')
+            if client_order_id:
+                await _close_not_dispatched(trade, client, trade.dust_reason)
+            return trade
         request=OrderRequest(market=trade.market,symbol=trade.proposal.symbol,
             side='SELL' if trade.proposal.side=='BUY' else 'BUY',qty=float(quantity),
             reduce_only=True,client_order_id=client_id)
         try:
             result=await submit_order(request,client=client)
+        except OrderNotDispatched as exc:
+            await _close_not_dispatched(trade, client, str(exc))
         except OrderExecutionError:
             # A confirmed rejection is terminal too. Apply it before propagating
             # failure so the next close can choose a new durable generation.
@@ -174,7 +250,14 @@ async def reconcile_intent(market: str, client_order_id: str, *, client):
     """Resolve a durable original intent without validation, sizing or create calls."""
     intent = await asyncio.to_thread(order_intents.lookup, market, client_order_id)
     if not intent:
-        raise KeyError('Intent not found in selected market')
+        outcome = await asyncio.to_thread(order_intents.close_outcome, market, client_order_id)
+        if not outcome:
+            raise KeyError('Intent not found in selected market')
+        try:
+            await asyncio.to_thread(order_intents.bind_account, client, market, False)
+        except ValueError as exc:
+            raise OrderOutcomeUnknown(str(exc)) from exc
+        raise OrderNotDispatched(outcome['reason'])
     request = OrderRequest.model_validate_json(intent['payload'])
     try:
         await asyncio.to_thread(order_intents.bind_account, client, market)

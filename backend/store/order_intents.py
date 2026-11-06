@@ -14,6 +14,9 @@ def connect():
     db.execute('''CREATE TABLE IF NOT EXISTS order_intents (
         identity TEXT PRIMARY KEY, market TEXT, symbol TEXT, payload TEXT,
         status TEXT, notional REAL, quantity REAL, updated REAL, result TEXT)''')
+    db.execute('''CREATE TABLE IF NOT EXISTS close_outcomes (
+        identity TEXT PRIMARY KEY, market TEXT, symbol TEXT, trade_id TEXT,
+        reason TEXT, quantity REAL, created REAL)''')
     try:
         with db:
             yield db
@@ -63,6 +66,8 @@ def claim(request, verdict, account, snapshot_started):
     from backend.risk.risk_gate import CryptoRiskGate as Gate
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        if db.execute('SELECT 1 FROM close_outcomes WHERE identity=?', (identity(request),)).fetchone():
+            raise ValueError('Original close attempt was not dispatched; confirm a new request')
         row = db.execute('SELECT * FROM order_intents WHERE identity=?',(identity(request),)).fetchone()
         if row:
             if row['payload'] != request.model_dump_json():
@@ -164,3 +169,34 @@ def pending(market=None):
     with connect() as db:
         rows=db.execute("SELECT * FROM order_intents WHERE status NOT IN ('FILLED','CANCELED','REJECTED','EXPIRED','EXPIRED_IN_MATCH')").fetchall()
         return [dict(row) for row in rows if market is None or row['market']==market]
+
+
+def close_outcome(market, client_id):
+    with connect() as db:
+        row = db.execute('SELECT * FROM close_outcomes WHERE identity=?', (f'{market}:{client_id}',)).fetchone()
+        return dict(row) if row else None
+
+
+def record_close_not_dispatched(trade_id, market, symbol, client_id, reason):
+    """Atomically prove no dispatch claim exists, retain the outcome and release this attempt."""
+    from backend.models.trade import TradeRecord
+    key = f'{market}:{client_id}'
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        if db.execute('SELECT 1 FROM order_intents WHERE identity=?', (key,)).fetchone():
+            return False  # A concurrent dispatch claim can never be released here.
+        old = db.execute('SELECT * FROM close_outcomes WHERE identity=?', (key,)).fetchone()
+        if old:
+            if old['trade_id'] != trade_id or old['symbol'] != symbol:
+                raise ValueError('Close identity conflict')
+            return True
+        row = db.execute('SELECT data FROM trades WHERE trade_id=?', (trade_id,)).fetchone()
+        trade = TradeRecord.model_validate_json(row['data'])
+        if trade.market != market or trade.proposal.symbol != symbol or trade.exit_client_order_id != client_id:
+            raise ValueError('Close ownership changed; retain unresolved attempt')
+        db.execute('INSERT INTO close_outcomes VALUES (?,?,?,?,?,?,?)',
+            (key, market, symbol, trade_id, reason, trade.proposal.qty, time.time()))
+        trade.exit_client_order_id = None
+        trade.exit_attempt += 1
+        db.execute('UPDATE trades SET data=? WHERE trade_id=?', (trade.model_dump_json(), trade_id))
+        return True

@@ -145,15 +145,17 @@ class TradeLog:
             await db.commit()
             return trade
 
-    async def prepare_exit(self, trade_id):
+    async def prepare_exit(self, trade_id, *, client_order_id=None):
         """Atomically choose one durable attempt for all concurrent close callers."""
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('BEGIN IMMEDIATE')
             row=await (await db.execute('SELECT data FROM trades WHERE trade_id=?',(trade_id,))).fetchone()
             trade=TradeRecord.model_validate_json(row[0])
-            if trade.proposal.qty>0 and not trade.exit_client_order_id:
+            if client_order_id and trade.exit_client_order_id not in (None, client_order_id):
+                raise ValueError('Another close attempt is unresolved; reconcile its original identity')
+            if (trade.proposal.qty>0 or client_order_id) and not trade.exit_client_order_id:
                 identity=f'{trade.trade_id}:{trade.closed_qty}:{trade.exit_attempt}'
-                trade.exit_client_order_id='vhx-'+hashlib.sha256(identity.encode()).hexdigest()[:32]
+                trade.exit_client_order_id=client_order_id or 'vhx-'+hashlib.sha256(identity.encode()).hexdigest()[:32]
                 await self._write_record(db,trade)
             await db.commit()
             return trade

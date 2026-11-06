@@ -1,9 +1,10 @@
 # VolHelix reliability, market discovery, and Futures upgrade
 
 Date: 2026-10-20 (Asia/Kolkata)
-Status: approved 2026-10-20; Tasks 1-8B implemented and reviewed. Final isolated
-verification recorded 2026-10-24; Task 9 review, whole-branch review and main
-integration remain pending. Public exchange access is currently externally
+Status: approved 2026-10-20; Tasks 1-9 implemented and reviewed. Whole-branch
+review on October 24 identified C1/I1-I5/M1-M2; the combined repair and isolated
+verification are recorded through November 6. Independent scoped re-review and
+main integration remain pending. Public exchange access is currently externally
 blocked; see `docs/UPGRADE_VERIFICATION.md`.
 
 ## Outcome and constraints

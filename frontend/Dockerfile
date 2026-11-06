@@ -4,7 +4,8 @@ WORKDIR /app
 
 # Install dependencies
 COPY package.json package-lock.json* ./
-RUN npm ci
+# Dependency audit is an explicit verification gate, separate from reproducible installation.
+RUN npm ci --no-audit --no-fund
 
 # Copy source code
 COPY . .

@@ -17,14 +17,14 @@ def futures(monkeypatch):
     c.trading_client.futures_symbol_config.return_value = [{'symbol':'SOLUSDT','leverage':1}]
     c.trading_client.futures_position_information.return_value = [{'symbol':'SOLUSDT','positionSide':'BOTH','positionAmt':'0','leverage':'1','markPrice':'100','notional':'0','entryPrice':'0'}]
     c.trading_client.futures_account.return_value = {'canTrade':True,'totalMarginBalance':'10000','availableBalance':'10000','assets':[{'asset':'USDT','marginBalance':'10000','availableBalance':'10000'}]}
-    info = {'symbols':[{'symbol':'SOLUSDT','baseAsset':'SOL','quoteAsset':'USDT','marginAsset':'USDT','contractType':'PERPETUAL','status':'TRADING','filters':[{'filterType':'LOT_SIZE','minQty':'.01','maxQty':'10000','stepSize':'.01'},{'filterType':'MIN_NOTIONAL','notional':'10'}]}]}
+    info = {'symbols':[{'symbol':'SOLUSDT','baseAsset':'SOL','quoteAsset':'USDT','marginAsset':'USDT','contractType':'PERPETUAL','status':'TRADING','filters':[{'filterType':'PRICE_FILTER','tickSize':'.01'},{'filterType':'LOT_SIZE','minQty':'.01','maxQty':'10000','stepSize':'.01'},{'filterType':'MIN_NOTIONAL','notional':'10'}]}]}
     c.market_client.futures_exchange_info.return_value = info
     c.trading_client.futures_exchange_info.return_value = info
     c.market_client.futures_symbol_ticker.return_value = {'symbol':'SOLUSDT','price':'100'}
     c.market_client.futures_klines.return_value = [[1,'99','101','98','100','12',2,'1200',10,'6','600','0']]
     from backend.engine import order_flow
     monkeypatch.setattr(order_flow,'analyze_order_flow', lambda *a:None)
-    monkeypatch.setattr(order_flow,'evaluate_master_strategy_setup', lambda *a:{'score':.70,'is_valid':True,'side':'SELL','levels':{'stop_loss_price':102,'take_profit_price':96}})
+    monkeypatch.setattr(order_flow,'evaluate_master_strategy_setup', lambda *a,**kw:{'score':.70,'is_valid':True,'side':'SELL','levels':{'stop_loss_price':102,'take_profit_price':96}})
     return c
 
 def request(**kw):

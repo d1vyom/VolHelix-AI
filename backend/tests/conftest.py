@@ -294,7 +294,7 @@ def exchange_fixture(monkeypatch):
     client.market_client.get_symbol_ticker.side_effect = None
     client.market_client.get_symbol_ticker.return_value = {"symbol": "SOLUSDT", "price": "150.00"}
     client.market_client.get_symbol_info.side_effect = None
-    client.market_client.get_symbol_info.return_value = {'symbol':'SOLUSDT','baseAsset':'SOL','quoteAsset':'USDT','status':'TRADING','filters':[{'filterType':'LOT_SIZE','minQty':'0.00001','maxQty':'10000','stepSize':'0.00001'},{'filterType':'MIN_NOTIONAL','minNotional':'10'}]}
+    client.market_client.get_symbol_info.return_value = {'symbol':'SOLUSDT','baseAsset':'SOL','quoteAsset':'USDT','status':'TRADING','filters':[{'filterType':'PRICE_FILTER','tickSize':'.01'},{'filterType':'LOT_SIZE','minQty':'0.00001','maxQty':'10000','stepSize':'0.00001'},{'filterType':'MIN_NOTIONAL','minNotional':'10'}]}
     client.trading_client.get_symbol_info.side_effect = None
     client.trading_client.get_symbol_info.return_value = deepcopy(client.market_client.get_symbol_info.return_value)
     client.trading_client.get_order.side_effect = RuntimeError('Order not found in explicit fixture')

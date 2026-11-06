@@ -27,15 +27,17 @@ export function OrderTicket({onUpdated,close,onDismiss}:{onUpdated?:()=>void;clo
   async function preview(event:React.FormEvent) {
     event.preventDefault();setBusy(true);setNotice('');
     const intent:OrderIntent={market:targetMarket,symbol:targetSymbol,qty:close?close.qty:Number(qty),side:close?(close.side==='SHORT'?'BUY':'SELL'):side,order_type:close?'MARKET':orderType,client_order_id:crypto.randomUUID().replaceAll('-',''),...(close?{reduce_only:true}:{}),...(!close&&orderType==='LIMIT'?{limit_price:Number(price)}:{})};
-    try {const verdict=await request<Preview>('/api/market/order/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(intent)});if(!alive.current)return;setAttempt({intent,preview:verdict,close});dialog.current?.showModal();}
+    try {const verdict=await request<Preview>(close?'/api/exchange/close-position/preview':'/api/market/order/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(close?{market:targetMarket,symbol:targetSymbol,trade_id:close.trade_id || close.id,client_order_id:intent.client_order_id}:intent)});if(!alive.current)return;setAttempt({intent,preview:verdict,close});dialog.current?.showModal();}
     catch(error){if(alive.current)setNotice(error instanceof Error?error.message:'Preview unavailable');}
     finally{if(alive.current)setBusy(false);}
   }
-  async function submit() {
+  async function submit(reconcile=false) {
     if(!attempt || !attempt.preview.approved || busy)return;
     setBusy(true);setUnknown(false);sessionStorage.setItem(storageKey,JSON.stringify(attempt));
     try {
-      const response=await fetch(`${process.env.NEXT_PUBLIC_API_URL||''}${attempt.close?'/api/exchange/close-position':'/api/exchange/order'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(attempt.close?{market:attempt.intent.market,symbol:attempt.intent.symbol,trade_id:attempt.close.trade_id || attempt.close.id}:attempt.intent)});
+      const queryClose=reconcile&&attempt.close;
+      const path=queryClose?`/api/market/order-intents/${encodeURIComponent(attempt.intent.client_order_id)}/reconcile?market=${attempt.intent.market}`:attempt.close?'/api/exchange/close-position':'/api/exchange/order';
+      const response=await fetch(`${process.env.NEXT_PUBLIC_API_URL||''}${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:queryClose?undefined:JSON.stringify(attempt.close?{market:attempt.intent.market,symbol:attempt.intent.symbol,trade_id:attempt.close.trade_id || attempt.close.id,client_order_id:attempt.intent.client_order_id}:attempt.intent)});
       const result=await readExecutionResponse(response);
       const {state,uncertain}=result;
       if(!uncertain)sessionStorage.removeItem(storageKey);
@@ -62,7 +64,7 @@ export function OrderTicket({onUpdated,close,onDismiss}:{onUpdated?:()=>void;clo
       {onDismiss&&<button type="button" onClick={onDismiss}>Back to positions</button>}
     </form>
     {notice&&<p role="status" className="break-words text-[#f7a600]">{notice}</p>}
-    {unknown&&<button type="button" className="gold-button" disabled={busy} onClick={submit}>Reconcile / retry same intent</button>}
+    {unknown&&<button type="button" className="gold-button" disabled={busy} onClick={()=>submit(true)}>Reconcile / retry same intent</button>}
     <dialog ref={dialog} onClose={()=>previewButton.current?.focus()} onKeyDown={event=>{
       if(event.key!=='Tab')return;
       const controls=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
@@ -72,12 +74,13 @@ export function OrderTicket({onUpdated,close,onDismiss}:{onUpdated?:()=>void;clo
     }} onCancel={event=>{if(busy)event.preventDefault();}} className="confirmation-dialog" aria-label="Confirm testnet order">
       {attempt&&<><h2 className="font-bold text-lg">Review {attempt.close?'position close':'testnet order'}</h2>
         <p>{attempt.intent.market} · {attempt.intent.symbol} · {attempt.intent.side} · {attempt.intent.order_type}</p>
-        <dl><dt>Quantity</dt><dd>{attempt.preview.quantity || attempt.intent.qty}</dd><dt>Preview price</dt><dd>{attempt.preview.price || 'Unavailable'}</dd><dt>Notional</dt><dd>{attempt.preview.notional || 'Unavailable'}</dd><dt>Client intent ID</dt><dd className="break-all">{attempt.intent.client_order_id}</dd></dl>
+        <dl><dt>Quantity</dt><dd>{attempt.preview.quantity ?? attempt.intent.qty}</dd>{attempt.close&&<><dt>Retained inventory</dt><dd>{attempt.preview.retained_quantity ?? 'Unavailable'}</dd></>}<dt>Preview price</dt><dd>{attempt.preview.price || 'Unavailable'}</dd><dt>Notional</dt><dd>{attempt.preview.notional || 'Unavailable'}</dd><dt>Client intent ID</dt><dd className="break-all">{attempt.intent.client_order_id}</dd></dl>
         <strong className={attempt.preview.approved?'text-[#20b26c]':'text-[#ef454a]'}>{attempt.preview.approved?'Risk approved':'Risk rejected'}: {attempt.preview.reason}</strong>
         <ul>{Object.entries(attempt.preview.checks).map(([name,passed])=><li key={name}>{passed?'PASS':'FAIL'} · {name}</li>)}</ul>
         <p>Risk coverage: {attempt.preview.risk_coverage || 'See server checks'}{attempt.preview.coverage_started_at?` since ${attempt.preview.coverage_started_at}`:''}</p>
+        {attempt.preview.entry_cancellation_required&&<p>The pending entry is canceled only after confirmation. Final fills and commissions are reconciled before sizing the close.</p>}
         <p>Server rechecks at execution. Market execution price can change. Testnet only.</p>
-        <div className="flex gap-3"><button type="button" disabled={busy} onClick={()=>{dialog.current?.close();setAttempt(null);}}>Back to ticket</button><button type="button" className="gold-button" disabled={!attempt.preview.approved||busy} onClick={submit}>Confirm testnet order</button></div>
+        <div className="flex gap-3"><button type="button" disabled={busy} onClick={()=>{dialog.current?.close();setAttempt(null);}}>Back to ticket</button><button type="button" className="gold-button" disabled={!attempt.preview.approved||busy} onClick={()=>submit()}>Confirm testnet order</button></div>
       </>}
     </dialog>
   </section>;

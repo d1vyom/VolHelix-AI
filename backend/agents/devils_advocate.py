@@ -30,7 +30,7 @@ class DevilsAdvocateAgent:
             Runnable[str, AdvocateResponse],
             self.llm.with_structured_output(AdvocateResponse)
         )
-    
+
     def evaluate(self, proposals: List[TradeProposal], signal: MarketSignal, risk: RiskFlags) -> List[AgentVote]:
         votes = []
         for prop in proposals:

@@ -18,3 +18,14 @@ def normalize_symbol_info(info):
             'quote_asset': info['quoteAsset'], 'status': info['status'],
             'filters': info.get('filters', []), 'contract_type': info.get('contractType'),
             'margin_asset': info.get('marginAsset')}
+
+
+def execution_price_tick(info):
+    """Use exchange PRICE_FILTER metadata, never a price-magnitude guess."""
+    from decimal import Decimal
+    for rule in info.get('filters', []):
+        if rule.get('filterType') == 'PRICE_FILTER':
+            tick = Decimal(str(rule.get('tickSize', 0)))
+            if tick.is_finite() and tick > 0:
+                return str(tick)
+    raise ValueError('Verified exchange price tick unavailable')

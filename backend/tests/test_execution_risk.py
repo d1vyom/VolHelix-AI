@@ -113,8 +113,8 @@ def test_server_context_values_inventory_and_records_coverage(exchange_fixture,m
     c=exchange_fixture
     c.trading_client.get_account.return_value={'canTrade':True,'balances':[{'asset':'USDT','free':'10000','locked':'0'},{'asset':'SOL','free':'2','locked':'0'}]}
     monkeypatch.setattr(c,'get_klines',lambda *a,**kw:[{'close':150}])
-    monkeypatch.setattr(order_flow,'analyze_order_flow',lambda *a:None)
-    monkeypatch.setattr(order_flow,'evaluate_master_strategy_setup',lambda *a:{'score':.70,'is_valid':True,'side':'BUY','levels':{'stop_loss_price':140,'take_profit_price':170}})
+    monkeypatch.setattr(order_flow,'analyze_order_flow',lambda *a:order_flow.OrderFlowAnalysis(symbol='SOLUSDT',timestamp='fixture',current_price=150))
+    monkeypatch.setattr(order_flow,'evaluate_master_strategy_setup',lambda *a,**kw:{'score':.70,'is_valid':True,'side':'BUY','levels':{'stop_loss_price':140,'take_profit_price':170}})
     context=BinanceClient.get_execution_context(c,'SOLUSDT')
     assert context['account']['equity']==10300
     assert context['account']['daily_pnl']==0
@@ -163,7 +163,7 @@ def test_auto_trader_scan_approval_cannot_bypass_fresh_gate(exchange_fixture,mon
     c=exchange_fixture
     monkeypatch.setattr(c,'get_execution_context',lambda symbol:{'account':{'equity':10000,'daily_pnl':0},'score':.69})
     monkeypatch.setattr(c,'get_klines',lambda *a,**kw:[{'close':150}])
-    monkeypatch.setattr(module,'analyze_order_flow',lambda *a:SimpleNamespace(current_price=150))
+    monkeypatch.setattr(module,'analyze_order_flow',lambda *a:SimpleNamespace(current_price=150,trend_bias="BULLISH"))
     monkeypatch.setattr(module,'evaluate_master_strategy_setup',lambda **kw:{'is_valid':True,'score':.9,'levels':{'take_profit_price':170,'stop_loss_price':140}})
     monkeypatch.setattr(module.auto_trader,'_get_binance_client',lambda:c)
     result=module.auto_trader.trigger_cycle('SOLUSDT')

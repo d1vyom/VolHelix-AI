@@ -1,0 +1,176 @@
+{
+  "date": "2026-11-06",
+  "runtimeBaseCommit": "2bba0c5c1a8309e050a27e9d8a6331973e9b8f6c",
+  "runtimeReference": "Combined repair commit containing this artifact; independent scoped re-review pending",
+  "scope": "Managed isolated repair and verification; no orders or VolHelix application lifespan",
+  "findings": {
+    "C1": "Shared Spot hub and enabled fail-closed scan/fresh-dispatch flow veto",
+    "I1": "Legacy strategy serialization and mixed-ledger guardian compatibility",
+    "I2": "Server-owned tracked-close quantity, commissions and retained dust",
+    "I3": "Durable original close identity and query-only uncertain recovery",
+    "I4": "Eligible non-watchlist holdings production valuation with honest unavailable/stale state",
+    "I5": "Actual OHLC price precision and execution tick-aware directional protection",
+    "M1": "Normalized buying_power and truthful available USDT label",
+    "M2": "Four aggregate whitespace errors removed"
+  },
+  "backend": {
+    "date": "2026-11-01",
+    "passed": 377,
+    "warnings": 2,
+    "seconds": 91.27,
+    "command": "D:/Projects/VolHelix-AI/env/Scripts/python.exe -m pytest -q",
+    "unexpectedNetwork": "forbidden",
+    "database": "temporary"
+  },
+  "frontend": {
+    "browserDate": "2026-11-01",
+    "browserPassed": 65,
+    "browserDuration": "2.0m",
+    "browserData": "offline HTTP and loopback Socket.IO fixtures",
+    "lintDate": "2026-11-06",
+    "lintExit": 0,
+    "typescriptExit": 0,
+    "buildExit": 0,
+    "next": "16.4.3",
+    "focusedCloseHeaderPassed": 6,
+    "finalVisualCapturePassed": 1,
+    "audit": {
+      "date": "2026-11-06",
+      "fullExit": 1,
+      "fullVulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 8,
+        "high": 0,
+        "critical": 0,
+        "total": 8
+      },
+      "underlyingAdvisories": [
+        "GHSA-g3hv-75wg-m249"
+      ],
+      "installedAffectedMinimatch": "10.2.6",
+      "scope": "development TypeScript ESLint dependency chain",
+      "productionOnlyExit": 0,
+      "productionOnlyVulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      },
+      "zodDevLockPatch": {
+        "from": "4.5.4",
+        "to": "4.6.7",
+        "clearedAdvisory": "GHSA-mrhx-c7xc-m3w5"
+      },
+      "disposition": "Compatible tooling retained under controller ruling; no forced major override or Next ESLint downgrade; full audit is not clean"
+    }
+  },
+  "docker": {
+    "date": "2026-11-06",
+    "context": "default",
+    "server": "29.7.2",
+    "backendImage": "volhelix-backend:final-repair-20261106",
+    "backendImageId": "sha256:18d7bfd438ea2aa7d1cbe75dadfecddf69cb1dfc2785745a8faaecc3cbe3a624",
+    "frontendImage": "volhelix-frontend:final-repair-20261106",
+    "frontendImageId": "sha256:630c998f2263744a1315760fa03e466aeede00dff4facda1f1ac6ad10aa13d32",
+    "buildsExit": 0,
+    "checksNetwork": "none",
+    "backendImportExit": 0,
+    "backendImportThreads": [
+      "MainThread"
+    ],
+    "backendImagePytest": {
+      "passed": 377,
+      "warnings": 2,
+      "seconds": 39.78
+    },
+    "frontendArtifactExit": 0,
+    "frontendNode": "22.23.4",
+    "frontendNext": "16.4.3",
+    "frontendBuildId": "OZ86gu8qkEglJ6xRMTJ5U",
+    "frontendAppRoutes": [
+      "/",
+      "/audit",
+      "/history",
+      "/terminal",
+      "/volatility"
+    ],
+    "desktopRestart": "Explicit user approval persisted; unrelated Supabase containers left untouched"
+  },
+  "public": {
+    "date": "2026-11-06",
+    "spotCliExit": 1,
+    "futuresCliExit": 1,
+    "spotError": "ConnectTimeout",
+    "futuresError": "ConnectTimeout",
+    "currentLiveConnectivity": "unverified",
+    "authenticatedExecution": "unverified",
+    "liveScreenshot": false,
+    "historicalEvidence": "task-9-summary.json and task-9-verification-history.md retain October 24 evidence; October 22 Futures LIVE remains historical"
+  },
+  "visualEvidence": {
+    "path": "../ui/final-repair/tracked-close-preview.png",
+    "type": "offline confirmation fixture; not live account proof",
+    "executableQuantity": "0.99",
+    "retainedQuantity": "0.0099",
+    "availableUSDT": "0.00",
+    "visuallyInspected": true
+  },
+  "delivery": {
+    "task9Review": "complete before final repair",
+    "wholeBranchReview": "completed October 24 with findings",
+    "combinedRepair": "implemented and isolated gates recorded",
+    "independentScopedRereview": "pending controller",
+    "push": "pending controller",
+    "mainIntegration": "pending controller",
+    "productionRefVerification": "pending controller",
+    "productionDeployment": "not authorized",
+    "selfReview": {
+      "contracts": "C1/I1-I5/M1-M2 source/tests reviewed against brief and section21",
+      "jsonEvidenceHashes": "passed",
+      "orderedRulings": 9,
+      "localMarkdownLinksChecked": 20,
+      "historicalEvidence": "unchanged; dated Task9 document rebases only four relative links",
+      "secretGeneratedFileReview": "scoped changed-file check passed; not exhaustive security certification",
+      "aggregateWhitespaceCheckExit": 0
+    }
+  },
+  "limitations": [
+    "Eight moderate development package entries from one minimatch advisory; full audit not clean",
+    "Unlocked Python dependencies; future install reproducibility not certified",
+    "Current public Spot/Futures connectivity unavailable from this environment",
+    "Authenticated orders, account modes, actual fees/partial fills and live guardian unverified",
+    "Inherited rolling-window/book extreme-load bounds not certified",
+    "Gross PnL with actual native fees separate; net PnL unavailable; pre-observation losses unknown"
+  ],
+  "rulings": [
+    "Ruling: Use managed isolated checkout and existing original Python runtime — authorized implementation permits reversible setup; original user files stay untouched — cost if wrong: environment-dependent tests must be rerun.",
+    "Ruling: Do not repeat unsafe baseline suite until Task 1 isolates clients/stores — inspected lifecycle tests invoke trading routes — cost if wrong: delayed baseline evidence.",
+    "Ruling: Implement persisted first-observed daily/session account-equity baseline for Spot drawdown where Binance lacks direct daily PnL, exposing coverage timestamp and retaining observed loss across deposits — functional risk gating cannot use fabricated0 or remain a permanent stub — cost if wrong: losses before monitoring began are unknown; must clearly disclose coverage and keep missing equity fail-closed.",
+    "Ruling: Bring backward-compatible persisted market fields forward into Task4 submission path — reachable Futures orders must never be stored as default Spot — cost if wrong: Task5 may refine serialization, legacy records remain Spot. Task5 retains lifecycle/guardian/reconciliation ownership.",
+    "Ruling: Split approved Task8 into sequential8A backend/runtime and8B visual/frontend-dependency review units — newly verified financial/runtime findings plus five-route polish exceed one coherent review surface — cost if wrong: one extra review handoff; no added product feature scope. Briefs task-8a-brief.md/task-8b-brief.md, both execute after Task7 review.",
+    "Ruling: Add tracked frontend/vercel.json git.deploymentEnabled.main=false in8B — connectedVercelautoDeploymentwouldotherwiseviolatetheapprovedno-production-deployscopeonmainpush — costifwrong: automaticmainreleasesremaindisableduntiluserexplicitlyre-enables; branchpreviewsunchanged. OfficialVercelgitconfigurationdocsverified; actualprojectrootfrontendconfirmed viaCLI. Task8Bassignedguard, final9mustverifyproductionrefunchanged.",
+    "Ruling: Include narrow sharedprice-gridprecisionfix in8B alongsideUIformatting — actualbackendbucketpriceswerewrong/zero, sofrontformattingalonecannotmeetapprovednew-pair/datahonestyrequirements — costifwrong:Decimalper-tickoverhead; requireO(1),boundedhelpers,targetedflowregressions/volumeconservation/fullbackendverification. No risk/executionchanges. Task8Bimplementerassigned.",
+    "Ruling: Carry the unchanged rolling-window/book internals as an explicit baseline verification limitation rather than redesign them in the final repair wave — the reviewer established no incremental regression or concrete failing workload there, while the binding spec prohibits broad rewrites — cost if wrong: extreme-load memory bounds and per-tick work in inherited internals remain uncertified; do not claim exhaustive runtime or production readiness.",
+    "Ruling: Retain the compatible ESLint/Next development toolchain and disclose the remaining minimatch advisory rather than force a major minimatch override or downgrade Next ESLint configuration — fresh Nov6 audit has 8 moderate development package entries for GHSA-g3hv-75wg-m249, current typescript-estree still requires vulnerable10.x, while production audit is0 and Zod high is patched — cost if wrong: lint/build tooling remains susceptible to the advisory with crafted glob inputs; do not claim a zero-vulnerability full audit."
+  ],
+  "evidenceLogSha256": {
+    "tmp/final-full-backend.log": "3015d76e260d77aed7a184d90596d521613931fdeff486ca5f9428c1ca8b9cb8",
+    "tmp/final-full-browser.log": "33bb76b495f90939dcf5132bbb992882f8950a61d33fd626df64d85df9b0cb79",
+    "tmp/final-lint-post-zod.log": "9a1a60887235a4056d6565ffb02af25ba870dd38f26d1b5a227b74c6b8ead6ac",
+    "tmp/final-typescript-post-build.log": "6de6c14acfcd459befbd25d44258b86991d531a52563ba851566118e060e2670",
+    "tmp/final-build.log": "a65b10193c9a3177f69068dcc7250f95f8cfa1490d04159d2865d5ea76efd7fd",
+    "tmp/final-audit-post-zod.json": "b19e48c14bd8686a12d0e0ca8c9f188c19638c75d53a3703ad921b320362d051",
+    "tmp/final-audit-production.json": "9c586c4a415c30217e08a8992b007b41621253f63407eec6b2070db7eac2dd78",
+    "tmp/final-backend-docker.log": "f1cd85b8a8db6d2cdf989035c1160b7d6f865a8b535f06270c8b08f599ec9df8",
+    "tmp/final-backend-image-check.log": "1f2a636be0c8d0355b381bd1aee3bc195bc18f936d2b08da83668fa0cf466270",
+    "tmp/final-backend-image-pytest.log": "58aefef3ada663de1455672f91a0596ab8a3c2ed1f86c0729cb948c503f1958b",
+    "tmp/final-frontend-docker-retry.log": "c273a8690a95d503e36b53baaf0b75541c304a52fa4d9854d5cf22a6b9aab437",
+    "tmp/final-frontend-image-check.log": "3d1251e454a7922fc7a549a3f8c56c797f21ca4be708c56dfb985c99efe3c865",
+    "tmp/final-close-capture.log": "c02649735b847def254078ad7e3b2b1cbb2e8e109ecb1667ab56a0b59e3b467e",
+    "tmp/final-public-spot-nov6.log": "0199466874243a4eec52f2cf7810251f6180cf2843d707df01edbfc32edb97c1",
+    "tmp/final-public-futures-nov6.log": "0199466874243a4eec52f2cf7810251f6180cf2843d707df01edbfc32edb97c1"
+  }
+}

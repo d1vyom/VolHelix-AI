@@ -16,7 +16,7 @@ export function Header() {
     <div className="flex flex-wrap items-center gap-3">
       <strong data-testid="selected-market">{market} · {symbol}</strong>
       <span data-testid="header-price" className="text-[#f7a600]">{quote ? `$${formatPrice(quote.price)}` : 'Quote unavailable'}</span>
-      <span>Testnet cash: {account ? `$${formatMoney(account.cash)}` : 'Unavailable'}</span>
+      <span>Testnet available: {account ? `$${formatMoney(account.buying_power)} USDT` : 'Unavailable'}</span>
       <span className="text-[#878996]">Production data / Testnet orders</span>
     </div>
     {error&&<div data-testid="market-read-status" role="status" className="text-[#f7a600] flex gap-2 flex-wrap"><span>{error}</span><button type="button" onClick={refresh}>Retry data</button></div>}

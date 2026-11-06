@@ -150,7 +150,9 @@ The tasks cover the approved spec's trading, market discovery, UI, compatibility
 verification, and delivery requirements. The five review-focus cases have explicit
 test owners. Work proceeds in dependency order; the UI consumes the API and
 market identities established earlier. Execution uses the approved task/review
-workflow. Tasks 1-8B are reviewed; Task 9 verification/docs are recorded in
-`docs/UPGRADE_VERIFICATION.md`. Task 9 review, final whole-branch review and main
-integration remain pending. Public connectivity checks ran but current live
-access is externally blocked.
+workflow. Tasks 1-9 are implemented and reviewed. The October 24 whole-branch
+review identified C1/I1-I5/M1-M2; the combined repair and November 1/6 isolated
+gates are recorded in `docs/UPGRADE_VERIFICATION.md`. Independent scoped
+re-review, push/main integration and final delivery remain pending. The review
+checkbox stays open until that re-review accepts the repair. Public connectivity
+checks ran but current live access is externally blocked.

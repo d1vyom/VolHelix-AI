@@ -560,7 +560,7 @@ class MarketDataHub:
                 # the exchange, and showing it as \"lag\" is misleading.
                 health.lag_ms = max(0, event_time - parsed.ts)
                 health.gap_events = self.buffers[sym].trade_gaps
-                
+
                 # Process footprint
                 if sym in self.footprint_engines:
                     for interval, engine in self.footprint_engines[sym].items():

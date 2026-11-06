@@ -1,137 +1,138 @@
-# Upgrade verification — 2026-10-24
+# Upgrade verification - 2026-11-06
 
-Runtime verified: implementation commit `a77679d` on
-`codex/market-upgrade-implementation`, managed isolated worktree. Task 9 changes
-are documentation and curated evidence only. Tasks 1-8B passed their scoped
-reviews. Task 9 review, fresh whole-branch review (including pre-existing
-`e06ac14`), push/main integration and remote/deployment-ref checks remain the
-controller's delivery gates. Production deployment remains outside scope.
-The preceding [Task 8B repair and review evidence](artifacts/verification/task-8b-verification-history.md)
-is preserved as a dated historical record; its screenshot link follows the new
-archive location.
+The final combined repair wave addresses C1, I1-I5 and M1-M2 from the whole-branch
+review of `2bba0c5`. The repair commit containing this document is the current
+runtime. Independent scoped re-review, push/main integration and production-ref
+verification remain controller-owned delivery gates; no production deployment
+is authorized. This document does not claim a clean full dependency audit or
+verified live execution.
 
-## Final checks
+Prior evidence is preserved in the dated [Task 9 record](artifacts/verification/task-9-verification-history.md),
+[Task 9 summary](artifacts/verification/task-9-summary.json), and
+[Task 8B record](artifacts/verification/task-8b-verification-history.md).
+Their original results, image identifiers and public observations are historical.
+The new [repair summary](artifacts/verification/final-repair-summary.json) records
+these repairs and current limitations separately.
 
-Commands run from the managed worktree root unless `frontend/` is specified.
-The local interpreter was `D:/Projects/VolHelix-AI/env/Scripts/python.exe`
-(Python 3.13.7); no environment, credentials or runtime database was copied from
-the primary checkout. Local Node was 24.18.1. Root/frontend private dotenv count
-and relevant inherited exchange/LLM credential count were both zero. Python
-verification additionally blanked the named credential variables explicitly.
+## Repairs and meaningful regression coverage
 
-| Check | Command | Actual result |
-|---|---|---|
-| Complete backend, bare root | `D:/Projects/VolHelix-AI/env/Scripts/python.exe -m pytest -q` | 329 passed, 2 warnings, 53.09s |
-| Lint, `frontend/` | `npm run lint` | exit 0, no lint diagnostics |
-| TypeScript, `frontend/` | `npx tsc --noEmit` | exit 0 |
-| Production build, `frontend/` | `npm run build` | exit 0; compile, TypeScript, 8 static pages and route generation successful |
-| Complete browser regressions, `frontend/` | `npx playwright test` | 59 passed, 1.3m |
-| Dependency audit, `frontend/` | `npm audit --json` | exit 0; 0 vulnerabilities, 769 dependencies counted |
-| Backend Docker | `docker --context default build --progress=plain -f backend/Dockerfile -t volhelix-backend:verify-29ee136 .` | controller build exit 0; backend source unchanged through `a77679d` |
-| Frontend Docker | `docker --context default build --progress=plain -f frontend/Dockerfile -t volhelix-frontend:verify-a77679d frontend` | controller build exit 0, including npm ci and Next build/export; Dockerfile default endpoint arguments |
-| Backend image isolation | network-disabled `docker run --rm` importing `backend.main`, with blank exchange/Google credentials | exit 0; ASGI callable; only MainThread; no lifecycle/server started |
-| Frontend image artifact | network-disabled `docker run --rm` reading Node/Next versions and `.next/BUILD_ID` | exit 0; Node 22.23.4, Next 16.4.3, nonempty build ID |
-
-Backend warnings are the existing `python-binance` import of deprecated
-`websockets.WebSocketClientProtocol` (twice). Image import also logs the retained
-legacy `AlpacaClient` alias deprecation. These checks do not certify external
-service availability or authenticated execution. Python dependencies are not
-locked; the existing environment and the independently built image are separate
-pieces of evidence, not a reproducibility guarantee for future installs.
-
-Exact local logs are `tmp/task9-pytest.log`, `task9-lint.log`,
-`task9-typescript.log`, `task9-build.log`, `task9-playwright.log`,
-`task9-npm-audit.json`, `task9-backend-docker.log`,
-`task9-frontend-docker-final.log`, `task9-backend-image-recheck.log`, and
-`task9-frontend-image-recheck.log`. Scratch logs are ignored; the concise
-[verification summary](artifacts/verification/task-9-summary.json) is tracked.
-
-## Browser scope and visual evidence
-
-HTTP exchange routes are fixtures, and the controlled Socket.IO transport binds
-only `127.0.0.1:8107`; Next uses a separate `.next-e2e` directory and port 3107.
-The tests start no backend lifecycle, guardian, scanner or authenticated client.
-Order POSTs in outcome tests terminate in local route fixtures. Screenshot-only
-navigation observed no mutating API requests and no page exceptions.
-
-The 59 tests include catalog search/retry/keyboard selection, rapid market
-switching, account unavailability/zero, server-owned confirmation and uncertain
-intent recovery, Spot/Futures flow isolation, pending/partial/fee displays,
-subcent and adjacent price ticks, chart axis bounding boxes, actual reduced-motion
-behavior, dialog focus and all five routes at 390/768/1440px. DOM/tape socket tests
-exercise the real browser Socket.IO client against the local controlled server.
-
-The labelled [Task 8B captures](artifacts/ui/task-8b) remain the curated visual
-set. This run regenerated them and visually inspected the 390px dashboard and
-1440px terminal; incidental clock/font timing changes were discarded. Current
-[observations](artifacts/verification/task-9-browser-observations.json) preserve
-width/overflow readings, page exceptions, console errors and mutation counts.
-Some navigation captures deliberately have no Socket.IO fixture server, so their
-console includes local `ERR_CONNECTION_REFUSED` messages and the UI correctly
-shows disconnected/no-data states. Reduced-motion tests emit the library's
-expected reduced-motion notice. No claim of a silent console or live-market
-screenshot is made.
-
-## Separate public connectivity checks and limits
-
-The explicit read-only CLI was run for both markets:
-
-```powershell
-D:/Projects/VolHelix-AI/env/Scripts/python.exe scripts/test_mcp_connection.py --market spot --symbol BTCUSDT
-D:/Projects/VolHelix-AI/env/Scripts/python.exe scripts/test_mcp_connection.py --market futures --symbol BTCUSDT
-```
-
-Both exited 1 with `ConnectTimeout`, before receiving server time or price.
-Independent `Invoke-WebRequest` calls to production `/api/v3/time` and
-`/fapi/v1/time`, each bounded to 12 seconds, also timed out. These are environmental
-access failures; no response established an exchange outage, geographic restriction
-or a code defect. No TLS validation was disabled and no host was substituted.
-
-A separate disposable `tmp/task9-public-hubs.py` invoked the actual
-`MarketDataHub` Spot/Futures connectors with all exchange/LLM credentials blank,
-BTCUSDT only, flow persistence off and an isolated temporary flow-store path.
-It never imported `backend.main`, entered the app lifespan, or called an order,
-account, scan/start endpoint. Each public metadata attempt raised `ConnectTimeout`.
-Both hubs were stopped and awaited in `finally`, each retained zero symbols and
-the final asyncio pending-task count was zero. Only MainThread and the two
-asyncio executor threads were present before `asyncio.run` closed its executor;
-no trading thread started. The probe process exited 0 because it records external
-failure as evidence, **not** because connectivity passed.
-
-Logs: `tmp/task9-public-spot.log`, `task9-public-futures.log`,
-`task9-public-hubs.log`. The earlier Task 6 Futures-only public ingestion proof
-(2026-10-22) observed synchronized depth, four trades/tape entries, LIVE health,
-one book resync and zero gaps, with awaited cleanup. That dated observation does
-not override the current failed access checks. Current public Spot/Futures LIVE
-connectivity and a screenshot backed by actual public data remain unverified.
-
-No live/testnet orders, authenticated account queries, Auto-Pilot startup, full
-app service smoke or deployment was attempted. Testnet instrument availability,
-account settings, real partial fills/fees and guardian execution against an
-actual demo account remain unverified. The guardian requires the backend process
-to remain running. Historical losses before the first observed equity baseline
-are unknown; PnL is gross with actual native fees separate and net PnL unavailable.
-No production-readiness or all-bugs-eliminated claim follows from these checks.
-
-## Coverage against the guardrails
-
-| Guardrail in Upgrade_Plan.md section 21 | Evidence / scope |
+| Finding | Result and boundaries |
 |---|---|
-| 1-2: MIT-compatible original work; same languages/framework | Scoped implementation uses existing Python/Next stack; final whole-branch origin/license review pending |
-| 3-4: production public data, testnet execution, no invented fallbacks | Separate market adapters; unavailable-state, no-fill, missing-quote and model-lab regressions; current external access blocked |
-| 5-6: nonblocking reads; fixed broadcasts | API thread-pool hooks, synchronous bounded aggregation and fixed-rate Socket.IO regressions |
-| 7: preserve risk/confluence | Deterministic entry/exit, funds, finite-value, account mode, leverage and risk regressions in the 329-test suite; 0.70 threshold retained |
-| 8: isolate data failures from classic API/guardian | Outage/partial fill/cancel/close/restart/intent recovery coverage; no authenticated live guardian test |
-| 9: no wholesale classic-module rewrite | Tasks 1-8B scoped reviews; final whole-branch review is still required |
-| 10: bounded buffers/tasks and cleanup | Bounded caches/listeners, disconnect/rotation/lifecycle cleanup regressions and awaited standalone probe shutdown |
-| 11: no secrets | No private dotenv or runtime DB copied; final docs/artifacts contain public errors and test summaries only; whole-branch secret/generated-file review pending |
-| 12: no completion with failing tests/build | All deterministic gates and image builds pass; external live gate explicitly unresolved; review/integration not marked complete |
+| C1 - lost scanner flow veto | Scanner and fresh Spot execution context resolve the market-owned shared hub. Enabled missing, warming, stale, disconnected or failed reads veto entries. Real strategy/risk regressions exercise scan-to-dispatch and LIVE-to-STALE transition. Disabled shadow behavior, exit eligibility, 0.70 threshold and $200 sizing remain. No new streams or per-evaluation hubs. |
+| I1 - historical strategy records | All six former persisted strategy values retain their identities; mixed history/open/pending rows and guardian processing stay readable. No obsolete strategy generation restored. |
+| I2 - fee-adjusted close preview | Server resolves the tracked position and shares quantity/filter rules with execution. Net0.9999SOL previews0.99 executable and0.0099 retained. Entry quantities remain strict; dust is retained; unknown actual commissions fail closed. Preview never cancels or submits. Confirmed pending entries cancel/reconcile before sizing final exposure. |
+| I3 - lost close response | Confirmation carries one durable close ID. Completed and terminal partial attempts remain queryable; UI recovery only queries original market/ID, including reload/market switch. Bare404 and account mismatch remain uncertain. Truthful pre-dispatch outcomes are atomically retained without exchange fills/acknowledgements, releasing an active ID only when no dispatch claim exists. Both race orderings and cancel-with-zero-fill/dust recovery are covered. |
+| I4 - dynamic holdings valuation | Eligible non-watchlist Spot USDT holdings use verified production metadata/tickers in common snapshots. Outages/missing prices preserve stale recorded exposure; genuine emptiness stays empty. Wallet holdings are not promoted to tracked trades; no catalog-wide flow subscriptions. |
+| I5 - subcent strategy prices | Real OHLC structure retains price precision. Both execution adapters and scanner require actual PRICE_FILTER tick metadata; structural buffers and rounding use that tick, with positive correctly directed long/short protection. Missing/nonfinite price and missing execution tick fail honestly; no575 fallback. Strategy weights and0.70 threshold remain. Tick-correct R:R changes one old fixture score from0.85 to0.90; disabled flow matches the same-tick bar-only baseline. |
+| M1/M2 | Header displays normalized buying_power as Testnet available USDT, preserving zero. Four aggregate whitespace errors removed. |
+
+New deterministic tests are `test_final_flow_contract.py`,
+`test_legacy_strategy_records.py`, `test_tracked_close_contract.py`,
+`test_dynamic_position_values.py`, `test_subcent_strategy_contract.py` and
+`frontend/tests/final-close-contract.spec.ts`. Each reported behavior was first
+reproduced failing. Focused backend groups passed144 and19 tests; the query-only
+browser group passed6. Real strategy and real OHLC/protection logic are used for
+C1/I5; exchange interactions are explicit fixtures. The risk gate file is
+unchanged by this repair wave.
+
+## Verification gates
+
+Commands run in the managed worktree root, or `frontend/` for npm/Playwright.
+Shared Python runtime was `D:/Projects/VolHelix-AI/env/Scripts/python.exe`;
+no private environment or database was copied. The suite prohibits unexpected
+network access and SQLite writes outside temporary test directories. Credentials
+were blanked in the backend verification process; no autonomous loops started.
+
+| Date | Gate | Actual result |
+|---|---|---|
+| Nov1 | Bare-root `python -m pytest -q` | 377 passed,2 existing SDK deprecation warnings,91.27s |
+| Nov1 | Full `npx playwright test` | 65 passed,2.0m; fixture HTTP and local Socket.IO only |
+| Nov6 | `npm run lint` after Zod patch | exit0 |
+| Nov6 | `npx tsc --noEmit` after generated files stabilized | exit0 |
+| Nov6 | `npm run build` | exit0; Next16.4.3 compile/TypeScript/static8pages/all five application routes |
+| Nov6 | Focused close/header browser and visual capture | 6 passed; final realistic base-fee capture1passed |
+| Nov6 | `npm audit --json --fetch-timeout=15000 --fetch-retries=0` | exit1;8 moderate affected package entries from one development-toolchain advisory;0high/critical |
+| Nov6 | `npm audit --omit=dev --json` | exit0;0 vulnerabilities |
+| Nov6 | Backend Docker build/import | build exit0; network-disabled import exit0,ASGI callable,only MainThread |
+| Nov6 | Backend Docker isolated suite | 377 passed, 2 existing SDK warnings, 39.78s; `--network none`, temporary ledgers |
+| Nov6 | Frontend Docker build/artifact | build exit0; network-disabled artifact check exit0, Node22.23.4, Next16.4.3, nonempty build ID and all five app routes |
+| Nov6 | Aggregate `git diff 5d07651 --check` | exit0 |
+
+The Nov1 full suites cover the final application source; later changes are the
+one-package development lock update, screenshot fixture/evidence and Docker
+install-time audit flag. The affected lint/build/typecheck gates ran again.
+Standalone TypeScript initially raced `.next-e2e` generated-file cleanup when
+run concurrently with browser startup; sequential verification passed without
+removing valid config. Browser captures can log expected local socket connection
+failures where the fixture deliberately lacks a socket server; this is not a
+claim of a silent console.
+
+The labelled [tracked-close confirmation](artifacts/ui/final-repair/tracked-close-preview.png)
+was visually inspected: executable0.99, retained0.0099, original identity and
+zero available balance are legible. It is an offline fixture, not live-account
+proof. Historical Task8B PNG/JSON captures remain unchanged.
+
+Scratch logs are `tmp/final-full-backend.log`, `final-full-browser.log`,
+`final-lint-post-zod.log`, `final-typescript-post-build.log`, `final-build.log`,
+`final-audit-post-zod.json`, `final-audit-production.json`,
+`final-backend-docker.log`, `final-backend-image-check.log`,
+`final-backend-image-pytest.log`, `final-frontend-docker-retry.log`,
+`final-frontend-image-check.log` and `final-close-capture.log`. Curated summary data
+is tracked, not full log dumps.
+
+## Dependency audit limitation
+
+The Nov1 audit reported17 affected package entries. The compatible development
+Zod update4.5.4 to4.6.7 removes the high issue; only its lockfile entry changed.
+The patched floor is4.6.6 in the [Zod advisory](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5).
+
+The fresh Nov6 audit reports8 moderate package entries from the single
+[minimatch glob-pattern amplification advisory](https://github.com/advisories/GHSA-g3hv-75wg-m249),
+whose current npm affected range is>=7.0.0,<11.0.1. Here minimatch10.2.6 belongs
+to the TypeScript ESLint development dependency chain; the3.1.5 branch is no
+longer flagged by current advisory metadata. npm metadata confirms10.2.6 is the
+latest10.x and latest typescript-estree8.72.1 still requires^10.2.2. A forced
+minimatch11 override or suggested eslint-config-next16.4.3 to15.5.29 downgrade
+would cross compatibility boundaries. The controller explicitly retained the
+compatible tooling and recorded the residual crafted-glob denial-of-service
+risk in lint/build tooling below. Production-only audit0 does not mean full
+audit0 or prove the entire application free of vulnerabilities.
+
+Docker installation uses `npm ci --no-audit --no-fund` after an install-time
+metadata stall. Explicit full and production audits remain separate visible
+gates; TLS verification and tests are unchanged.
+
+## External verification and runtime limits
+
+Controller read-only public CLI checks on Nov6 for Spot and Futures both exited1
+with ConnectTimeout (`tmp/final-public-spot-nov6.log`,
+`tmp/final-public-futures-nov6.log`). This proves unavailable access from this
+environment, not an exchange outage or geographic restriction. No current LIVE
+claim is supported. Earlier Oct22 Futures LIVE and Oct24 failures remain dated
+historical observations.
+
+No actual exchange orders, authenticated account queries, autonomous VolHelix
+service/guardian startup or deployment were used for verification. Testnet
+account modes, real fees/partial fills and actual guardian execution remain
+unverified. The guardian requires a running backend process; historical losses
+before first observed equity are unknown. PnL remains gross with actual native
+fees separate; net PnL is unavailable.
+
+Docker Desktop was restarted under explicit user approval;
+unrelated existing Supabase containers auto-restarted and were left untouched.
+Current images are `volhelix-backend:final-repair-20261106` and
+`volhelix-frontend:final-repair-20261106`. The latter contains build ID
+`OZ86gu8qkEglJ6xRMTJ5U`; exact image IDs are in the repair summary.
+Project checks use explicit `--context default` and network-disabled disposable
+containers without an application lifespan. Unlocked Python dependencies mean
+future install reproducibility is not certified. The unchanged inherited rolling
+window/book internals remain an explicit unverified extreme-load limitation.
+No exhaustive runtime, security or production-readiness claim is made.
 
 ## Rulings carried from the execution ledger
 
-The following ledger lines are preserved verbatim, in their original order,
-including each stated cost if wrong. The controller must carry them to final
-delivery together with any later rulings.
+All nine lines below are preserved verbatim and in order, including their stated
+costs. The controller must carry these and any later rulings to final delivery.
 
 - Ruling: Use managed isolated checkout and existing original Python runtime — authorized implementation permits reversible setup; original user files stay untouched — cost if wrong: environment-dependent tests must be rerun.
 - Ruling: Do not repeat unsafe baseline suite until Task 1 isolates clients/stores — inspected lifecycle tests invoke trading routes — cost if wrong: delayed baseline evidence.
@@ -140,3 +141,5 @@ delivery together with any later rulings.
 - Ruling: Split approved Task8 into sequential8A backend/runtime and8B visual/frontend-dependency review units — newly verified financial/runtime findings plus five-route polish exceed one coherent review surface — cost if wrong: one extra review handoff; no added product feature scope. Briefs task-8a-brief.md/task-8b-brief.md, both execute after Task7 review.
 - Ruling: Add tracked frontend/vercel.json git.deploymentEnabled.main=false in8B — connectedVercelautoDeploymentwouldotherwiseviolatetheapprovedno-production-deployscopeonmainpush — costifwrong: automaticmainreleasesremaindisableduntiluserexplicitlyre-enables; branchpreviewsunchanged. OfficialVercelgitconfigurationdocsverified; actualprojectrootfrontendconfirmed viaCLI. Task8Bassignedguard, final9mustverifyproductionrefunchanged.
 - Ruling: Include narrow sharedprice-gridprecisionfix in8B alongsideUIformatting — actualbackendbucketpriceswerewrong/zero, sofrontformattingalonecannotmeetapprovednew-pair/datahonestyrequirements — costifwrong:Decimalper-tickoverhead; requireO(1),boundedhelpers,targetedflowregressions/volumeconservation/fullbackendverification. No risk/executionchanges. Task8Bimplementerassigned.
+- Ruling: Carry the unchanged rolling-window/book internals as an explicit baseline verification limitation rather than redesign them in the final repair wave — the reviewer established no incremental regression or concrete failing workload there, while the binding spec prohibits broad rewrites — cost if wrong: extreme-load memory bounds and per-tick work in inherited internals remain uncertified; do not claim exhaustive runtime or production readiness.
+- Ruling: Retain the compatible ESLint/Next development toolchain and disclose the remaining minimatch advisory rather than force a major minimatch override or downgrade Next ESLint configuration — fresh Nov6 audit has 8 moderate development package entries for GHSA-g3hv-75wg-m249, current typescript-estree still requires vulnerable10.x, while production audit is0 and Zod high is patched — cost if wrong: lint/build tooling remains susceptible to the advisory with crafted glob inputs; do not claim a zero-vulnerability full audit.

@@ -222,3 +222,18 @@ def evaluate_flow_confluence(
         "veto": False,
         "veto_reason": None
     }
+
+
+def shared_flow_confluence(symbol: str, side_bias: str, market: str = 'spot') -> dict:
+    """Read the market-owned hub; absent/warming data must never become bar-only approval."""
+    from backend.marketdata.hub import get_hub
+    try:
+        hub = get_hub(market)
+        metrics = hub.get_metrics(symbol)
+        if metrics is not None:
+            return evaluate_flow_confluence(symbol, metrics, hub.get_footprint_bars(symbol, '1m'), side_bias)
+    except Exception:
+        # A failed stream read vetoes enabled entries, but leaves disabled shadow mode intact.
+        pass
+    return {'score': 0.0, 'components': {}, 'reasons': ['Flow data unavailable'],
+            'veto': True, 'veto_reason': 'Flow data unavailable'}
