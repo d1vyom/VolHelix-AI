@@ -139,10 +139,10 @@
 
 - [x] Run the complete isolated backend suite, lint, production build/TypeScript, and browser regressions. Preserve exact results and limitations.
 - [x] Run read-only public Spot/Futures connectivity checks separately. Do not submit orders or start the autonomous trader. Report unavailable external access honestly.
-- [ ] Review all changed execution paths, full branch diff including the pre-existing local commit, secrets/generated files, and every guardrail. Fix findings and rerun affected checks.
+- [x] Review all changed execution paths, full branch diff including the pre-existing local commit, secrets/generated files, and every guardrail. Fix findings and rerun affected checks.
 - [x] Document setup, separate Futures credentials, supported account mode, testnet limitations, and actual verification results. Remove outdated claims of test counts/unsupported features.
-- [ ] Push verified commits, integrate into main with no force push, and verify remote main matches the intended commit. Check for deployment automation before pushing main; keep production deployment outside scope.
-- [ ] Deliver commit references, test outcomes, feature coverage, and any remaining externally blocked validation. Do not claim all possible bugs are eliminated.
+- [x] Push verified commits, integrate into main with no force push, and verify remote main matches the intended commit. Check for deployment automation before pushing main; keep production deployment outside scope.
+- [x] Deliver commit references, test outcomes, feature coverage, and any remaining externally blocked validation. Do not claim all possible bugs are eliminated.
 
 ## Plan self-review
 
@@ -151,8 +151,7 @@ verification, and delivery requirements. The five review-focus cases have explic
 test owners. Work proceeds in dependency order; the UI consumes the API and
 market identities established earlier. Execution uses the approved task/review
 workflow. Tasks 1-9 are implemented and reviewed. The October 24 whole-branch
-review identified C1/I1-I5/M1-M2; the combined repair and November 1/6 isolated
-gates are recorded in `docs/UPGRADE_VERIFICATION.md`. Independent scoped
-re-review, push/main integration and final delivery remain pending. The review
-checkbox stays open until that re-review accepts the repair. Public connectivity
-checks ran but current live access is externally blocked.
+review identified C1/I1-I5/M1-M2. The combined repair and final close concurrency
+fix passed the applicable checks and independent review. GitHub `main` received
+runtime commit `d785902` on November 7. The verification record preserves the
+test results, deployment check and public connectivity timeouts.

@@ -113,9 +113,10 @@ The frontend passed **65 fixture browser tests**, lint, standalone TypeScript,
 the production build and the offline image check. Production-only npm audit
 reports **0 vulnerabilities**. The full audit retains **8 moderate development
 package entries** from one minimatch
-advisory after the compatible Zod patch. Current public Spot/Futures reads still
-time out; authenticated execution and independent scoped re-review remain
-unverified. See [current verification and limitations](docs/UPGRADE_VERIFICATION.md).
+advisory after the compatible Zod patch. Independent review passed and GitHub
+`main` received runtime commit `d785902`. Public Spot/Futures reads timed out on
+November 6, leaving live connectivity and authenticated execution unverified.
+See [current verification and limitations](docs/UPGRADE_VERIFICATION.md).
 
 On 2026-10-24, the then-current runtime passed **329 isolated backend tests**,
 **59 fixture-backed browser tests**, lint, TypeScript and production build;

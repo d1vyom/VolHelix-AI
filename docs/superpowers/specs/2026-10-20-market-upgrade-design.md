@@ -2,10 +2,10 @@
 
 Date: 2026-10-20 (Asia/Kolkata)
 Status: approved 2026-10-20; Tasks 1-9 implemented and reviewed. Whole-branch
-review on October 24 identified C1/I1-I5/M1-M2; the combined repair and isolated
-verification are recorded through November 6. Independent scoped re-review and
-main integration remain pending. Public exchange access is currently externally
-blocked; see `docs/UPGRADE_VERIFICATION.md`.
+review on October 24 identified C1/I1-I5/M1-M2. The combined repair and follow-up
+close concurrency fix passed independent review. GitHub `main` received runtime
+commit `d785902` on November 7. Public exchange reads timed out on November 6.
+See `docs/UPGRADE_VERIFICATION.md` for evidence and limits.
 
 ## Outcome and constraints
 
