@@ -1,7 +1,7 @@
 {
   "date": "2026-11-06",
   "runtimeBaseCommit": "2bba0c5c1a8309e050a27e9d8a6331973e9b8f6c",
-  "runtimeReference": "Combined repair commit containing this artifact; independent scoped re-review pending",
+  "runtimeReference": "Current commit containing this artifact, with the scoped I3 concurrency repair on combined repair 207d6cc. Independent R1/R2 review pending.",
   "scope": "Managed isolated repair and verification; no orders or VolHelix application lifespan",
   "findings": {
     "C1": "Shared Spot hub and enabled fail-closed scan/fresh-dispatch flow veto",
@@ -122,7 +122,7 @@
     "task9Review": "complete before final repair",
     "wholeBranchReview": "completed October 24 with findings",
     "combinedRepair": "implemented and isolated gates recorded",
-    "independentScopedRereview": "pending controller",
+    "independentScopedRereview": "C1/I1/I2/I4/I5/M1/M2 approved at 207d6cc. R1/R2 identified and repaired. Independent R1/R2 review pending controller.",
     "push": "pending controller",
     "mainIntegration": "pending controller",
     "productionRefVerification": "pending controller",
@@ -154,7 +154,8 @@
     "Ruling: Add tracked frontend/vercel.json git.deploymentEnabled.main=false in8B — connectedVercelautoDeploymentwouldotherwiseviolatetheapprovedno-production-deployscopeonmainpush — costifwrong: automaticmainreleasesremaindisableduntiluserexplicitlyre-enables; branchpreviewsunchanged. OfficialVercelgitconfigurationdocsverified; actualprojectrootfrontendconfirmed viaCLI. Task8Bassignedguard, final9mustverifyproductionrefunchanged.",
     "Ruling: Include narrow sharedprice-gridprecisionfix in8B alongsideUIformatting — actualbackendbucketpriceswerewrong/zero, sofrontformattingalonecannotmeetapprovednew-pair/datahonestyrequirements — costifwrong:Decimalper-tickoverhead; requireO(1),boundedhelpers,targetedflowregressions/volumeconservation/fullbackendverification. No risk/executionchanges. Task8Bimplementerassigned.",
     "Ruling: Carry the unchanged rolling-window/book internals as an explicit baseline verification limitation rather than redesign them in the final repair wave — the reviewer established no incremental regression or concrete failing workload there, while the binding spec prohibits broad rewrites — cost if wrong: extreme-load memory bounds and per-tick work in inherited internals remain uncertified; do not claim exhaustive runtime or production readiness.",
-    "Ruling: Retain the compatible ESLint/Next development toolchain and disclose the remaining minimatch advisory rather than force a major minimatch override or downgrade Next ESLint configuration — fresh Nov6 audit has 8 moderate development package entries for GHSA-g3hv-75wg-m249, current typescript-estree still requires vulnerable10.x, while production audit is0 and Zod high is patched — cost if wrong: lint/build tooling remains susceptible to the advisory with crafted glob inputs; do not claim a zero-vulnerability full audit."
+    "Ruling: Retain the compatible ESLint/Next development toolchain and disclose the remaining minimatch advisory rather than force a major minimatch override or downgrade Next ESLint configuration — fresh Nov6 audit has 8 moderate development package entries for GHSA-g3hv-75wg-m249, current typescript-estree still requires vulnerable10.x, while production audit is0 and Zod high is patched — cost if wrong: lint/build tooling remains susceptible to the advisory with crafted glob inputs; do not claim a zero-vulnerability full audit.",
+    "Ruling: Continue with a narrowly scoped I3 concurrency repair despite the workflow one-wave limit — the independent re-review proved duplicate exchange reductions and one acknowledgement applied to two trades, so parking these load-bearing defects or merging would contradict the authorized repair goal and financial-data guardrails — cost if wrong: one additional targeted repair and independent validation cycle; no reopening of the completed whole-branch audit."
   ],
   "evidenceLogSha256": {
     "tmp/final-full-backend.log": "3015d76e260d77aed7a184d90596d521613931fdeff486ca5f9428c1ca8b9cb8",
@@ -172,5 +173,59 @@
     "tmp/final-close-capture.log": "c02649735b847def254078ad7e3b2b1cbb2e8e109ecb1667ab56a0b59e3b467e",
     "tmp/final-public-spot-nov6.log": "0199466874243a4eec52f2cf7810251f6180cf2843d707df01edbfc32edb97c1",
     "tmp/final-public-futures-nov6.log": "0199466874243a4eec52f2cf7810251f6180cf2843d707df01edbfc32edb97c1"
+  },
+  "closeRaceRepair": {
+    "date": "2026-11-07",
+    "baseCommit": "207d6cc72c5e0fa43613587089d297ce45285481",
+    "R1": "A call retains one client ID across awaits and replays its own terminal partial result while preserving newer attempts",
+    "R2": "SQLite reservation binds each market and pinned account client ID to one tracked trade, including completed and local no-dispatch attempts",
+    "red": {
+      "initialFailures": 3,
+      "boundaryFailures": 2,
+      "staleSizingFailures": 1
+    },
+    "focused": {
+      "passed": 106,
+      "warnings": 2,
+      "seconds": 10.26,
+      "exit": 0
+    },
+    "backend": {
+      "passed": 383,
+      "warnings": 2,
+      "seconds": 47.52,
+      "exit": 0
+    },
+    "docker": {
+      "context": "default",
+      "server": "29.7.2",
+      "backendImage": "volhelix-backend:close-race-20261107",
+      "backendImageId": "sha256:8d64a4ed89c01fbc6a55056665c0d2234863015759959860c8372f43c8126426",
+      "backendBuildExit": 0,
+      "checksNetwork": "none",
+      "backendImportExit": 0,
+      "backendImportThreads": [
+        "MainThread"
+      ],
+      "backendImagePytest": {
+        "passed": 383,
+        "warnings": 3,
+        "seconds": 49.64,
+        "exit": 0
+      }
+    },
+    "frontendEvidence": "65 fixture browser tests, lint, TypeScript, build and image checks cover the unchanged frontend source.",
+    "orderedRulings": 10,
+    "evidenceLogSha256": {
+      "tmp/close-races-red.log": "7a47249a56c5a9a2ffd5f6c22db3bfce1af2fc552d20568b3841386eaf199262",
+      "tmp/close-races-boundary-red.log": "9421aa3d30c19236ccfa005963700630c0a61d175ebcc627ed51793176a72d11",
+      "tmp/close-races-late-red.log": "198d985592241ce1c13a0dc9394d782feace2464b9950a973555bd4abbf3ee93",
+      "tmp/close-races-focused.log": "fcd30c44e0049f5b8f585972ecc2b6baa65d0746e5a7d0e3b13e0d260e9ffd1d",
+      "tmp/close-races-focused-final.log": "115c89021cceee3c96c27110c1137526caa403d66d820087b89a4d800e0924ad",
+      "tmp/close-races-full-backend.log": "f49abb69ec80f19c50ecc19f348aa72c22cd19626bcac90b7dabdee3f4fc037a",
+      "tmp/close-races-backend-docker.log": "36a3e61d7e5812062323bd6c5645702dad71004a2ff91001398bab27f2ab993d",
+      "tmp/close-races-backend-image-check.log": "f11acd46173b31c0ce5c1eb9140b7059bac3ec89c27e9bc4ccd04b3cffa57c12",
+      "tmp/close-races-backend-image-pytest.log": "1f595d314bb240e001a1d062657897dd16a8c5c4cc30d88ba5aa86947a35a85b"
+    }
   }
 }

@@ -6,6 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 from backend.models.trade import TradeRecord, TradeStatus
+from backend.store import order_intents
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "trades.db")
 
@@ -27,6 +28,8 @@ class TradeLog:
                     data JSON
                 )
             """)
+            for statement in order_intents.SCHEMA:
+                await db.execute(statement)
             await db.commit()
 
     async def save_trade(self, record: TradeRecord):
@@ -65,12 +68,13 @@ class TradeLog:
 
     async def find_exit_intent(self, market: str, client_order_id: str) -> Optional[TradeRecord]:
         """Find the current or completed exit owner without loading the whole ledger."""
-        execution_path = '$.exit_executions."' + client_order_id + '"'
         async with aiosqlite.connect(DB_PATH) as db:
-            rows = await (await db.execute("""SELECT data FROM trades
-                WHERE json_extract(data,'$.market')=? AND
-                (json_extract(data,'$.exit_client_order_id')=? OR json_type(data,?) IS NOT NULL)
-                LIMIT 2""", (market, client_order_id, execution_path))).fetchall()
+            return await self._find_exit_owner(db, market, client_order_id)
+
+    @staticmethod
+    async def _find_exit_owner(db, market, client_order_id):
+        rows = await (await db.execute(order_intents.EXIT_OWNER_QUERY,
+            order_intents.exit_owner_args(market, client_order_id))).fetchall()
         if len(rows) > 1:
             raise ValueError('Ambiguous tracked exit identity; reservation retained')
         return TradeRecord.model_validate_json(rows[0][0]) if rows else None
@@ -133,12 +137,19 @@ class TradeLog:
             base_fee=Decimal(str(trade.entry_fees.get(trade.base_asset,0)))+Decimal(str(trade.exit_fees.get(trade.base_asset,0)))
         return max(0,float(Decimal(str(trade.executed_qty))-Decimal(str(trade.closed_qty))-base_fee))
 
-    async def mark_dust(self, trade_id, reason):
+    async def mark_dust(self, expected, reason):
         """Keep untradeable residual inventory visible, never record it as sold."""
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('BEGIN IMMEDIATE')
-            row=await (await db.execute('SELECT data FROM trades WHERE trade_id=?',(trade_id,))).fetchone()
+            row=await (await db.execute('SELECT data FROM trades WHERE trade_id=?',(expected.trade_id,))).fetchone()
             trade=TradeRecord.model_validate_json(row[0])
+            if (trade.exit_attempt, trade.exit_client_order_id, trade.proposal.qty) != (
+                    expected.exit_attempt, expected.exit_client_order_id, expected.proposal.qty):
+                return trade  # A stale sizing decision cannot change a later generation.
+            if expected.exit_client_order_id and await (await db.execute(
+                    'SELECT 1 FROM order_intents WHERE identity=?',
+                    (f'{trade.market}:{expected.exit_client_order_id}',))).fetchone():
+                return trade
             trade.dust_qty=trade.proposal.qty
             trade.dust_reason=reason
             await self._write_record(db,trade)
@@ -146,16 +157,33 @@ class TradeLog:
             return trade
 
     async def prepare_exit(self, trade_id, *, client_order_id=None):
-        """Atomically choose one durable attempt for all concurrent close callers."""
+        """Bind a market/account client ID to one trade before releasing the write lock."""
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('BEGIN IMMEDIATE')
             row=await (await db.execute('SELECT data FROM trades WHERE trade_id=?',(trade_id,))).fetchone()
             trade=TradeRecord.model_validate_json(row[0])
-            if client_order_id and trade.exit_client_order_id not in (None, client_order_id):
+            client_id = client_order_id or trade.exit_client_order_id
+            if not client_id:
+                if trade.proposal.qty <= 0 and trade.exchange_status in (
+                        'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED', 'EXPIRED_IN_MATCH'):
+                    return trade
+                identity = f'{trade.trade_id}:{trade.closed_qty}:{trade.exit_attempt}'
+                client_id = 'vhx-' + hashlib.sha256(identity.encode()).hexdigest()[:32]
+            key = f'{trade.market}:{client_id}'
+            owner = await self._find_exit_owner(db, trade.market, client_id)
+            outcome = await (await db.execute('SELECT trade_id,symbol FROM close_outcomes WHERE identity=?',
+                (key,))).fetchone()
+            intent = await (await db.execute('SELECT 1 FROM order_intents WHERE identity=?', (key,))).fetchone()
+            if ((owner and owner.trade_id != trade_id)
+                    or (outcome and outcome != (trade_id, trade.proposal.symbol))
+                    or (intent and not owner)):
+                raise ValueError('Close identity conflict; reconcile its original tracked position')
+            if outcome or (owner and client_id in owner.exit_executions):
+                return trade  # Completed attempts can be read without reactivating them.
+            if trade.exit_client_order_id not in (None, client_id):
                 raise ValueError('Another close attempt is unresolved; reconcile its original identity')
-            if (trade.proposal.qty>0 or client_order_id) and not trade.exit_client_order_id:
-                identity=f'{trade.trade_id}:{trade.closed_qty}:{trade.exit_attempt}'
-                trade.exit_client_order_id=client_order_id or 'vhx-'+hashlib.sha256(identity.encode()).hexdigest()[:32]
+            if not trade.exit_client_order_id:
+                trade.exit_client_order_id = client_id
                 await self._write_record(db,trade)
             await db.commit()
             return trade

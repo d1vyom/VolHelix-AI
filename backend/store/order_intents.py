@@ -6,17 +6,33 @@ from importlib import import_module
 from contextlib import contextmanager
 import hashlib
 
+SCHEMA = (
+    '''CREATE TABLE IF NOT EXISTS order_intents (
+        identity TEXT PRIMARY KEY, market TEXT, symbol TEXT, payload TEXT,
+        status TEXT, notional REAL, quantity REAL, updated REAL, result TEXT)''',
+    '''CREATE TABLE IF NOT EXISTS close_outcomes (
+        identity TEXT PRIMARY KEY, market TEXT, symbol TEXT, trade_id TEXT,
+        reason TEXT, quantity REAL, created REAL)''',
+)
+
+# The active reservation and cumulative exit history are the owner index.
+# Terminal application and no-dispatch proof update them under the same write lock.
+EXIT_OWNER_QUERY = """SELECT data FROM trades
+    WHERE json_extract(data,'$.market')=? AND
+    (json_extract(data,'$.exit_client_order_id')=? OR json_type(data,?) IS NOT NULL)
+    LIMIT 2"""
+
+
+def exit_owner_args(market, client_id):
+    return market, client_id, '$.exit_executions."' + client_id + '"'
+
 
 @contextmanager
 def connect():
     db = sqlite3.connect(import_module('backend.store.trade_log').DB_PATH, timeout=15)
     db.row_factory = sqlite3.Row
-    db.execute('''CREATE TABLE IF NOT EXISTS order_intents (
-        identity TEXT PRIMARY KEY, market TEXT, symbol TEXT, payload TEXT,
-        status TEXT, notional REAL, quantity REAL, updated REAL, result TEXT)''')
-    db.execute('''CREATE TABLE IF NOT EXISTS close_outcomes (
-        identity TEXT PRIMARY KEY, market TEXT, symbol TEXT, trade_id TEXT,
-        reason TEXT, quantity REAL, created REAL)''')
+    for statement in SCHEMA:
+        db.execute(statement)
     try:
         with db:
             yield db
@@ -73,6 +89,9 @@ def claim(request, verdict, account, snapshot_started):
             if row['payload'] != request.model_dump_json():
                 raise ValueError('Client order ID payload conflict')
             return dict(row)
+        if not request.reduce_only and db.execute(EXIT_OWNER_QUERY,
+                exit_owner_args(request.market, request.client_order_id)).fetchone():
+            raise ValueError('Client order ID already belongs to a tracked close')
         rows = db.execute("SELECT * FROM order_intents WHERE market=? AND (status NOT IN ('FILLED','CANCELED','REJECTED','EXPIRED','EXPIRED_IN_MATCH') OR updated>=?)", (request.market,snapshot_started)).fetchall()
         active = []
         for row in rows:
@@ -177,7 +196,7 @@ def close_outcome(market, client_id):
         return dict(row) if row else None
 
 
-def record_close_not_dispatched(trade_id, market, symbol, client_id, reason):
+def record_close_not_dispatched(trade_id, market, symbol, client_id, reason, *, dust=False):
     """Atomically prove no dispatch claim exists, retain the outcome and release this attempt."""
     from backend.models.trade import TradeRecord
     key = f'{market}:{client_id}'
@@ -196,6 +215,9 @@ def record_close_not_dispatched(trade_id, market, symbol, client_id, reason):
             raise ValueError('Close ownership changed; retain unresolved attempt')
         db.execute('INSERT INTO close_outcomes VALUES (?,?,?,?,?,?,?)',
             (key, market, symbol, trade_id, reason, trade.proposal.qty, time.time()))
+        if dust:
+            trade.dust_qty = trade.proposal.qty
+            trade.dust_reason = reason
         trade.exit_client_order_id = None
         trade.exit_attempt += 1
         db.execute('UPDATE trades SET data=? WHERE trade_id=?', (trade.model_dump_json(), trade_id))

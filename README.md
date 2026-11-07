@@ -107,12 +107,12 @@ npm audit
 
 ### Final repair verification (November 2026)
 
-The combined market/execution repair passed **377 isolated backend tests** and
-**65 fixture browser tests** on November 1. November 6 lint, standalone TypeScript,
-production build and both Docker image builds passed. The backend image also
-passed 377 tests with networking disabled; the frontend image artifacts were
-checked offline. Production-only npm audit reports **0 vulnerabilities**; the
-full audit retains **8 moderate development package entries** from one minimatch
+The November 7 tracked-close concurrency repair passed **383 isolated backend
+tests** on Windows and in the rebuilt backend image with networking disabled.
+The frontend passed **65 fixture browser tests**, lint, standalone TypeScript,
+the production build and the offline image check. Production-only npm audit
+reports **0 vulnerabilities**. The full audit retains **8 moderate development
+package entries** from one minimatch
 advisory after the compatible Zod patch. Current public Spot/Futures reads still
 time out; authenticated execution and independent scoped re-review remain
 unverified. See [current verification and limitations](docs/UPGRADE_VERIFICATION.md).

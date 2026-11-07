@@ -128,38 +128,39 @@ async def preview_close_position(trade, *, client):
     return verdict
 
 
-async def _close_not_dispatched(trade, client, reason):
-    await asyncio.to_thread(order_intents.bind_account, client, trade.market)
+async def _replay_close(trade, client, client_id, exit_type):
+    try:
+        _, updated = await reconcile_intent(trade.market, client_id, client=client,
+            expected_trade=trade, exit_type=exit_type)
+        return updated
+    except KeyError:
+        return None
+
+
+async def _close_not_dispatched(trade, client, client_id, reason, exit_type, *, confirmed=True, dust=False):
     recorded = await asyncio.to_thread(order_intents.record_close_not_dispatched,
-        trade.trade_id, trade.market, trade.proposal.symbol, trade.exit_client_order_id, reason)
-    if not recorded:
+        trade.trade_id, trade.market, trade.proposal.symbol, client_id, reason, dust=dust)
+    if recorded and not confirmed:
+        return await trade_log.get_trade_by_id(trade.trade_id)
+    updated = await _replay_close(trade, client, client_id, exit_type)
+    if updated is None:
         raise OrderOutcomeUnknown('Concurrent close dispatch exists; reconcile the original intent')
-    raise OrderNotDispatched(reason)
+    return updated
 
 
 async def close_trade_position(trade, *, client, exit_type=TradeStatus.CLOSED, client_order_id=None):
     try:
-        await asyncio.to_thread(order_intents.bind_account, client, trade.market, False)
-    except ValueError as exc:
-        raise OrderOutcomeUnknown(str(exc)) from exc
-    if client_order_id:
-        outcome = await asyncio.to_thread(order_intents.close_outcome, trade.market, client_order_id)
-        if outcome:
-            if outcome['trade_id'] != trade.trade_id or outcome['symbol'] != trade.proposal.symbol:
-                raise OrderOutcomeUnknown('Close identity conflict; reconcile its original tracked position')
-            raise OrderNotDispatched(outcome['reason'])
-        owner = await trade_log.find_exit_intent(trade.market, client_order_id)
-        intent = await asyncio.to_thread(order_intents.lookup, trade.market, client_order_id)
-        if (owner and owner.trade_id != trade.trade_id) or (intent and not owner):
-            raise OrderOutcomeUnknown('Close identity conflict; reconcile its original tracked position')
-        if intent:
-            _, updated = await reconcile_intent(trade.market, client_order_id, client=client)
-            return updated
-    trade=await trade_log.get_trade_by_id(trade.trade_id) or trade
-    try:
+        await asyncio.to_thread(order_intents.bind_account, client, trade.market)
         trade=await trade_log.prepare_exit(trade.trade_id, client_order_id=client_order_id)
     except ValueError as exc:
         raise OrderOutcomeUnknown(str(exc)) from exc
+    # This call owns one generation even if another caller completes it while we await.
+    client_id = client_order_id or trade.exit_client_order_id
+    if not client_id:
+        return trade
+    updated = await _replay_close(trade, client, client_id, exit_type)
+    if updated is not None:
+        return updated
     if trade.exchange_status not in TERMINAL:
         trade=await cancel_trade_order(trade,client=client)
         if trade.exchange_status not in TERMINAL:
@@ -174,60 +175,50 @@ async def close_trade_position(trade, *, client, exit_type=TradeStatus.CLOSED, c
     if trade.market=='spot' and trade.exit_fees_known is False:
         for identity,known in trade.exit_order_fees_known.items():
             if known is False:
-                _,trade=await reconcile_intent(trade.market,identity,client=client)
+                _,trade=await reconcile_intent(trade.market,identity,client=client,expected_trade=trade)
         if trade.exit_fees_known is False:
             raise OrderOutcomeUnknown('Actual exit commission unavailable; retained tracked holdings')
-    trade=await trade_log.prepare_exit(trade.trade_id)
+    trade=await trade_log.get_trade_by_id(trade.trade_id)
+    updated = await _replay_close(trade, client, client_id, exit_type)
+    if updated is not None:
+        return updated
+    if trade.exit_client_order_id != client_id:
+        raise OrderOutcomeUnknown('Close ownership changed; reconcile the original intent')
     if trade.proposal.qty<=0:
+        return await _close_not_dispatched(trade, client, client_id,
+            'No remaining exposure after entry cancellation/reconciliation; no exit dispatched',
+            exit_type, confirmed=client_order_id is not None)
+    try:
+        quantity, info, price = await close_quantity(trade, client=client)
+    except OrderNotDispatched as exc:
+        return await _close_not_dispatched(trade, client, client_id, str(exc), exit_type)
+    if quantity <= 0:
+        reason = 'Below quantity step or minimum notional; retained inventory'
         if client_order_id:
-            await _close_not_dispatched(trade, client, 'No remaining exposure after entry cancellation/reconciliation; no exit dispatched')
-        return trade
-    client_id=trade.exit_client_order_id
-    await asyncio.to_thread(order_intents.bind_account,client,trade.market)
-    intent=await asyncio.to_thread(order_intents.lookup,trade.market,client_id)
-    if intent:
-        request=OrderRequest.model_validate_json(intent['payload'])
-        if intent['status'] in TERMINAL:
-            result=OrderResult.model_validate_json(intent['result'])
-        else:
-            try:
-                raw=await asyncio.to_thread(client.get_order_by_client_id,request.symbol,client_id)
-                result=parse_acknowledgement(raw,request,trade.current_price or trade.entry_price)
-                result=await recover_fees(result,request,client)
-                result=await asyncio.to_thread(order_intents.finish,request,result)
-            except Exception as exc:
-                raise OrderExecutionError('Exit reconciliation unavailable; retained exposure') from exc
-    else:
-        try:
-            quantity, info, price = await close_quantity(trade, client=client)
-        except OrderNotDispatched as exc:
-            await _close_not_dispatched(trade, client, str(exc))
-        if quantity <= 0:
-            trade = await trade_log.mark_dust(trade.trade_id,'Below quantity step or minimum notional; retained inventory')
-            if client_order_id:
-                await _close_not_dispatched(trade, client, trade.dust_reason)
-            return trade
-        request=OrderRequest(market=trade.market,symbol=trade.proposal.symbol,
-            side='SELL' if trade.proposal.side=='BUY' else 'BUY',qty=float(quantity),
-            reduce_only=True,client_order_id=client_id)
-        try:
-            result=await submit_order(request,client=client)
-        except OrderNotDispatched as exc:
-            await _close_not_dispatched(trade, client, str(exc))
-        except OrderExecutionError:
-            # A confirmed rejection is terminal too. Apply it before propagating
-            # failure so the next close can choose a new durable generation.
-            intent=await asyncio.to_thread(order_intents.lookup,trade.market,client_id)
-            if intent and intent['status'] in TERMINAL and intent['result']:
-                result=OrderResult.model_validate_json(intent['result'])
-            else:
-                raise
+            return await _close_not_dispatched(trade, client, client_id, reason, exit_type, dust=True)
+        updated = await trade_log.mark_dust(trade, reason)
+        replayed = await _replay_close(updated, client, client_id, exit_type)
+        return replayed if replayed is not None else updated
+    request=OrderRequest(market=trade.market,symbol=trade.proposal.symbol,
+        side='SELL' if trade.proposal.side=='BUY' else 'BUY',qty=float(quantity),
+        reduce_only=True,client_order_id=client_id)
+    try:
+        result=await submit_order(request,client=client)
+    except OrderNotDispatched as exc:
+        return await _close_not_dispatched(trade, client, client_id, str(exc), exit_type)
+    except OrderExecutionError:
+        # A concurrent caller may have stored the terminal acknowledgement.
+        intent = await asyncio.to_thread(order_intents.lookup, trade.market, client_id)
+        if not intent or intent['status'] not in TERMINAL:
+            raise
+        return await _replay_close(trade, client, client_id, exit_type)
     updated=await trade_log.apply_exit(trade.trade_id,result,exit_type)
-    if updated.proposal.qty>0 and result.exchange_status in TERMINAL and trade.market=='spot':
+    if (updated.proposal.qty > 0 and result.exchange_status in TERMINAL and trade.market == 'spot'
+            and updated.exit_client_order_id is None and updated.exit_attempt == trade.exit_attempt + 1):
         # A subsequent close rechecks filters against fresh price before dispatch.
         residual=Decimal(str(updated.proposal.qty))
-        if 'info' in locals() and not passes_exchange_filters(request,info,residual,price,residual*price):
-            updated=await trade_log.mark_dust(updated.trade_id,'Below Spot quantity step or minimum notional; retained inventory')
+        if not passes_exchange_filters(request,info,residual,price,residual*price):
+            updated=await trade_log.mark_dust(updated,'Below Spot quantity step or minimum notional; retained inventory')
     if result.exchange_status=='REJECTED':
         raise OrderRejected('Exchange rejected exit; position retained')
     return updated
@@ -246,19 +237,26 @@ async def recover_entries():
             get_logger('lifecycle').warning(f"Retained {intent['identity']} for reconciliation: {exc}")
 
 
-async def reconcile_intent(market: str, client_order_id: str, *, client):
+async def reconcile_intent(market: str, client_order_id: str, *, client, expected_trade=None,
+                           exit_type=TradeStatus.CLOSED):
     """Resolve a durable original intent without validation, sizing or create calls."""
     intent = await asyncio.to_thread(order_intents.lookup, market, client_order_id)
     if not intent:
         outcome = await asyncio.to_thread(order_intents.close_outcome, market, client_order_id)
         if not outcome:
             raise KeyError('Intent not found in selected market')
+        if expected_trade and (outcome['trade_id'], outcome['symbol']) != (
+                expected_trade.trade_id, expected_trade.proposal.symbol):
+            raise OrderOutcomeUnknown('Close identity conflict; reconcile its original tracked position')
         try:
             await asyncio.to_thread(order_intents.bind_account, client, market, False)
         except ValueError as exc:
             raise OrderOutcomeUnknown(str(exc)) from exc
         raise OrderNotDispatched(outcome['reason'])
     request = OrderRequest.model_validate_json(intent['payload'])
+    if (request.market, request.client_order_id) != (market, client_order_id) or (
+            expected_trade and not request.reduce_only):
+        raise OrderOutcomeUnknown('Stored intent identity does not match the requested close')
     try:
         await asyncio.to_thread(order_intents.bind_account, client, market)
     except ValueError as exc:
@@ -271,6 +269,11 @@ async def reconcile_intent(market: str, client_order_id: str, *, client):
             raise OrderOutcomeUnknown(str(exc)) from exc
         if not owner:
             raise OrderOutcomeUnknown('Tracked exit identity unavailable; reservation retained')
+        if (request.symbol != owner.proposal.symbol
+                or request.side != ('SELL' if owner.proposal.side == 'BUY' else 'BUY')
+                or (expected_trade and (owner.trade_id, owner.proposal.symbol) !=
+                    (expected_trade.trade_id, expected_trade.proposal.symbol))):
+            raise OrderOutcomeUnknown('Stored close payload does not match the tracked position')
     # A nonterminal acknowledgement is only a snapshot. Query its current state.
     if intent['status'] not in TERMINAL:
         intent['result'] = None
@@ -279,9 +282,9 @@ async def reconcile_intent(market: str, client_order_id: str, *, client):
     except OrderRejected:
         if owner:
             stored = await asyncio.to_thread(order_intents.lookup, market, client_order_id)
-            await trade_log.apply_exit(owner.trade_id, OrderResult.model_validate_json(stored['result']), TradeStatus.CLOSED)
+            await trade_log.apply_exit(owner.trade_id, OrderResult.model_validate_json(stored['result']), exit_type)
         raise
-    trade = (await trade_log.apply_exit(owner.trade_id, result, TradeStatus.CLOSED)
+    trade = (await trade_log.apply_exit(owner.trade_id, result, exit_type)
              if owner else await persist_entry(request, result))
     return result, trade
 
